@@ -10,3 +10,9 @@ wheels/
 .venv
 
 .env
+
+# vscode
+.vscode/
+
+# outputs
+outputs/
