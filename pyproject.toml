@@ -1,11 +1,26 @@
 [project]
 name = "rhoai-ai-feature-sizing"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI-powered feature sizing for Jira using LLMs and MCP."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fire>=0.7.0",
+    "llama-stack>=0.2.10",
     "llama-stack-client>=0.2.10",
     "requests>=2.32.3",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "python-multipart>=0.0.6",
 ]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rhoai_ai_feature_sizing*"]
