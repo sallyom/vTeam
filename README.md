@@ -66,18 +66,41 @@ uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
 # 2. Create epics from refined spec (not yet implemented)
 uv run python -m rhoai_ai_feature_sizing.main stage epics refined_PROJ-123.md
 
-# 3. Draft Jira tickets from epics (not yet implemented)
-uv run python -m rhoai_ai_feature_sizing.main stage jiras epics_PROJ-123.md
+# 3. Draft Jira tickets from refined spec (soft mode - no actual tickets created)
+uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md
+
+# 3a. Draft Jira tickets in hard mode (creates actual Jira tickets)
+uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md --hard-mode
 
 # 4. Create estimates from tickets (not yet implemented)
 uv run python -m rhoai_ai_feature_sizing.main stage estimate jiras_PROJ-123.md
 ```
 
+### Common Workflows
+
+```bash
+# Workflow 1: Analyze and plan feature implementation (soft mode)
+uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
+uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md
+# Review jiras_PROJ-123.md for epic/story breakdown and estimates
+
+# Workflow 2: Complete feature setup with actual Jira tickets
+uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
+uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md --hard-mode
+# Actual epics and stories will be created in your Jira instance
+
+# Workflow 3: Run full pipeline (currently uses soft mode by default)
+uv run python -m rhoai_ai_feature_sizing.main run PROJ-123
+```
+
 ### Full Pipeline
 
 ```bash
-# Run complete workflow (only refine stage currently works)
+# Run complete workflow (refine + jiras stages work)
 uv run python -m rhoai_ai_feature_sizing.main run PROJ-123
+
+# Run with hard mode for actual Jira ticket creation
+uv run python -m rhoai_ai_feature_sizing.main run PROJ-123 --hard-mode
 ```
 
 ### API Server Mode
@@ -116,9 +139,23 @@ OUTPUT_DIR=./outputs
 **Refine Stage** - Convert Jira issues to detailed specs:
 ```bash
 # Fetch a Jira issue and refine it into a detailed spec
-uv run python -m rhoai_ai_feature_sizing.cli refine PROJ-123
+uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
 # Output: refined_PROJ-123.md
 ```
+
+**Draft Jiras Stage** - Break down features into implementable tickets:
+```bash
+# Generate Jira tickets structure from refined spec (soft mode - no actual tickets)
+uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md
+# Output: jiras_PROJ-123.md
+
+# Create actual Jira tickets (hard mode)
+uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md --hard-mode
+```
+
+**Soft Mode vs Hard Mode:**
+- **Soft Mode** (default): Generates a structured markdown document with detailed ticket definitions including titles, descriptions, dependencies, story points, and parent-child relationships. No actual Jira tickets are created.
+- **Hard Mode**: Uses the MCP Atlassian integration to create actual Jira tickets in your configured Jira instance based on the generated structure.
 
 **API Server** - RESTful API with job management:
 ```bash
@@ -143,8 +180,7 @@ uv run python -m rhoai_ai_feature_sizing.cli refine PROJ-123 --wait
 ### 🚧 Planned Features (Not Yet Implemented)
 
 The following stages are defined but not implemented:
-- **Epics Stage**: Break refined specs into epics
-- **Jiras Stage**: Create individual Jira tickets from epics  
+- **Epics Stage**: Break refined specs into epics  
 - **Estimate Stage**: Add story point estimates to tickets
 
 ### 🔍 Architecture Details
@@ -162,8 +198,10 @@ Jira Issue PROJ-123
 Jira details (JSON)
   ↓ (via LLM + template)
 refined_PROJ-123.md
+  ↓ (via LLM + template)
+jiras_PROJ-123.md (soft mode: structure only / hard mode: actual tickets)
   ↓ (planned stages)
-epics_PROJ-123.md → jiras_PROJ-123.md → estimates_PROJ-123.md
+epics_PROJ-123.md → estimates_PROJ-123.md
 ```
 
 ## 🎯 Architecture Overview

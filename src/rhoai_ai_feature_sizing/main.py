@@ -9,6 +9,9 @@ import time
 from rhoai_ai_feature_sizing.stages.refine_feature import (
     generate_refinement_with_agent,
 )
+from rhoai_ai_feature_sizing.stages.draft_jiras import (
+    draft_jiras_from_file,
+)
 
 
 # Setup logging
@@ -119,16 +122,53 @@ def run_epics_stage(input_file: Path, output_dir: Path, debug: bool = False):
     return output_path
 
 
-def run_jiras_stage(input_file: Path, output_dir: Path, debug: bool = False):
-    """Run the draft jiras stage."""
+def run_jiras_stage(
+    input_file: Path, output_dir: Path, debug: bool = False, soft_mode: bool = True
+):
+    """Run the draft jiras stage with enhanced error handling and monitoring."""
     logger = logging.getLogger("jiras")
-    logger.info(f"Creating jiras from {input_file}")
+    start_time = time.time()
 
-    # TODO: Implement jiras creation logic
-    output_path = output_dir / f"jiras_{input_file.stem.replace('epics_', '')}.md"
+    # Validate inputs
+    if not input_file.exists():
+        logger.error(f"Input file not found: {input_file}")
+        sys.exit(1)
 
-    logger.warning("Jiras stage not yet implemented")
-    print(f"✗ Jiras stage not yet implemented. Would output to {output_path}")
+    logger.info(
+        f"Generating Jira tickets structure from {input_file} (soft_mode: {soft_mode})"
+    )
+
+    try:
+        jira_content = draft_jiras_from_file(input_file, soft_mode=soft_mode)
+    except Exception as e:
+        logger.error(f"Failed to generate Jira tickets structure: {e}")
+        if debug:
+            logger.exception("Full traceback:")
+        sys.exit(1)
+
+    # Determine output filename based on input type
+    if input_file.stem.startswith("epics_"):
+        issue_key = input_file.stem.replace("epics_", "")
+    elif input_file.stem.startswith("refined_"):
+        issue_key = input_file.stem.replace("refined_", "")
+    else:
+        issue_key = input_file.stem
+
+    output_path = output_dir / f"jiras_{issue_key}.md"
+    logger.info(f"Writing Jira tickets structure to {output_path}")
+
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(jira_content)
+    except Exception as e:
+        logger.error(f"Failed to write output file: {e}")
+        sys.exit(1)
+
+    # Log performance metrics
+    duration = time.time() - start_time
+    mode_text = "soft mode" if soft_mode else "hard mode"
+    logger.info(f"Jira tickets stage completed in {duration:.2f}s ({mode_text})")
+    print(f"✓ Jira tickets structure written to {output_path} ({mode_text})")
     return output_path
 
 
@@ -145,7 +185,9 @@ def run_estimate_stage(input_file: Path, output_dir: Path, debug: bool = False):
     return output_path
 
 
-def run_full_pipeline(issue_key: str, output_dir: Path, debug: bool = False):
+def run_full_pipeline(
+    issue_key: str, output_dir: Path, debug: bool = False, soft_mode: bool = True
+):
     """Run the complete pipeline."""
     logger = logging.getLogger("pipeline")
     logger.info(f"Running full pipeline for {issue_key}")
@@ -160,9 +202,16 @@ def run_full_pipeline(issue_key: str, output_dir: Path, debug: bool = False):
     print("📋 Stage 2: Creating epics...")
     epics_output = run_epics_stage(refined_output, output_dir, debug)
 
-    # Stage 3: Jiras
+    # Stage 3: Jiras (use refined output if epics stage isn't implemented)
     print("🎫 Stage 3: Drafting jiras...")
-    jiras_output = run_jiras_stage(epics_output, output_dir, debug)
+    # For now, use refined output since epics stage isn't implemented yet
+    if not epics_output.exists():
+        logger.info("Epics stage not implemented, using refined output for jiras stage")
+        jiras_input = refined_output
+    else:
+        jiras_input = epics_output
+
+    jiras_output = run_jiras_stage(jiras_input, output_dir, debug, soft_mode)
 
     # Stage 4: Estimate
     print("📊 Stage 4: Creating estimates...")
@@ -221,6 +270,17 @@ Examples:
     jiras_parser.add_argument(
         "input_file", type=Path, help="Input file from epics stage"
     )
+    jiras_parser.add_argument(
+        "--soft-mode",
+        action="store_true",
+        default=True,
+        help="Generate ticket structure without creating actual Jira tickets (default: True)",
+    )
+    jiras_parser.add_argument(
+        "--hard-mode",
+        action="store_true",
+        help="Create actual Jira tickets (overrides --soft-mode)",
+    )
 
     # Stage: estimate
     estimate_parser = stage_subparsers.add_parser(
@@ -233,6 +293,17 @@ Examples:
     # Run subcommand (full pipeline)
     run_parser = subparsers.add_parser("run", help="Run the complete pipeline")
     run_parser.add_argument("issue_key", help="Jira issue key (e.g., PROJ-123)")
+    run_parser.add_argument(
+        "--soft-mode",
+        action="store_true",
+        default=True,
+        help="Generate ticket structure without creating actual Jira tickets (default: True)",
+    )
+    run_parser.add_argument(
+        "--hard-mode",
+        action="store_true",
+        help="Create actual Jira tickets (overrides --soft-mode)",
+    )
 
     # Parse arguments
     args = parser.parse_args()
@@ -260,7 +331,11 @@ Examples:
                     f"Error: Input file not found: {args.input_file}", file=sys.stderr
                 )
                 sys.exit(1)
-            run_jiras_stage(args.input_file, args.output_dir, args.debug)
+            # Determine soft_mode: hard_mode flag overrides soft_mode
+            soft_mode = (
+                not args.hard_mode if hasattr(args, "hard_mode") else args.soft_mode
+            )
+            run_jiras_stage(args.input_file, args.output_dir, args.debug, soft_mode)
         elif args.stage == "estimate":
             if not args.input_file.exists():
                 print(
@@ -271,7 +346,9 @@ Examples:
         else:
             stage_parser.print_help()
     elif args.command == "run":
-        run_full_pipeline(args.issue_key, args.output_dir, args.debug)
+        # Determine soft_mode: hard_mode flag overrides soft_mode
+        soft_mode = not args.hard_mode if hasattr(args, "hard_mode") else args.soft_mode
+        run_full_pipeline(args.issue_key, args.output_dir, args.debug, soft_mode)
     else:
         parser.print_help()
 
