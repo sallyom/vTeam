@@ -3,25 +3,68 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+import time
 
 # Import stage functions
-from stages.refine_feature import fetch_jira_issue_with_agent, fill_template
+from rhoai_ai_feature_sizing.stages.refine_feature import (
+    generate_refinement_with_agent,
+)
 
 
 # Setup logging
 def setup_logging(debug=False):
-    level = logging.DEBUG if debug else logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stderr)],
+    """Configure comprehensive logging following Llama Stack best practices."""
+    level = logging.DEBUG if debug else logging.INFO
+
+    # Create formatter with more detailed information
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
+
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Clear any existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    # File handler for detailed logs
+    if debug:
+        file_handler = logging.FileHandler("rhoai_feature_sizing.log")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+    # Set specific logger levels
+    logging.getLogger("llama_stack_client").setLevel(
+        logging.INFO if debug else logging.WARNING
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+    if debug:
+        logging.info(
+            "Debug logging enabled - detailed logs written to rhoai_feature_sizing.log"
+        )
 
 
 # Stage implementations
 def run_refine_stage(issue_key: str, output_dir: Path, debug: bool = False):
-    """Run the refine feature stage."""
+    """Run the refine feature stage with enhanced error handling and monitoring."""
     logger = logging.getLogger("refine_feature")
+    start_time = time.time()
+
+    # Validate inputs
+    if not issue_key or not issue_key.strip():
+        logger.error("Issue key cannot be empty")
+        sys.exit(1)
 
     template_path = Path(__file__).parent / "prompts" / "refine_feature.md"
 
@@ -30,20 +73,35 @@ def run_refine_stage(issue_key: str, output_dir: Path, debug: bool = False):
         sys.exit(1)
 
     logger.info(f"Reading template from {template_path}")
-    with open(template_path, "r") as f:
-        template = f.read()
+    try:
+        with open(template_path, "r", encoding="utf-8") as f:
+            template = f.read()
+    except Exception as e:
+        logger.error(f"Failed to read template: {e}")
+        sys.exit(1)
 
-    logger.info(f"Fetching Jira issue {issue_key}")
-    issue = fetch_jira_issue_with_agent(issue_key)
-
-    filled = fill_template(template, issue)
+    logger.info(f"Generating refinement document for Jira issue {issue_key}")
+    try:
+        refinement_content = generate_refinement_with_agent(issue_key, template)
+    except Exception as e:
+        logger.error(f"Failed to generate refinement document: {e}")
+        if debug:
+            logger.exception("Full traceback:")
+        sys.exit(1)
 
     output_path = output_dir / f"refined_{issue_key}.md"
     logger.info(f"Writing refinement spec to {output_path}")
 
-    with open(output_path, "w") as f:
-        f.write(filled)
+    try:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(refinement_content)
+    except Exception as e:
+        logger.error(f"Failed to write output file: {e}")
+        sys.exit(1)
 
+    # Log performance metrics
+    duration = time.time() - start_time
+    logger.info(f"Refinement stage completed in {duration:.2f}s")
     print(f"✓ Refinement spec written to {output_path}")
     return output_path
 
