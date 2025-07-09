@@ -65,6 +65,8 @@ metadata:
   namespace: $NAMESPACE
 type: Opaque
 data:
+  VLLM_URL: $(encode_base64 "$API_BASE_URL")
+  VLLM_INFERENCE_MODEL: $(encode_base64 "$MODEL_ID")
   CUSTOM_API_BASE_URL: $(encode_base64 "$API_BASE_URL")
   CUSTOM_MODEL_NAME: $(encode_base64 "$MODEL_NAME")
   CUSTOM_MODEL_ID: $(encode_base64 "$MODEL_ID")
@@ -75,6 +77,7 @@ if [ -n "$API_KEY" ]; then
     echo "🔑 Adding API key..."
     oc patch secret llama-stack-secrets -n $NAMESPACE --patch="$(cat <<EOF
 data:
+  VLLM_API_TOKEN: $(encode_base64 "$API_KEY")
   CUSTOM_API_KEY: $(encode_base64 "$API_KEY")
 EOF
     )"
@@ -122,6 +125,12 @@ if [ "$ROUTE_URL" != "Route not available" ]; then
     echo "  • API URL: $API_BASE_URL"
     echo "  • Model: $MODEL_NAME"
     echo "  • Has API Key: $([ -n "$API_KEY" ] && echo "Yes" || echo "No")"
+    echo ""
+    echo "🎯 Jira MCP configuration:"
+    echo "  • Jira URL: $JIRA_URL"
+    echo "  • Username: $JIRA_USERNAME"
+    echo "  • MCP Service: jira-mcp-service.$NAMESPACE.svc.cluster.local:9000"
+    echo "  • Available Jira tools: search, get_issue, create_issue, update_issue, transitions, etc."
 else
     echo "⚠️  Route not created. Access via port-forward:"
     echo "oc port-forward svc/llama-stack-service 8321:8321 -n $NAMESPACE"
@@ -130,6 +139,9 @@ fi
 echo ""
 echo "🧪 Test your deployment:"
 echo "curl http://$ROUTE_URL/v1/health"
+echo ""
+echo "🔍 Test Jira MCP service (from within cluster):"
+echo "oc exec -n $NAMESPACE deployment/llama-stack -- curl http://jira-mcp-service:9000/health"
 echo ""
 echo "📚 Next steps:"
 echo "1. Update your application's LLAMA_STACK_URL environment variable"
