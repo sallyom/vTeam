@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llama-stack-secrets
+  namespace: llama-stack
+type: Opaque
+data:
+  VLLM_API_TOKEN: ""
+  VLLM_URL: ""
+  VLLM_INFERENCE_MODEL: ""
+  SQLITE_STORE_DIR: ""
+  FILES_STORAGE_DIR: ""
+  MILVUS_DB_PATH: ""
+  MILVUS_KVSTORE_DB_PATH: ""
+  OTEL_SERVICE_NAME: ""
+  TELEMETRY_SINKS: ""
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llama-stack-config
+  namespace: llama-stack
+data:
+  run.yaml: |
+    version: 2
+    image_name: llamastack-rhoai-ai-feature-sizing
+    container_image: llamastack-rhoai-ai-feature-sizing
+    apis:
+      - inference
+      - safety
+      - agents
+      - vector_io
+      - tool_runtime
+      - telemetry
+      - files
+    providers:
+      inference:
+      - provider_id: vllm
+        provider_type: remote::vllm
+        config:
+          url: ${env.VLLM_URL}
+          api_token: ${env.VLLM_API_TOKEN:=fake}
+      safety:
+      - provider_id: llama-guard
+        provider_type: inline::llama-guard
+        config:
+          excluded_categories: []
+      agents:
+      - provider_id: meta-reference
+        provider_type: inline::meta-reference
+        config:
+          persistence_store:
+            type: sqlite
+            namespace: null
+            db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing}/agents_store.db
+          responses_store:
+            type: sqlite
+            db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing}/responses_store.db
+      vector_io:
+      - provider_id: milvus
+        provider_type: inline::milvus
+        config:
+          db_path: ${env.MILVUS_DB_PATH:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing/milvus.db}
+          kvstore:
+            type: sqlite
+            namespace: null
+            db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing}/${env.MILVUS_KVSTORE_DB_PATH:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing/milvus_registry.db}
+      tool_runtime:
+      - provider_id: model-context-protocol
+        provider_type: remote::model-context-protocol
+        config: {}
+      telemetry:
+      - provider_id: meta-reference
+        provider_type: inline::meta-reference
+        config:
+          service_name: "${env.OTEL_SERVICE_NAME:=\u200B}"
+          sinks: ${env.TELEMETRY_SINKS:=console,sqlite}
+          sqlite_db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing}/trace_store.db
+      files:
+      - provider_id: localfs
+        provider_type: inline::localfs
+        config:
+          storage_dir: ${env.FILES_STORAGE_DIR:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing/files}
+          metadata_store:
+            type: sqlite
+            db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing}/files_metadata.db
+    metadata_store: null
+    inference_store: null
+    models:
+    - metadata: {}
+      model_id: ${env.VLLM_INFERENCE_MODEL}
+      provider_id: vllm
+      model_type: llm
+    shields: []
+    vector_dbs: []
+    datasets: []
+    scoring_fns: []
+    benchmarks: []
+    tool_groups: []
+    logging: null
+    server:
+      port: 8321
+      tls_certfile: null
+      tls_keyfile: null
+      tls_cafile: null
+      auth: null
+      host: null
+      quota: null
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-stack
+  namespace: llama-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llama-stack
+  template:
+    metadata:
+      labels:
+        app: llama-stack
+    spec:
+      containers:
+      - name: llama-stack
+        image: llamastack/distribution-starter:latest
+        ports:
+        - containerPort: 8321
+        env:
+        - name: VLLM_URL
+          valueFrom:
+            secretKeyRef:
+              name: llama-stack-secrets
+              key: VLLM_URL
+        - name: VLLM_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: llama-stack-secrets
+              key: CUSTOM_API_KEY
+              optional: true
+        - name: VLLM_INFERENCE_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: llama-stack-secrets
+              key: VLLM_INFERENCE_MODEL
+        - name: SQLITE_STORE_DIR
+          value: "/tmp"
+        - name: MILVUS_DB_PATH
+          value: "/tmp/milvus.db"
+        - name: MILVUS_KVSTORE_DB_PATH
+          value: "/tmp/milvus_registry.db"
+        - name: OTEL_SERVICE_NAME
+          value: "llama-stack"
+        - name: TELEMETRY_SINKS
+          value: "console,sqlite"
+        - name: FILES_STORAGE_DIR
+          value: "/tmp/files"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-stack-service
+  namespace: llama-stack
+spec:
+  selector:
+    app: llama-stack
+  ports:
+  - port: 8321
+    targetPort: 8321
+  type: ClusterIP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: llama-stack-route
+  namespace: llama-stack
+spec:
+  to:
+    kind: Service
+    name: llama-stack-service
+  port:
+    targetPort: 8321 
