@@ -13,11 +13,26 @@ Analyze the provided RHOAI feature document and create a comprehensive structure
 Generate ticket structures in **soft mode** - do NOT create actual Jira tickets. Instead, define the complete ticket structure with:
 - Ticket title and detailed description
 - Epic/Story/Task/Bug classifications
-- Parent-child relationships
-- Cross-ticket dependencies
+- Acceptance Criteria using standard Acceptance Criteria Format: "Given [scenario], when [action performed],Then [expected state]"
+- Parent-child relationships, including assigning appropriate Feature Jira Issues as Parent issue
+- Cross-ticket dependencies, using following dependency types:
+  * Blocks / is blocked byOutward Description: Blocks – The source issue prevents the destination issue from starting or completing.
+Inward Description: Is blocked by – The destination issue cannot proceed until the source issue is resolved. Use Case: Commonly used for process dependencies where one task must be completed before another can start (e.g., a "Finish-to-Start" dependency).
+  * Relates to / relates toOutward Description: Relates to – The source issue has a general relationship with the destination issue. Inward Description: Relates to – The destination issue is related to the source issue. Use Case: Used for loose associations where issues are connected but not necessarily dependent (e.g., for context or shared relevance). This link type may not always indicate a strict dependency, so use it cautiously for dependency management.  
 - Component assignments
-- Story point estimates
+- Story point estimates using ticket sizing guidelines:
+  * decompose into child user stories or tasks ensuring that each is appropriately sized for completion within a three-week sprint.
+  * Story points are in Fibonacci sequence: 0, 1, 2, 3, 5, 8 and 13.
+  * Story points do not exactly reflect the time the ticket will take, but reflect more the complexity of the ticket and overall effort required. If the ticket is 8 or 13, consider dividing it into smaller tickets.
+- For Feature estimation, the points of all child tickets shall be added up to provide a Feature story point estimate which will be combined with implementation plan timeline.
 - Priority levels
+- upstream open source applicability
+- tech debt identification
+- detailed test steps
+- required documentation
+
+## Ticket sequencing
+Sequence the tickets in chronological order within appicable epic accounting for cross-ticket dependencies
 
 ## Examples
 
