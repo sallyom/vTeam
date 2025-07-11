@@ -50,6 +50,18 @@ docker-compose ps
 
 ## 🚀 Running the CLI
 
+### Deployment Options
+
+**Local Development (Current):**
+- Uses Docker Compose with Ollama
+- Requires local GPU or CPU inference
+- See main instructions below
+
+**OpenShift Production (New):**
+- Uses any OpenAI-compatible API (OpenAI, Mistral, Gemini, Azure OpenAI, vLLM, etc.)
+- No local GPU required
+- See [OpenShift Deployment Guide](OPENSHIFT-DEPLOYMENT.md)
+
 ### Basic Usage
 
 ```bash
