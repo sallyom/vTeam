@@ -237,6 +237,92 @@ spec:
     targetPort: 9000
   type: ClusterIP
 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rhoai-ai-feature-sizing-api
+  namespace: llama-stack
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rhoai-ai-feature-sizing-api
+  template:
+    metadata:
+      labels:
+        app: rhoai-ai-feature-sizing-api
+    spec:
+      containers:
+      - name: rhoai-ai-feature-sizing-api
+        image: llamastack/distribution-starter:latest
+        command: ["python", "-m", "rhoai_ai_feature_sizing.run_api"]
+        ports:
+        - containerPort: 8000
+        env:
+        - name: PORT
+          value: "8000"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: DATABASE_URL
+          value: "sqlite:///tmp/rhoai_sessions.db"
+        - name: LLAMA_STACK_URL
+          value: "http://llama-stack-service.llama-stack.svc.cluster.local:8321"
+        - name: VLLM_URL
+          valueFrom:
+            secretKeyRef:
+              name: llama-stack-secrets
+              key: VLLM_URL
+        - name: VLLM_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: llama-stack-secrets
+              key: VLLM_API_TOKEN
+              optional: true
+        - name: VLLM_INFERENCE_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: llama-stack-secrets
+              key: VLLM_INFERENCE_MODEL
+        - name: INFERENCE_MODEL
+          valueFrom:
+            secretKeyRef:
+              name: llama-stack-secrets
+              key: VLLM_INFERENCE_MODEL
+        - name: LOG_LEVEL
+          value: "INFO"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rhoai-ai-feature-sizing-api-service
+  namespace: llama-stack
+spec:
+  selector:
+    app: rhoai-ai-feature-sizing-api
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: rhoai-ai-feature-sizing-api-route
+  namespace: llama-stack
+spec:
+  to:
+    kind: Service
+    name: rhoai-ai-feature-sizing-api-service
+  port:
+    targetPort: 8000
+---
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:

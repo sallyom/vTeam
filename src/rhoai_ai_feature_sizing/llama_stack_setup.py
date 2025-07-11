@@ -3,7 +3,7 @@ from llama_stack_client import LlamaStackClient
 
 LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL")
 MCP_ATLASSIAN_URL = os.getenv("MCP_ATLASSIAN_URL")
-DEV_MODE = os.getenv("DEV_MODE", "false")
+CONFIGURE_TOOLGROUPS = os.getenv("CONFIGURE_TOOLGROUPS", "false")
 
 
 def get_llama_stack_client():
@@ -18,7 +18,7 @@ def get_llama_stack_client():
     print(f"Creating client for {LLAMA_STACK_URL}")
     client = LlamaStackClient(base_url=LLAMA_STACK_URL)
 
-    if DEV_MODE == "false":
+    if CONFIGURE_TOOLGROUPS == "true":
         try:
             # First, try to unregister any existing toolgroup to clear old config
             try:
