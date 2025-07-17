@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field
-from .models import SessionStatus, Stage, MessageRole
+from .models import SessionStatus, Stage, MessageRole, MessageStatus
 
 
 # Request schemas
@@ -27,6 +27,7 @@ class MessageResponse(BaseModel):
     role: MessageRole
     content: str
     stage: Optional[Stage]
+    status: MessageStatus
     timestamp: datetime
     message_metadata: Optional[Dict[str, Any]] = None
 
@@ -51,11 +52,46 @@ class MCPUsageResponse(BaseModel):
     """MCP usage tracking response."""
 
     id: uuid.UUID
+    stage: Stage
     tool_name: str
+    input_data: Optional[dict] = None
+    output_data: Optional[dict] = None
     timestamp: datetime
     duration_ms: Optional[int]
     success: bool
     error_message: Optional[str]
+
+    @classmethod
+    def from_model(cls, mcp_usage) -> "MCPUsageResponse":
+        """Create response from model, converting JSON strings to dicts."""
+        import json
+
+        input_data = None
+        output_data = None
+
+        if mcp_usage.request_data:
+            try:
+                input_data = json.loads(mcp_usage.request_data)
+            except json.JSONDecodeError:
+                input_data = {"raw": mcp_usage.request_data}
+
+        if mcp_usage.response_data:
+            try:
+                output_data = json.loads(mcp_usage.response_data)
+            except json.JSONDecodeError:
+                output_data = {"raw": mcp_usage.response_data}
+
+        return cls(
+            id=mcp_usage.id,
+            stage=mcp_usage.stage,
+            tool_name=mcp_usage.tool_name,
+            input_data=input_data,
+            output_data=output_data,
+            timestamp=mcp_usage.timestamp,
+            duration_ms=mcp_usage.duration_ms,
+            success=mcp_usage.success,
+            error_message=mcp_usage.error_message,
+        )
 
     class Config:
         from_attributes = True

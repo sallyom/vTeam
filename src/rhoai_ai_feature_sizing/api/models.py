@@ -88,6 +88,14 @@ class MessageRole(str, Enum):
     AGENT = "agent"
 
 
+class MessageStatus(str, Enum):
+    """Status of a message."""
+
+    LOADING = "loading"
+    SUCCESS = "success"
+    ERROR = "error"
+
+
 class Session(Base):
     """Main session tracking table."""
 
@@ -135,6 +143,9 @@ class Message(Base):
     role = Column(SQLEnum(MessageRole), nullable=False)
     content = Column(Text, nullable=False)
     stage = Column(SQLEnum(Stage), nullable=True)
+    status = Column(
+        SQLEnum(MessageStatus), default=MessageStatus.SUCCESS, nullable=False
+    )
     timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
     message_metadata = Column(Text, nullable=True)  # JSON string for additional data
 
@@ -142,7 +153,7 @@ class Message(Base):
     session = relationship("Session", back_populates="messages")
 
     def __repr__(self):
-        return f"<Message(id={self.id}, role={self.role}, stage={self.stage})>"
+        return f"<Message(id={self.id}, role={self.role}, stage={self.stage}, status={self.status})>"
 
 
 class Output(Base):
@@ -171,6 +182,7 @@ class MCPUsage(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     session_id = Column(GUID(), ForeignKey("sessions.id"), nullable=False, index=True)
+    stage = Column(SQLEnum(Stage, name="stage"), nullable=False)
     tool_name = Column(String(100), nullable=False)
     request_data = Column(Text, nullable=True)  # JSON string
     response_data = Column(Text, nullable=True)  # JSON string

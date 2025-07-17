@@ -42,14 +42,12 @@ data:
             type: sqlite
             db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing}/responses_store.db
       vector_io:
-      - provider_id: milvus
-        provider_type: inline::milvus
+      - provider_id: faiss
+        provider_type: inline::faiss
         config:
-          db_path: ${env.MILVUS_DB_PATH:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing/milvus.db}
           kvstore:
             type: sqlite
-            namespace: null
-            db_path: ${env.SQLITE_STORE_DIR:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing}/${env.MILVUS_KVSTORE_DB_PATH:=~/.llama/distributions/llamastack-rhoai-ai-feature-sizing/milvus_registry.db}
+            db_path: ${env.SQLITE_STORE_DIR:=/tmp}/vector_kvstore.db
       tool_runtime:
       - provider_id: model-context-protocol
         provider_type: remote::model-context-protocol
@@ -84,9 +82,9 @@ data:
     benchmarks: []
     tool_groups:
       - toolgroup_id: mcp::atlassian
-      provider_id: model-context-protocol
-      mcp_endpoint:
-        uri: ${env.MCP_ATLASSIAN_URL}
+        provider_id: model-context-protocol
+        mcp_endpoint:
+          uri: ${env.MCP_ATLASSIAN_URL}
     logging: null
     server:
       port: 8321
@@ -115,6 +113,7 @@ spec:
       containers:
       - name: llama-stack
         image: llamastack/distribution-starter:latest
+        command: ["python", "-m", "llama_stack.distribution.server.server", "--config", "/app/run.yaml"]
         ports:
         - containerPort: 8321
         env:
@@ -136,10 +135,8 @@ spec:
               key: VLLM_INFERENCE_MODEL
         - name: SQLITE_STORE_DIR
           value: "/tmp"
-        - name: MILVUS_DB_PATH
-          value: "/tmp/milvus.db"
-        - name: MILVUS_KVSTORE_DB_PATH
-          value: "/tmp/milvus_registry.db"
+        - name: VECTOR_STORAGE_DIR
+          value: "/tmp/vector_storage"
         - name: OTEL_SERVICE_NAME
           value: "llama-stack"
         - name: TELEMETRY_SINKS
