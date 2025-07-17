@@ -19,9 +19,9 @@ Generate ticket structures in **soft mode** - do NOT create actual Jira tickets.
   * Blocks / is blocked byOutward Description: Blocks – The source issue prevents the destination issue from starting or completing.
 Inward Description: Is blocked by – The destination issue cannot proceed until the source issue is resolved. Use Case: Commonly used for process dependencies where one task must be completed before another can start (e.g., a "Finish-to-Start" dependency).
   * Relates to / relates toOutward Description: Relates to – The source issue has a general relationship with the destination issue. Inward Description: Relates to – The destination issue is related to the source issue. Use Case: Used for loose associations where issues are connected but not necessarily dependent (e.g., for context or shared relevance). This link type may not always indicate a strict dependency, so use it cautiously for dependency management.  
-- Component assignments
+- Component assignments using component teams listed in Ticket Sizing: Team Average Duration Per Story Point
 - Story point estimates using ticket sizing guidelines:
-  * decompose into child user stories or tasks ensuring that each is appropriately sized for completion within a three-week sprint.
+  * decompose into child user stories or tasks ensuring that each is appropriately sized for completion within a three-week sprint and using Average Duration per story point for componenet specific size estimation.
   * Story points are in Fibonacci sequence: 0, 1, 2, 3, 5, 8 and 13.
   * Story points do not exactly reflect the time the ticket will take, but reflect more the complexity of the ticket and overall effort required. If the ticket is 8 or 13, consider dividing it into smaller tickets.
 - For Feature estimation, the points of all child tickets shall be added up to provide a Feature story point estimate which will be combined with implementation plan timeline.
@@ -31,8 +31,28 @@ Inward Description: Is blocked by – The destination issue cannot proceed until
 - detailed test steps
 - required documentation
 
+## Ticket Sizing: Team Average Duration Per Story Point
+
+| Team/Board | Sprint Story Points Committed | Sprint Story Points Completed | Velocity Predictability (%) | Average Duration per Story Point |
+|------------|-------------------------------|------------------------------|----------------------------|----------------------------|
+| Kubeflow DevX | 25 | - | - | - |
+| Model Explainability | 29 | - | - | - |
+| Training Ray | 14 | 3 | 21.428571428571427 | 94.35333333333334 |
+| RHOAIENG IDE Indigo Scrum Team | 59 | 18 | 30.508474576271187 | 1.4084259259259262 |
+| Data Science Pipelines | 411 | 147 | 35.76642335766424 | 0.4174296745725317 |
+| RHOAI IDE Main Board | 54 | 30 | 55.55555555555556 | 2.9058125 |
+| RHOAI Platform | 155 | 97 | 62.58064516129033 | 0.583617912371134 |
+| Model Serving Runtimes | 368 | 231 | 62.77173913043478 | 0.20084369531178042 |
+| Workload Orchestration | 115 | 87 | 75.65217391304347 | 0.6207620263942103 |
+| Model Servers and Metrics | 243 | 202 | 83.1275720164609 | 0.22003116978364504 |
+| RHOAIENG IDE Teal Scrum Team | 64 | 54 | 84.375 | 0.9677731481481481 |
+| Training Kubeflow | 85 | 76 | 89.41176470588236 | 0.5279844497607655 |
+| Dashboard | 591 | 561 | 94.9238578680203 | 0.08809968916191571 |
+| Model Registry board | 65 | 76 | 116.92307692307693 | 0.32335812356979404 |
+| Feature Store | 44 | 53 | 120.45454545454545 | 1.4122700471698113 |
+
 ## Ticket sequencing
-Sequence the tickets in chronological order within appicable epic accounting for cross-ticket dependencies
+Sequence the tickets in chronological order within applicable epic accounting for cross-ticket dependencies
 
 ## Examples
 
