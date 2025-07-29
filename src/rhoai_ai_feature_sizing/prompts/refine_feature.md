@@ -3,18 +3,17 @@
 ## Objective
 Fetch Jira issue {{issue_key}} and create a comprehensive RHOAI feature refinement document following the provided template and examples.
 
-## Step-by-Step Process
-1. **Fetch Complete Issue Details**: Use the Jira tools to get comprehensive information about {{issue_key}}:
-   - Summary and description
-   - Components and labels  
-   - Priority and status
-   - Reporter and assignee information
-   - Any linked issues or epics
-   - Comments and attachments (if relevant)
+## Instructions
 
-2. **Analyze and Transform**: Convert the Jira content into a structured refinement document
+You will be provided with real Jira issue data for `{{issue_key}}`. Use this data to create a comprehensive refinement document following the template structure below.
 
-3. **Generate Complete Document**: Create the full refinement document using the template structure below
+**IMPORTANT:**
+- Do not make up or assume any information about the issue.
+- Use only the provided Jira data to fill in the template.
+- If information is missing from the Jira data, mark as "TBD - requires stakeholder input".
+- Ensure all sections are meaningful and actionable based on the real Jira information.
+
+Create a comprehensive refinement document following the template structure below.
 
 ## Examples
 
@@ -250,11 +249,11 @@ Now create a refinement document for {{issue_key}} following this exact structur
 
 ## Output Requirements
 
-- Return ONLY the complete markdown refinement document
-- Replace ALL placeholder text with specific information from the Jira issue
-- Use the examples as a quality standard
-- If information is missing from Jira, mark as "TBD - requires stakeholder input"
-- Ensure all sections are meaningful and actionable
-- Follow the exact markdown formatting shown in examples
+1. Return ONLY the complete markdown refinement document based on the provided Jira data
+2. Replace ALL placeholder text with specific information from the actual Jira issue
+3. Use the examples as a quality standard
+4. If information is missing from Jira, mark as "TBD - requires stakeholder input"
+5. Ensure all sections are meaningful and actionable
+6. Follow the exact markdown formatting shown in examples
 
-Begin by fetching the Jira issue details for {{issue_key}}, then generate the complete refinement document following the template and examples above.
+Use the provided Jira data to create the refinement document now.

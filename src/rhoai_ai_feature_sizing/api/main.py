@@ -4,9 +4,18 @@ import logging
 import uuid
 import asyncio
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    BackgroundTasks,
+    Query,
+    Depends,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -21,6 +30,9 @@ from .schemas import (
     HealthResponse,
     ProgressResponse,
     SessionListResponse,
+    JiraMetricsRequest,
+    ComponentMetrics,
+    JiraMetricsResponse,
 )
 from .services import SessionService
 from ..llama_stack_setup import get_llama_stack_client
@@ -28,6 +40,45 @@ from ..llama_stack_setup import get_llama_stack_client
 
 # Global service instance
 session_service = None
+
+
+class WebSocketManager:
+    """Manager for WebSocket connections."""
+
+    def __init__(self):
+        self.active_connections: Dict[uuid.UUID, List[WebSocket]] = {}
+
+    async def connect(self, websocket: WebSocket, session_id: uuid.UUID):
+        """Connect a WebSocket for a specific session."""
+        await websocket.accept()
+        if session_id not in self.active_connections:
+            self.active_connections[session_id] = []
+        self.active_connections[session_id].append(websocket)
+
+    def disconnect(self, websocket: WebSocket, session_id: uuid.UUID):
+        """Disconnect a WebSocket from a session."""
+        if session_id in self.active_connections:
+            self.active_connections[session_id].remove(websocket)
+            if not self.active_connections[session_id]:
+                del self.active_connections[session_id]
+
+    async def send_message(self, session_id: uuid.UUID, message: dict):
+        """Send a message to all connected clients for a session."""
+        if session_id in self.active_connections:
+            disconnected = []
+            for websocket in self.active_connections[session_id]:
+                try:
+                    await websocket.send_json(message)
+                except Exception:
+                    disconnected.append(websocket)
+
+            # Remove disconnected clients
+            for websocket in disconnected:
+                self.disconnect(websocket, session_id)
+
+
+# Global WebSocket manager
+ws_manager = WebSocketManager()
 
 
 @asynccontextmanager
@@ -41,6 +92,9 @@ async def lifespan(app: FastAPI):
 
     logging.info("Creating session service...")
     session_service = SessionService()
+
+    # Set WebSocket manager on session service
+    session_service.set_websocket_manager(ws_manager)
 
     logging.info("API startup complete")
 
@@ -100,20 +154,22 @@ async def health_check():
 @app.post("/sessions", response_model=SessionResponse)
 async def create_session(
     request: CreateSessionRequest,
-    background_tasks: BackgroundTasks,
     service: SessionService = Depends(get_session_service),
 ):
     """Create a new processing session and start processing."""
     try:
         # Create session
-        session_id = service.create_session(request.jira_key, request.soft_mode)
+        session_id = service.create_session(
+            request.jira_key, request.soft_mode, request.custom_prompts
+        )
 
-        # Start processing in background
-        background_tasks.add_task(service.process_session, session_id)
+        # Start processing in background using asyncio.create_task
+        # This ensures proper async handling without blocking the event loop
+        asyncio.create_task(service.process_session(session_id))
 
         # Return session info
         session = service.get_session(session_id)
-        return SessionResponse.model_validate(session)
+        return session
 
     except Exception as e:
         logging.error(f"Error creating session: {e}")
@@ -130,7 +186,7 @@ async def list_sessions(
     try:
         sessions, total = service.get_sessions(page, page_size)
         return SessionListResponse(
-            sessions=[SessionResponse.model_validate(s) for s in sessions],
+            sessions=sessions,
             total=total,
             page=page,
             page_size=page_size,
@@ -156,10 +212,10 @@ async def get_session(
         mcp_usages = service.get_session_mcp_usage(session_id)
 
         return SessionDetailResponse(
-            **SessionResponse.model_validate(session).model_dump(),
-            messages=[MessageResponse.model_validate(m) for m in messages],
-            outputs=[OutputResponse.model_validate(o) for o in outputs],
-            mcp_usages=[MCPUsageResponse.model_validate(u) for u in mcp_usages],
+            **session.model_dump(),
+            messages=messages,
+            outputs=outputs,
+            mcp_usages=mcp_usages,
         )
     except HTTPException:
         raise
@@ -232,7 +288,7 @@ async def get_session_messages(
         if stage:
             messages = [m for m in messages if m.stage == stage]
 
-        return [MessageResponse.model_validate(m) for m in messages]
+        return messages
     except HTTPException:
         raise
     except Exception as e:
@@ -258,7 +314,7 @@ async def get_session_outputs(
         if stage:
             outputs = [o for o in outputs if o.stage == stage]
 
-        return [OutputResponse.model_validate(o) for o in outputs]
+        return outputs
     except HTTPException:
         raise
     except Exception as e:
@@ -286,7 +342,7 @@ async def get_session_output_by_stage(
                 status_code=404, detail=f"No output found for stage {stage}"
             )
 
-        return OutputResponse.model_validate(stage_output)
+        return stage_output
     except HTTPException:
         raise
     except Exception as e:
@@ -307,7 +363,7 @@ async def get_session_mcp_usage(
             raise HTTPException(status_code=404, detail="Session not found")
 
         usages = service.get_session_mcp_usage(session_id)
-        return [MCPUsageResponse.model_validate(u) for u in usages]
+        return usages
     except HTTPException:
         raise
     except Exception as e:
@@ -321,20 +377,110 @@ async def delete_session(
 ):
     """Delete a session and all related data."""
     try:
-        session = service.get_session(session_id)
-        if not session:
+        # Attempt to delete the session
+        deleted = service.delete_session(session_id)
+
+        if not deleted:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        # TODO: Implement session deletion
-        # For now, just update status to cancelled
-        service.update_session_status(session_id, SessionStatus.CANCELLED)
-
-        return {"message": "Session cancelled"}
+        return {"message": "Session deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
         logging.error(f"Error deleting session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/prompts", response_model=List[str])
+async def list_available_prompts():
+    """Get list of available prompt names."""
+    try:
+        prompts_dir = Path(__file__).parent.parent / "prompts"
+        prompt_files = [f.stem for f in prompts_dir.glob("*.md")]
+        return sorted(prompt_files)
+    except Exception as e:
+        logging.error(f"Error listing prompts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/prompts/{prompt_name}")
+async def get_prompt_content(prompt_name: str):
+    """Get the content of a specific prompt file."""
+    try:
+        # Validate prompt name to prevent path traversal
+        if not prompt_name.replace("_", "").replace("-", "").isalnum():
+            raise HTTPException(status_code=400, detail="Invalid prompt name")
+
+        prompts_dir = Path(__file__).parent.parent / "prompts"
+        prompt_file = prompts_dir / f"{prompt_name}.md"
+
+        if not prompt_file.exists():
+            raise HTTPException(status_code=404, detail="Prompt not found")
+
+        with open(prompt_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        return {
+            "name": prompt_name,
+            "content": content,
+            "file_path": f"src/rhoai_ai_feature_sizing/prompts/{prompt_name}.md",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting prompt {prompt_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/jira/metrics", response_model=JiraMetricsResponse)
+async def get_jira_metrics(
+    request: JiraMetricsRequest,
+    service: SessionService = Depends(get_session_service),
+):
+    """
+    Get comprehensive metrics for a JIRA issue and all its children recursively.
+    Only processes issues with resolution 'Done'.
+    """
+    try:
+        # Run the metrics calculation in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, service.get_jira_metrics, request.jira_key
+        )
+
+        # Convert to response model
+        components = {}
+        for comp_name, comp_data in result["components"].items():
+            components[comp_name] = ComponentMetrics(
+                total_story_points=comp_data["total_story_points"],
+                total_days_to_done=comp_data["total_days_to_done"],
+            )
+
+        return JiraMetricsResponse(
+            components=components,
+            total_story_points=result["total_story_points"],
+            total_days_to_done=result["total_days_to_done"],
+            processed_issues=result["processed_issues"],
+            done_issues=result["done_issues"],
+        )
+
+    except Exception as e:
+        logging.error(f"Error getting JIRA metrics for {request.jira_key}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to calculate JIRA metrics: {str(e)}"
+        )
+
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: uuid.UUID):
+    """WebSocket endpoint for real-time session updates."""
+    await ws_manager.connect(websocket, session_id)
+    try:
+        while True:
+            # Keep connection alive - we only send, don't receive
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket, session_id)
 
 
 if __name__ == "__main__":

@@ -2,11 +2,39 @@ import logging
 import os
 import time
 from pathlib import Path
-from llama_stack_client import Agent
+from llama_stack_client import Agent, AgentEventLogger
 from rhoai_ai_feature_sizing.llama_stack_setup import get_llama_stack_client
+from typing import Optional, Dict
 
 
-INSTRUCTIONS = "You are a senior product manager expert at creating RHOAI feature refinement documents. Follow the provided template and examples precisely."
+def _filter_session_id_from_tool_calls(tool_calls):
+    """Filter out session_id from tool call arguments to prevent MCP validation errors."""
+    if not tool_calls:
+        return tool_calls
+
+    filtered_calls = []
+    for call in tool_calls:
+        if isinstance(call, dict) and "arguments" in call:
+            # Remove session_id from arguments
+            filtered_args = {
+                k: v for k, v in call["arguments"].items() if k != "session_id"
+            }
+            filtered_call = call.copy()
+            filtered_call["arguments"] = filtered_args
+            filtered_calls.append(filtered_call)
+        else:
+            filtered_calls.append(call)
+
+    return filtered_calls
+
+
+INSTRUCTIONS = """You are a senior product manager expert at creating RHOAI feature refinement documents. 
+
+You will be provided with real Jira issue data. Use this data to create a comprehensive refinement document following the provided template and examples precisely.
+
+CRITICAL: Do not make up or assume any information about the issue. Use only the provided Jira data.
+
+Create a comprehensive refinement document following the provided template and examples precisely."""
 
 
 def _load_validation_template() -> str:
@@ -20,7 +48,12 @@ def _load_validation_template() -> str:
         return f.read()
 
 
-def generate_refinement_with_agent(issue_key: str, template: str) -> str:
+def generate_refinement_with_agent(
+    issue_key: str,
+    template: str,
+    session_id=None,
+    custom_prompts: Optional[Dict[str, str]] = None,
+) -> str:
     """
     Generate a comprehensive refinement document using the Llama Stack agent.
     Uses LLM-based validation with iteration for quality improvement.
@@ -42,15 +75,51 @@ def generate_refinement_with_agent(issue_key: str, template: str) -> str:
     try:
         client = get_llama_stack_client()
 
-        # Load validation template
-        validation_template = _load_validation_template()
+        # Get Jira data directly through the client
+        response = client.tool_runtime.invoke_tool(
+            tool_name="jira_get_issue", kwargs={"issue_key": issue_key}
+        )
+
+        if response.error_message:
+            raise RuntimeError(
+                f"Failed to retrieve Jira issue data: {response.error_code} - {response.error_message}"
+            )
+
+        try:
+
+            # Llama Stack sometimes returns an array even if the type says otherwise.
+            content = response.content
+            if isinstance(content, list):
+                if not content:
+                    raise RuntimeError("Jira response content is an empty list")
+                content = content[0]
+
+            # Now extract the text attribute as before
+            jira_data = getattr(content, "text", None)
+            if jira_data is None:
+                raise RuntimeError(
+                    "Jira response content does not have a 'text' attribute"
+                )
+        except Exception as e:
+            logger.error(f"Failed to retrieve Jira issue data: {e}")
+            raise RuntimeError(f"Failed to retrieve Jira issue data: {e}") from e
+
+        logger.info(
+            f"Fetched Jira issue {issue_key}: {jira_data[:500]}{'...' if len(jira_data) > 500 else ''}"
+        )
+
+        # Load validation template - use custom prompt if available
+        if custom_prompts and "validate_refinement" in custom_prompts:
+            validation_template = custom_prompts["validate_refinement"]
+            logger.info("Using custom validate_refinement prompt")
+        else:
+            validation_template = _load_validation_template()
 
         # Create generation agent
         generation_agent = Agent(
             client,
             model=INFERENCE_MODEL,
             instructions=INSTRUCTIONS,
-            tools=["mcp::atlassian"],
         )
 
         # Create validation agent
@@ -58,13 +127,13 @@ def generate_refinement_with_agent(issue_key: str, template: str) -> str:
             client,
             model=INFERENCE_MODEL,
             instructions=validation_template,
-            tools=[],
         )
 
         # Generate and iterate on the document
         best_content = None
         best_score = 0.0
         max_iterations = 3
+        validation_result = None
 
         for iteration in range(max_iterations):
             start_time = time.time()
@@ -78,27 +147,38 @@ def generate_refinement_with_agent(issue_key: str, template: str) -> str:
 
             # Create prompt based on iteration
             if iteration == 0:
-                # First attempt: use template directly
-                prompt = template.replace("{{issue_key}}", issue_key)
+                # First attempt: use template with Jira data
+                prompt = f"""Here is the Jira issue data:
+                        ---
+                        {jira_data}
+                        ---
+                        {template.replace("{{issue_key}}", issue_key)}"""
             else:
                 # Subsequent attempts: include validation feedback
                 prompt = _create_improvement_prompt(
-                    issue_key, template, validation_result
+                    issue_key, template, validation_result, jira_data
                 )
 
             # Generate content
-            response = generation_agent.create_turn(
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompt,
-                    }
-                ],
-                session_id=session_id,
-                stream=False,
-            )
+            try:
+                response = generation_agent.create_turn(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        }
+                    ],
+                    session_id=session_id,
+                    stream=False,
+                )
+
+            except Exception as e:
+                logger.error(f"Error creating turn: {e}")
+                # Try to continue with next iteration
+                continue
 
             content = response.output_message.content
+
             duration = time.time() - start_time
 
             logger.info(
@@ -121,7 +201,7 @@ def generate_refinement_with_agent(issue_key: str, template: str) -> str:
             # Check if we have a passing result
             if validation_result.get("passed", False) and current_score >= 0.8:
                 logger.info(
-                    f"✅ Document passed validation on iteration {iteration + 1} with score {current_score:.2f}"
+                    f"Document passed validation on iteration {iteration + 1} with score {current_score:.2f}"
                 )
                 return content
 
@@ -157,12 +237,10 @@ def _validate_with_llm(validation_agent: Agent, content: str, issue_key: str) ->
         )
 
         validation_prompt = f"""Please evaluate this RHOAI feature refinement document:
-
----
-{content}
----
-
-Provide your assessment as JSON following the specified format."""
+                                ---
+                                {content}
+                                ---
+                                Provide your assessment as JSON following the specified format."""
 
         response = validation_agent.create_turn(
             messages=[{"role": "user", "content": validation_prompt}],
@@ -211,7 +289,7 @@ def _extract_validation_json(content: str) -> dict:
 
 
 def _create_improvement_prompt(
-    issue_key: str, template: str, validation_result: dict
+    issue_key: str, template: str, validation_result: dict, jira_data: str
 ) -> str:
     """Create an improvement prompt based on validation feedback."""
     issues = validation_result.get("issues", [])
@@ -226,15 +304,21 @@ def _create_improvement_prompt(
 
     return f"""Based on the feedback below, please improve the RHOAI feature refinement document for issue {issue_key}.
 
-PREVIOUS ISSUES TO ADDRESS:
-{feedback_text}
+            PREVIOUS ISSUES TO ADDRESS:
+            {feedback_text}
 
-STRENGTHS TO MAINTAIN:
-{', '.join(validation_result.get('strengths', []))}
+            STRENGTHS TO MAINTAIN:
+            {', '.join(validation_result.get('strengths', []))}
 
-{template.replace("{{issue_key}}", issue_key)}
+            Here is the Jira issue data:
 
-Focus on addressing the specific issues mentioned while maintaining the document's strengths. Ensure all content is specific, actionable, and follows the examples provided."""
+            ---
+            {jira_data}
+            ---
+
+            {template.replace("{{issue_key}}", issue_key)}
+
+            Focus on addressing the specific issues mentioned while maintaining the document's strengths. Ensure all content is specific, actionable, and follows the examples provided."""
 
 
 def _basic_fallback_validation(content: str) -> dict:

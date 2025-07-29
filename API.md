@@ -282,6 +282,50 @@ GET /sessions/{session_id}/mcp-usage
 
 Get MCP tool usage statistics for analytics.
 
+### JIRA Metrics
+
+```http
+POST /jira/metrics
+Content-Type: application/json
+
+{
+  "jira_key": "PROJ-123"
+}
+```
+
+Get comprehensive metrics for a JIRA issue and all its children recursively. This endpoint:
+
+- Recursively fetches the specified JIRA issue and all its children (subtasks, child issues, etc.)
+- Only processes issues with resolution status "Done"
+- Calculates story points and completion time metrics per component
+- Returns aggregated totals across all components
+
+**Response Example:**
+```json
+{
+  "components": {
+    "some-component": {
+      "total_story_points": 45,
+      "total_days_to_done": 120.5
+    },
+    "another-component": {
+      "total_story_points": 23,
+      "total_days_to_done": 85.2
+    }
+  },
+  "total_story_points": 68,
+  "total_days_to_done": 120.5,
+  "processed_issues": 15,
+  "done_issues": 12
+}
+```
+
+**Key Metrics:**
+- `total_story_points`: Sum of story points for all "Done" issues
+- `total_days_to_done`: Days from earliest creation date to latest resolution date (only for "Done" issues)
+- `processed_issues`: Total number of issues found recursively
+- `done_issues`: Number of issues with "Done" resolution
+
 ## Processing Stages
 
 The API processes Jira issues through four stages:
