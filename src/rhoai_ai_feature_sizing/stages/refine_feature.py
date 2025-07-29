@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from llama_stack_client import Agent, AgentEventLogger
 from rhoai_ai_feature_sizing.llama_stack_setup import get_llama_stack_client
+from typing import Optional, Dict
 
 
 def _filter_session_id_from_tool_calls(tool_calls):
@@ -48,7 +49,10 @@ def _load_validation_template() -> str:
 
 
 def generate_refinement_with_agent(
-    issue_key: str, template: str, session_id=None
+    issue_key: str,
+    template: str,
+    session_id=None,
+    custom_prompts: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Generate a comprehensive refinement document using the Llama Stack agent.
@@ -104,8 +108,12 @@ def generate_refinement_with_agent(
             f"Fetched Jira issue {issue_key}: {jira_data[:500]}{'...' if len(jira_data) > 500 else ''}"
         )
 
-        # Load validation template
-        validation_template = _load_validation_template()
+        # Load validation template - use custom prompt if available
+        if custom_prompts and "validate_refinement" in custom_prompts:
+            validation_template = custom_prompts["validate_refinement"]
+            logger.info("Using custom validate_refinement prompt")
+        else:
+            validation_template = _load_validation_template()
 
         # Create generation agent
         generation_agent = Agent(

@@ -1,17 +1,24 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Button,
   Masthead,
   MastheadBrand,
+  MastheadContent,
   MastheadLogo,
   MastheadMain,
   Page,
   PageSidebar,
   PageSidebarBody,
   SkipToContent,
+  Toolbar,
+  ToolbarContent,
+  ToolbarItem,
 } from '@patternfly/react-core';
-// import { BarsIcon } from '@patternfly/react-icons';
+import { ChartLineIcon, CogIcon } from '@patternfly/react-icons';
 import SessionSidebar from '../../components/SessionSidebar';
+import PromptSettings from '../../components/PromptSettings';
+import JiraMetrics from '../../components/JiraMetrics';
 import { Session } from '../../types/api';
 
 interface IAppLayout {
@@ -20,6 +27,8 @@ interface IAppLayout {
 
 const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
   const [selectedSession, setSelectedSession] = React.useState<Session | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
+  const [isJiraMetricsOpen, setIsJiraMetricsOpen] = React.useState(false);
   const navigate = useNavigate();
 
   const handleSessionSelect = (session: Session) => {
@@ -78,6 +87,32 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
           </MastheadLogo>
         </MastheadBrand>
       </MastheadMain>
+      <MastheadContent>
+        <Toolbar>
+          <ToolbarContent>
+            <ToolbarItem>
+              <Button
+                variant="plain"
+                icon={<ChartLineIcon />}
+                onClick={() => setIsJiraMetricsOpen(true)}
+                aria-label="JIRA Metrics"
+              >
+                Metrics
+              </Button>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
+                variant="plain"
+                icon={<CogIcon />}
+                onClick={() => setIsSettingsOpen(true)}
+                aria-label="Prompt Settings"
+              >
+                Settings
+              </Button>
+            </ToolbarItem>
+          </ToolbarContent>
+        </Toolbar>
+      </MastheadContent>
     </Masthead>
   );
 
@@ -107,6 +142,8 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
   return (
     <Page mainContainerId={pageId} masthead={masthead} sidebar={Sidebar} skipToContent={PageSkipToContent}>
       {children}
+      <PromptSettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <JiraMetrics isOpen={isJiraMetricsOpen} onClose={() => setIsJiraMetricsOpen(false)} />
     </Page>
   );
 };

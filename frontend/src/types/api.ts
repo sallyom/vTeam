@@ -10,6 +10,7 @@ export type Session = {
 	soft_mode: boolean;
 	status: SessionStatus;
 	current_stage: Stage | null;
+	custom_prompts?: Record<string, string>;
 	error_message: string | null;
 	started_at: string;
 	completed_at: string | null;
@@ -72,4 +73,22 @@ export type SessionListResponse = {
 export type CreateSessionRequest = {
 	jira_key: string;
 	soft_mode: boolean;
+	custom_prompts?: Record<string, string>;
+};
+
+export type ComponentMetrics = {
+	total_story_points: number;
+	total_days_to_done: number;
+};
+
+export type JiraMetricsResponse = {
+	components: Record<string, ComponentMetrics>;
+	total_story_points: number;
+	total_days_to_done: number;
+	processed_issues: number;
+	done_issues: number;
+};
+
+export type JiraMetricsRequest = {
+	jira_key: string;
 }; 

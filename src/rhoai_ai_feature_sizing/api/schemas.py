@@ -3,6 +3,7 @@
 import uuid
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+import json
 
 from pydantic import BaseModel, Field
 from .models import SessionStatus, Stage, MessageRole, MessageStatus
@@ -17,6 +18,16 @@ class CreateSessionRequest(BaseModel):
         True,
         description="If True, only generate structure without creating actual Jira tickets",
     )
+    custom_prompts: Optional[Dict[str, str]] = Field(
+        None,
+        description="Optional custom prompts for stages. Keys should be prompt names (e.g., 'refine_feature', 'draft_jiras')",
+    )
+
+
+class JiraMetricsRequest(BaseModel):
+    """Request to get JIRA metrics for an epic and all its children."""
+
+    jira_key: str = Field(..., description="Jira issue key (e.g., PROJ-123)")
 
 
 # Response schemas
@@ -105,11 +116,44 @@ class SessionResponse(BaseModel):
     status: SessionStatus
     current_stage: Optional[Stage]
     soft_mode: bool
+    custom_prompts: Optional[Dict[str, str]] = Field(
+        None, description="Custom prompts used for this session"
+    )
     created_at: datetime
     updated_at: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
     error_message: Optional[str]
+
+    @classmethod
+    def from_model(cls, session):
+        """Create response from model, handling JSON deserialization of custom_prompts."""
+        custom_prompts = None
+        if session.custom_prompts:
+            try:
+                # Handle both string (JSON) and dict cases
+                if isinstance(session.custom_prompts, str):
+                    custom_prompts = json.loads(session.custom_prompts)
+                elif isinstance(session.custom_prompts, dict):
+                    custom_prompts = session.custom_prompts
+                else:
+                    custom_prompts = None
+            except json.JSONDecodeError:
+                custom_prompts = None
+
+        return cls(
+            id=session.id,
+            jira_key=session.jira_key,
+            status=session.status,
+            current_stage=session.current_stage,
+            soft_mode=session.soft_mode,
+            custom_prompts=custom_prompts,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            started_at=session.started_at,
+            completed_at=session.completed_at,
+            error_message=session.error_message,
+        )
 
     class Config:
         from_attributes = True
@@ -163,3 +207,30 @@ class StageProgressUpdate(BaseModel):
     message: str
     progress_percentage: int = 0
     metadata: Optional[Dict[str, Any]] = None
+
+
+class ComponentMetrics(BaseModel):
+    """Metrics for a specific component."""
+
+    total_story_points: int = Field(
+        0, description="Total story points for the component"
+    )
+    total_days_to_done: float = Field(
+        0.0, description="Total days from earliest start to latest resolution"
+    )
+
+
+class JiraMetricsResponse(BaseModel):
+    """Response containing JIRA metrics by component and overall totals."""
+
+    components: Dict[str, ComponentMetrics] = Field(
+        default_factory=dict, description="Metrics grouped by component name"
+    )
+    total_story_points: int = Field(
+        0, description="Total story points across all components"
+    )
+    total_days_to_done: float = Field(
+        0.0, description="Total days from earliest start to latest resolution"
+    )
+    processed_issues: int = Field(0, description="Number of issues processed")
+    done_issues: int = Field(0, description="Number of issues with resolution 'Done'")

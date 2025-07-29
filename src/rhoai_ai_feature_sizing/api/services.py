@@ -88,7 +88,12 @@ class SessionService:
         finally:
             db_session.close()
 
-    def create_session(self, jira_key: str, soft_mode: bool = False) -> uuid.UUID:
+    def create_session(
+        self,
+        jira_key: str,
+        soft_mode: bool = False,
+        custom_prompts: Optional[Dict[str, str]] = None,
+    ) -> uuid.UUID:
         """Create a new processing session."""
         session_id = uuid.uuid4()
 
@@ -97,6 +102,7 @@ class SessionService:
                 id=session_id,
                 jira_key=jira_key,
                 soft_mode=soft_mode,
+                custom_prompts=json.dumps(custom_prompts) if custom_prompts else None,
                 status=SessionStatus.PENDING,
                 started_at=datetime.now(),
                 created_at=datetime.now(),
@@ -111,7 +117,7 @@ class SessionService:
         """Get a session by ID."""
         with self.get_db_session() as db_session:
             session = db_session.query(Session).filter(Session.id == session_id).first()
-            return SessionResponse.model_validate(session) if session else None
+            return SessionResponse.from_model(session) if session else None
 
     def get_sessions(
         self, page: int = 1, page_size: int = 20
@@ -127,7 +133,7 @@ class SessionService:
             sessions = query.offset((page - 1) * page_size).limit(page_size).all()
 
             # Convert to Pydantic models while still in database session
-            session_responses = [SessionResponse.model_validate(s) for s in sessions]
+            session_responses = [SessionResponse.from_model(s) for s in sessions]
 
             return session_responses, total
 
@@ -464,10 +470,37 @@ class SessionService:
             MessageStatus.LOADING,
         )
 
-        # Load template
-        template_path = Path(__file__).parent.parent / "prompts" / "refine_feature.md"
-        with open(template_path, "r", encoding="utf-8") as f:
-            template = f.read()
+        # Get session to check for custom prompts
+        session = self.get_session(session_id)
+        custom_prompts = None
+        if session and session.custom_prompts:
+            try:
+                # Handle both string (JSON) and dict cases
+                if isinstance(session.custom_prompts, str):
+                    custom_prompts = json.loads(session.custom_prompts)
+                elif isinstance(session.custom_prompts, dict):
+                    custom_prompts = session.custom_prompts
+                else:
+                    self.logger.warning(
+                        f"Unexpected custom_prompts type for session {session_id}: {type(session.custom_prompts)}"
+                    )
+            except json.JSONDecodeError:
+                self.logger.warning(
+                    f"Failed to parse custom prompts for session {session_id}"
+                )
+
+        # Load template - use custom prompt if available
+        if custom_prompts and "refine_feature" in custom_prompts:
+            template = custom_prompts["refine_feature"]
+            self.logger.info(
+                f"Using custom refine_feature prompt for session {session_id}"
+            )
+        else:
+            template_path = (
+                Path(__file__).parent.parent / "prompts" / "refine_feature.md"
+            )
+            with open(template_path, "r", encoding="utf-8") as f:
+                template = f.read()
 
         start_time = time.time()
 
@@ -485,6 +518,7 @@ class SessionService:
                 jira_key,
                 template,
                 session_id,
+                custom_prompts,
             )
 
             # Save output
@@ -552,6 +586,25 @@ class SessionService:
         with open(temp_file, "w", encoding="utf-8") as f:
             f.write(refined_output.content)
 
+        # Get session to check for custom prompts
+        session = self.get_session(session_id)
+        custom_prompts = None
+        if session and session.custom_prompts:
+            try:
+                # Handle both string (JSON) and dict cases
+                if isinstance(session.custom_prompts, str):
+                    custom_prompts = json.loads(session.custom_prompts)
+                elif isinstance(session.custom_prompts, dict):
+                    custom_prompts = session.custom_prompts
+                else:
+                    self.logger.warning(
+                        f"Unexpected custom_prompts type for session {session_id}: {type(session.custom_prompts)}"
+                    )
+            except json.JSONDecodeError:
+                self.logger.warning(
+                    f"Failed to parse custom prompts for session {session_id}"
+                )
+
         start_time = time.time()
 
         # Set up custom logging handler
@@ -563,7 +616,11 @@ class SessionService:
             # Generate jiras using thread pool to avoid blocking
             loop = asyncio.get_event_loop()
             jira_content = await loop.run_in_executor(
-                self.executor, draft_jiras_from_file, temp_file, soft_mode
+                self.executor,
+                draft_jiras_from_file,
+                temp_file,
+                soft_mode,
+                custom_prompts,
             )
 
             # Save output
@@ -601,6 +658,364 @@ class SessionService:
             "📊 Estimation stage is not yet implemented. Completing session...",
             Stage.ESTIMATE,
         )
+
+    def get_jira_metrics(self, jira_key: str) -> Dict:
+        """
+        Recursively fetch JIRA issue and all children, calculate metrics for Done issues.
+
+        Args:
+            jira_key: The root JIRA issue key
+
+        Returns:
+            Dict containing component metrics and totals
+        """
+        from ..llama_stack_setup import get_llama_stack_client
+        from datetime import datetime
+        import json
+        import re
+
+        logger = self.logger
+        logger.info(f"Starting JIRA metrics calculation for {jira_key}")
+
+        try:
+            client = get_llama_stack_client()
+
+            # Data structures to store results
+            all_issues = {}  # key -> issue_data
+            components = (
+                {}
+            )  # component_name -> {issues: [], total_story_points: 0, dates: []}
+
+            def fetch_issue_recursive(issue_key: str, visited: set = None):
+                """Recursively fetch issue and all its children."""
+                if visited is None:
+                    visited = set()
+
+                if issue_key in visited:
+                    logger.warning(
+                        f"Circular reference detected for {issue_key}, skipping"
+                    )
+                    return
+
+                visited.add(issue_key)
+                logger.info(f"Fetching issue: {issue_key}")
+
+                try:
+                    # Fetch issue data using MCP tool, requesting specific fields for efficiency
+                    response = client.tool_runtime.invoke_tool(
+                        tool_name="jira_get_issue",
+                        kwargs={
+                            "issue_key": issue_key,
+                            "fields": "summary,status,resolution,components,customfield_12310243,created,resolutiondate",
+                        },
+                    )
+
+                    if response.error_message:
+                        logger.error(
+                            f"Failed to fetch {issue_key}: {response.error_message}"
+                        )
+                        return
+
+                    # Extract issue data
+                    content = response.content
+                    if isinstance(content, list):
+                        if not content:
+                            logger.warning(f"Empty response for {issue_key}")
+                            return
+                        content = content[0]
+
+                    issue_text = getattr(content, "text", None)
+                    if not issue_text:
+                        logger.warning(f"No text content for {issue_key}")
+                        return
+
+                    # Parse the issue data - MCP tool returns structured text
+                    try:
+                        issue_data = json.loads(issue_text)
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to parse issue_text as JSON for {issue_key}: {e}"
+                        )
+                        return
+
+                    # Normalize the issue data format
+                    normalized_issue = self._normalize_jira_issue(issue_data, issue_key)
+                    all_issues[issue_key] = normalized_issue
+
+                    logger.info(
+                        f"Parsed {issue_key}: resolution={normalized_issue.get('resolution', 'N/A')}, "
+                        f"component={normalized_issue.get('component', 'N/A')}, "
+                        f"story_points={normalized_issue.get('story_points', 0)}"
+                    )
+
+                    # Search for child issues using JQL parent relationship
+                    search_response = client.tool_runtime.invoke_tool(
+                        tool_name="jira_search",
+                        kwargs={
+                            "jql": f'"Parent Link" = {issue_key}',
+                            "fields": "summary,status,resolution,components,customfield_12310243,created,resolutiondate,issuetype",
+                            "limit": 50,
+                            "start_at": 0,
+                            "projects_filter": "",
+                            "expand": "",
+                        },
+                    )
+
+                    if not search_response.error_message:
+                        # Process search results
+                        search_content = search_response.content
+                        if isinstance(search_content, list) and search_content:
+                            search_content = search_content[0]
+
+                        search_text = getattr(search_content, "text", None)
+                        if search_text:
+                            try:
+                                search_data = json.loads(search_text)
+                                child_issues = search_data.get("issues", [])
+
+                                logger.info(
+                                    f"Found {len(child_issues)} child issues for {issue_key}"
+                                )
+
+                                # Recursively process each child issue only if it is a Epic or Feature
+                                for child_issue in child_issues:
+                                    child_key = child_issue.get("key")
+
+                                    issue_type_obj = child_issue.get("issue_type")
+                                    issue_type = (
+                                        issue_type_obj.get("name")
+                                        if isinstance(issue_type_obj, dict)
+                                        and issue_type_obj
+                                        else issue_type_obj
+                                    )
+
+                                    if child_key and child_key not in visited:
+                                        # Normalize and add child issue to our collection
+                                        normalized_child = self._normalize_jira_issue(
+                                            child_issue, child_key
+                                        )
+                                        all_issues[child_key] = normalized_child
+
+                                        # Recursively fetch grandchildren
+                                        if issue_type in [
+                                            "Epic",
+                                            "Feature",
+                                            "Feature Request",
+                                        ]:
+                                            fetch_issue_recursive(
+                                                child_key, visited.copy()
+                                            )
+
+                            except Exception as e:
+                                logger.error(
+                                    f"Failed to parse search results for {issue_key}: {e}"
+                                )
+                    else:
+                        logger.warning(
+                            f"Failed to search for children of {issue_key}: {search_response.error_message}"
+                        )
+
+                except Exception as e:
+                    logger.error(f"Error fetching {issue_key}: {e}")
+
+            # Start recursive fetch from root issue
+            fetch_issue_recursive(jira_key)
+
+            # Process all fetched issues
+            earliest_start = None
+            latest_resolution = None
+            total_story_points = 0
+            processed_count = 0
+            done_count = 0
+
+            for key, issue_data in all_issues.items():
+                processed_count += 1
+
+                # Only process Done issues
+                resolution = issue_data.get("resolution")
+                if resolution != "Done":
+                    print(issue_data.get("story_points"))
+                    continue
+
+                done_count += 1
+                component = issue_data.get("component", "Unknown")
+                story_points = issue_data.get("story_points", 0)
+                created_date = issue_data.get("created")
+                resolved_date = issue_data.get("resolved")
+
+                # Initialize component if not exists
+                if component not in components:
+                    components[component] = {
+                        "total_story_points": 0,
+                        "total_days_to_done": 0.0,
+                        "created_dates": [],
+                        "resolved_dates": [],
+                    }
+
+                # Add story points
+                components[component]["total_story_points"] += story_points
+                total_story_points += story_points
+
+                # Track dates for duration calculation
+                if created_date:
+                    components[component]["created_dates"].append(created_date)
+                    if earliest_start is None or created_date < earliest_start:
+                        earliest_start = created_date
+
+                if resolved_date:
+                    components[component]["resolved_dates"].append(resolved_date)
+                    if latest_resolution is None or resolved_date > latest_resolution:
+                        latest_resolution = resolved_date
+
+            # Calculate total days to done
+            total_days_to_done = 0.0
+            if earliest_start and latest_resolution:
+                total_days_to_done = (
+                    latest_resolution - earliest_start
+                ).total_seconds() / (24 * 3600)
+
+            # Calculate component-level days to done
+            for component, data in components.items():
+                comp_earliest = (
+                    min(data["created_dates"]) if data["created_dates"] else None
+                )
+                comp_latest = (
+                    max(data["resolved_dates"]) if data["resolved_dates"] else None
+                )
+
+                if comp_earliest and comp_latest:
+                    data["total_days_to_done"] = (
+                        comp_latest - comp_earliest
+                    ).total_seconds() / (24 * 3600)
+                else:
+                    data["total_days_to_done"] = 0.0
+
+            # Format response
+            response_components = {}
+            for comp_name, comp_data in components.items():
+                response_components[comp_name] = {
+                    "total_story_points": comp_data["total_story_points"],
+                    "total_days_to_done": round(comp_data["total_days_to_done"], 2),
+                }
+
+            result = {
+                "components": response_components,
+                "total_story_points": total_story_points,
+                "total_days_to_done": round(total_days_to_done, 2),
+                "processed_issues": processed_count,
+                "done_issues": done_count,
+            }
+
+            logger.info(
+                f"JIRA metrics calculation completed for {jira_key}: "
+                f"{done_count}/{processed_count} Done issues, "
+                f"{total_story_points} total story points, "
+                f"{result['total_days_to_done']} days total"
+            )
+
+            return result
+
+        except Exception as e:
+            print(e)
+            logger.error(
+                f"Error calculating JIRA metrics for {jira_key}: {e}", exc_info=True
+            )
+            raise
+
+    def _normalize_jira_issue(self, issue_data: dict, issue_key: str) -> dict:
+        """
+        Normalize JIRA issue data from different sources (get_issue vs search) into consistent format.
+
+        Args:
+            issue_data: Raw JIRA issue data from API
+            issue_key: The JIRA issue key
+
+        Returns:
+            Dict with normalized issue data
+        """
+        from datetime import datetime
+
+        normalized = {
+            "key": issue_key,
+            "resolution": None,
+            "component": "Unknown",
+            "story_points": 0,
+            "created": None,
+            "resolved": None,
+        }
+
+        # Handle fields that might be in different structures
+        fields = issue_data.get("fields", issue_data)
+
+        # Extract resolution from status or resolution field
+        if "resolution" in fields and fields["resolution"]:
+            if isinstance(fields["resolution"], dict):
+                normalized["resolution"] = fields["resolution"].get("name")
+            else:
+                normalized["resolution"] = str(fields["resolution"])
+        elif "status" in fields and fields["status"]:
+            if isinstance(fields["status"], dict):
+                normalized["resolution"] = fields["status"].get("name")
+            else:
+                normalized["resolution"] = str(fields["status"])
+
+        # Extract component
+        if "components" in fields and fields["components"]:
+            if isinstance(fields["components"], list) and fields["components"]:
+                component = fields["components"][0]
+                if isinstance(component, dict):
+                    normalized["component"] = component.get("name", "Unknown")
+                else:
+                    normalized["component"] = str(component)
+        elif "component" in fields and fields["component"]:
+            if isinstance(fields["component"], dict):
+                normalized["component"] = fields["component"].get("name", "Unknown")
+            else:
+                normalized["component"] = str(fields["component"])
+
+        # Extract story points from custom field
+        story_points_field = fields.get("customfield_12310243")
+        points = story_points_field.get("value") if story_points_field else None
+        if points is not None:
+            try:
+                normalized["story_points"] = int(float(points))
+            except (ValueError, TypeError):
+                normalized["story_points"] = 0
+
+        # Also try other common story point field names
+
+        # Extract dates
+        if "created" in fields and fields["created"]:
+            try:
+                # Handle different date formats
+                date_str = str(fields["created"])
+                # Remove timezone info and parse
+                clean_date = date_str.replace("Z", "").split("+")[0].split(".")[0]
+                for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                    try:
+                        normalized["created"] = datetime.strptime(clean_date, fmt)
+                        break
+                    except ValueError:
+                        continue
+            except Exception:
+                pass
+
+        if "resolutiondate" in fields and fields["resolutiondate"]:
+            try:
+                # Handle different date formats
+                date_str = str(fields["resolutiondate"])
+                # Remove timezone info and parse
+                clean_date = date_str.replace("Z", "").split("+")[0].split(".")[0]
+                for fmt in ["%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
+                    try:
+                        normalized["resolved"] = datetime.strptime(clean_date, fmt)
+                        break
+                    except ValueError:
+                        continue
+            except Exception:
+                pass
+
+        return normalized
 
     def delete_session(self, session_id: uuid.UUID) -> bool:
         """Delete a session and all related data.

@@ -59,7 +59,10 @@ docker-compose ps
 
 **OpenShift Production (New):**
 - Uses any OpenAI-compatible API (OpenAI, Mistral, Gemini, Azure OpenAI, vLLM, etc.)
+- **PostgreSQL database** for multi-pod scalability (no SQLite limitations)
+- **Persistent storage** for data reliability
 - No local GPU required
+- Requires building and pushing a custom Docker image
 - See [OpenShift Deployment Guide](OPENSHIFT-DEPLOYMENT.md)
 
 ### Basic Usage
@@ -326,7 +329,10 @@ rhoai-ai-feature-sizing/
 │   ├── main.py             # Core logic
 │   └── stages/             # Processing pipelines
 ├── tests/                  # Test files
-├── docker-compose.yml      # Services configuration
+├── docker-compose.yml      # Local services configuration
+├── Dockerfile              # Custom Docker image for OpenShift
+├── openshift-deployment.yaml # OpenShift deployment configuration
+├── deploy-to-openshift.sh  # OpenShift deployment script
 ├── pyproject.toml          # Python dependencies
 └── README.md
 ```

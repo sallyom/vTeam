@@ -5,6 +5,7 @@ import uuid
 import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict
+from pathlib import Path
 
 from fastapi import (
     FastAPI,
@@ -29,6 +30,9 @@ from .schemas import (
     HealthResponse,
     ProgressResponse,
     SessionListResponse,
+    JiraMetricsRequest,
+    ComponentMetrics,
+    JiraMetricsResponse,
 )
 from .services import SessionService
 from ..llama_stack_setup import get_llama_stack_client
@@ -155,7 +159,9 @@ async def create_session(
     """Create a new processing session and start processing."""
     try:
         # Create session
-        session_id = service.create_session(request.jira_key, request.soft_mode)
+        session_id = service.create_session(
+            request.jira_key, request.soft_mode, request.custom_prompts
+        )
 
         # Start processing in background using asyncio.create_task
         # This ensures proper async handling without blocking the event loop
@@ -163,7 +169,7 @@ async def create_session(
 
         # Return session info
         session = service.get_session(session_id)
-        return SessionResponse.model_validate(session)
+        return session
 
     except Exception as e:
         logging.error(f"Error creating session: {e}")
@@ -383,6 +389,86 @@ async def delete_session(
     except Exception as e:
         logging.error(f"Error deleting session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/prompts", response_model=List[str])
+async def list_available_prompts():
+    """Get list of available prompt names."""
+    try:
+        prompts_dir = Path(__file__).parent.parent / "prompts"
+        prompt_files = [f.stem for f in prompts_dir.glob("*.md")]
+        return sorted(prompt_files)
+    except Exception as e:
+        logging.error(f"Error listing prompts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/prompts/{prompt_name}")
+async def get_prompt_content(prompt_name: str):
+    """Get the content of a specific prompt file."""
+    try:
+        # Validate prompt name to prevent path traversal
+        if not prompt_name.replace("_", "").replace("-", "").isalnum():
+            raise HTTPException(status_code=400, detail="Invalid prompt name")
+
+        prompts_dir = Path(__file__).parent.parent / "prompts"
+        prompt_file = prompts_dir / f"{prompt_name}.md"
+
+        if not prompt_file.exists():
+            raise HTTPException(status_code=404, detail="Prompt not found")
+
+        with open(prompt_file, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        return {
+            "name": prompt_name,
+            "content": content,
+            "file_path": f"src/rhoai_ai_feature_sizing/prompts/{prompt_name}.md",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting prompt {prompt_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/jira/metrics", response_model=JiraMetricsResponse)
+async def get_jira_metrics(
+    request: JiraMetricsRequest,
+    service: SessionService = Depends(get_session_service),
+):
+    """
+    Get comprehensive metrics for a JIRA issue and all its children recursively.
+    Only processes issues with resolution 'Done'.
+    """
+    try:
+        # Run the metrics calculation in a thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, service.get_jira_metrics, request.jira_key
+        )
+
+        # Convert to response model
+        components = {}
+        for comp_name, comp_data in result["components"].items():
+            components[comp_name] = ComponentMetrics(
+                total_story_points=comp_data["total_story_points"],
+                total_days_to_done=comp_data["total_days_to_done"],
+            )
+
+        return JiraMetricsResponse(
+            components=components,
+            total_story_points=result["total_story_points"],
+            total_days_to_done=result["total_days_to_done"],
+            processed_issues=result["processed_issues"],
+            done_issues=result["done_issues"],
+        )
+
+    except Exception as e:
+        logging.error(f"Error getting JIRA metrics for {request.jira_key}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to calculate JIRA metrics: {str(e)}"
+        )
 
 
 @app.websocket("/ws/{session_id}")

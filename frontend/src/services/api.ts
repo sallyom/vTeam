@@ -10,6 +10,8 @@ import {
 	SessionDetail,
 	SessionListResponse,
 	Stage,
+	JiraMetricsRequest,
+	JiraMetricsResponse,
 } from '../types/api';
 
 class ApiService {
@@ -102,6 +104,24 @@ class ApiService {
 	async deleteSession(sessionId: string): Promise<{ message: string }> {
 		const response = await this.api.delete(`/sessions/${sessionId}`);
 		console.log(response);
+		return response.data;
+	}
+
+	// Get list of available prompts
+	async getAvailablePrompts(): Promise<string[]> {
+		const response = await this.api.get('/prompts');
+		return response.data;
+	}
+
+	// Get content of a specific prompt
+	async getPromptContent(promptName: string): Promise<{ name: string; content: string; file_path: string }> {
+		const response = await this.api.get(`/prompts/${promptName}`);
+		return response.data;
+	}
+
+	// JIRA metrics
+	async getJiraMetrics(request: JiraMetricsRequest): Promise<JiraMetricsResponse> {
+		const response = await this.api.post('/jira/metrics', request);
 		return response.data;
 	}
 }

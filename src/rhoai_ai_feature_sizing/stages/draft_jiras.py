@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from llama_stack_client import Agent
 from rhoai_ai_feature_sizing.llama_stack_setup import get_llama_stack_client
+from typing import Optional, Dict
 
 
 INSTRUCTIONS = "You are a senior Agile coach and technical lead expert at breaking down RHOAI features into implementable Jira tickets. Follow the provided template and examples precisely."
@@ -32,7 +33,9 @@ def _load_draft_template() -> str:
 
 
 def generate_jira_structure_with_agent(
-    input_content: str, soft_mode: bool = True
+    input_content: str,
+    soft_mode: bool = True,
+    custom_prompts: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Generate a comprehensive Jira tickets structure using the Llama Stack agent.
@@ -41,6 +44,7 @@ def generate_jira_structure_with_agent(
     Args:
         input_content: The content from refined or epics document
         soft_mode: If True, only generate ticket structure without creating actual Jira tickets
+        custom_prompts: Optional custom prompts dictionary
     """
     logger = logging.getLogger("draft_jiras")
     INFERENCE_MODEL = os.getenv("INFERENCE_MODEL")
@@ -56,9 +60,18 @@ def generate_jira_structure_with_agent(
     try:
         client = get_llama_stack_client()
 
-        # Load templates
-        draft_template = _load_draft_template()
-        validation_template = _load_validation_template()
+        # Load templates - use custom prompts if available
+        if custom_prompts and "draft_jiras" in custom_prompts:
+            draft_template = custom_prompts["draft_jiras"]
+            logger.info("Using custom draft_jiras prompt")
+        else:
+            draft_template = _load_draft_template()
+
+        if custom_prompts and "validate_jira_draft" in custom_prompts:
+            validation_template = custom_prompts["validate_jira_draft"]
+            logger.info("Using custom validate_jira_draft prompt")
+        else:
+            validation_template = _load_validation_template()
 
         # Create generation agent
         generation_agent = Agent(
@@ -349,13 +362,18 @@ def _basic_fallback_validation(content: str) -> dict:
     }
 
 
-def draft_jiras_from_file(input_file: Path, soft_mode: bool = True) -> str:
+def draft_jiras_from_file(
+    input_file: Path,
+    soft_mode: bool = True,
+    custom_prompts: Optional[Dict[str, str]] = None,
+) -> str:
     """
     Generate Jira tickets structure from an input file.
 
     Args:
         input_file: Path to the input file (refined or epics document)
         soft_mode: If True, only generate ticket structure without creating actual Jira tickets
+        custom_prompts: Optional custom prompts dictionary
 
     Returns:
         Generated Jira tickets structure content
@@ -375,4 +393,4 @@ def draft_jiras_from_file(input_file: Path, soft_mode: bool = True) -> str:
     if not input_content.strip():
         raise ValueError("Input file is empty")
 
-    return generate_jira_structure_with_agent(input_content, soft_mode)
+    return generate_jira_structure_with_agent(input_content, soft_mode, custom_prompts)

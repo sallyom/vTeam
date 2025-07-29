@@ -1,23 +1,63 @@
-# Deploying LLAMA Stack to OpenShift with External Model Providers
+# Deploying RHOAI AI Feature Sizing with Frontend to OpenShift
 
-This guide shows you how to deploy LLAMA Stack to OpenShift using external model providers instead of hosting your own GPU-based models.
+This guide shows you how to deploy the complete RHOAI AI Feature Sizing application to OpenShift, including both the React frontend and Python backend with external model providers.
 
 ## 🎯 Overview
 
-Instead of using Ollama locally, this deployment connects to external model providers like:
+This deployment provides a **scalable, production-ready** setup with:
+
+### **Complete Web Application**
+- **React Frontend** with PatternFly UI components for JIRA session management
+- **Interactive Chat Panel** for real-time session monitoring
+- **Session Management** with create, view, delete functionality  
+- **Custom Prompt Configuration** via web interface
+- **nginx Proxy** serving frontend and routing API requests
+
+### **External Model Providers**
+Instead of using Ollama locally, connects to external providers like:
 - **OpenAI** (GPT-4o, GPT-4o-mini)
 - **Azure OpenAI** (Your deployed models)
 - **External vLLM services** (Hosted elsewhere)
 - **HuggingFace TGI endpoints** (Hosted services)
 - **Custom APIs** (Mistral, Gemini, Claude, RHOAI models, etc.)
 
+### **Production Database**
+- **PostgreSQL 15** with persistent storage for scalability
+- **Multi-pod capable** (no SQLite limitations)
+- **Automatic database initialization** and schema management
+- **Secure credential management** via Kubernetes secrets
+
+## 🏗️ Architecture Overview
+
+The deployment creates a complete web application with the following architecture:
+
+```
+📱 User Browser → 🌐 OpenShift Route → nginx (Port 80) → {
+                                                          📄 Static Files (React App)
+                                                          🔀 /api/* → Python API (Port 8000)
+                                                        }
+                                                                    ↓
+                                        🐍 Python API → 🦙 LLAMA Stack → 🤖 External LLM
+                                             ↓                ↓
+                                        🗄️ PostgreSQL ← 📋 Jira MCP
+```
+
+**Components:**
+- **nginx**: Serves React frontend and proxies API requests
+- **React Frontend**: PatternFly-based UI for session management  
+- **Python API**: FastAPI backend for session processing
+- **LLAMA Stack**: AI orchestration layer
+- **PostgreSQL**: Persistent session storage
+- **Jira MCP**: Jira integration service
+
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-1. OpenShift cluster access with `oc` CLI configured
-2. Appropriate permissions to create namespaces, deployments, secrets, and routes
-3. API credentials for your chosen provider:
+1. **OpenShift cluster access** with `oc` CLI configured
+2. **Docker** and access to a **container registry** (e.g., Quay.io, Docker Hub, OpenShift internal registry)
+3. **Appropriate permissions** to create namespaces, deployments, secrets, and routes
+4. **API credentials** for your chosen provider:
    - **OpenAI**: API key from https://platform.openai.com/api-keys
    - **Azure OpenAI**: API key, endpoint, and deployment names
    - **vLLM**: URL of your hosted vLLM service
@@ -32,7 +72,27 @@ cd rhoai-ai-feature-sizing
 chmod +x deploy-to-openshift.sh
 ```
 
-### 2. Deploy to OpenShift
+### 2. Build and Push Custom Docker Image
+
+The RHOAI AI Feature Sizing application requires a custom Docker image that includes both the React frontend and Python backend:
+
+```bash
+# Build and push to your container registry (replace with your registry URL)
+docker build -t quay.io/yourusername/rhoai-ai-feature-sizing:latest .
+docker push quay.io/yourusername/rhoai-ai-feature-sizing:latest
+```
+
+**The Dockerfile creates a multi-stage build that:**
+- **Stage 1**: Builds the React frontend using Node.js and webpack
+- **Stage 2**: Sets up Python backend, nginx, and combines everything
+
+**Important**: Update `openshift-deployment.yaml` with your actual image URL:
+```yaml
+# Replace this line in the rhoai-ai-feature-sizing deployment:
+image: quay.io/yourusername/rhoai-ai-feature-sizing:latest
+```
+
+### 3. Deploy to OpenShift
 
 Run the deployment script:
 
@@ -51,7 +111,8 @@ The script will:
 - Create the `llama-stack` namespace
 - Prompt you for API details and credentials
 - Deploy LLAMA Stack configured for your API
-- Deploy the Jira MCP service  
+- Deploy the Jira MCP service
+- **Deploy PostgreSQL database** for scalable data storage
 - Create routes for external access
 
 ### 3. Update Your Environment
@@ -66,10 +127,16 @@ cp env.openshift.example .env
 ### 4. Test Your Deployment
 
 ```bash
-# Test the health endpoint
+# Open the web interface in your browser
+open http://your-app-route-url
+
+# Test the API health endpoint
+curl http://your-app-route-url/health
+
+# Test the LLAMA Stack endpoint  
 curl http://your-llama-stack-route-url/v1/health
 
-# Test with your existing CLI
+# Test with your existing CLI (update API URL in .env)
 uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
 ```
 
@@ -77,12 +144,27 @@ uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
 
 If you prefer manual deployment or need to customize the configuration:
 
-### 1. Create Namespace
+### 1. Build and Push Custom Image
+
+First, build and push the custom Docker image that includes both frontend and backend:
+
+```bash
+# Build the multi-stage image (frontend + backend)
+docker build -t quay.io/yourusername/rhoai-ai-feature-sizing:latest .
+
+# Push to registry
+docker push quay.io/yourusername/rhoai-ai-feature-sizing:latest
+
+# Update openshift-deployment.yaml with your image URL
+sed -i 's|quay.io/yourusername/rhoai-ai-feature-sizing:latest|your-registry/your-image:tag|g' openshift-deployment.yaml
+```
+
+### 2. Create Namespace
 ```bash
 oc create namespace llama-stack
 ```
 
-### 2. Create Secrets
+### 3. Create Secrets
 
 ```bash
 # Create API secrets
@@ -101,11 +183,29 @@ oc create secret generic jira-secrets \
   -n llama-stack
 ```
 
-### 3. Deploy Configuration
+### 4. Deploy Configuration
 
 ```bash
 oc apply -f openshift-deployment.yaml
 ```
+
+## 🗄️ Database Architecture
+
+The deployment includes a **PostgreSQL database** for scalability and production readiness:
+
+- **PostgreSQL 15** container with persistent storage (5GB)
+- **Dedicated secrets** for database credentials
+- **Health checks** with readiness and liveness probes
+- **Resource limits** for stable operation
+- **Cluster-internal service** for secure database access
+
+### Database Connection
+- **Internal URL**: `postgresql-service.llama-stack.svc.cluster.local:5432`
+- **Database**: `rhoai_sessions`
+- **Credentials**: Stored in `database-secrets` secret
+- **Persistence**: 5GB PersistentVolumeClaim
+
+This replaces SQLite for multi-pod scalability and data persistence.
 
 ## 📊 Supported APIs
 
@@ -303,6 +403,44 @@ volumes:
 Refer to external guides like:
 - [OpenShift AI vLLM examples](https://github.com/rh-aiservices-bu/llm-on-openshift)
 - [Community vLLM deployments](https://github.com/rcarrat-AI/hftgi-llms)
+
+## 🔍 Troubleshooting
+
+### Database Issues
+```bash
+# Check PostgreSQL pod status
+oc get pods -n llama-stack -l app=postgresql
+
+# View PostgreSQL logs
+oc logs -n llama-stack deployment/postgresql
+
+# Test database connectivity from API pod
+oc exec -n llama-stack deployment/rhoai-ai-feature-sizing-api -- python -c "
+import os
+from sqlalchemy import create_engine
+url = os.getenv('DATABASE_URL')
+engine = create_engine(url)
+with engine.connect() as conn:
+    result = conn.execute('SELECT version()')
+    print('Database connected:', result.fetchone()[0])
+"
+```
+
+### API Health Check
+```bash
+# Check API health (includes database status)
+ROUTE_URL=$(oc get route rhoai-ai-feature-sizing-api-route -n llama-stack -o jsonpath='{.spec.host}')
+curl http://$ROUTE_URL/health
+```
+
+### Scaling Issues
+```bash
+# Scale API pods (PostgreSQL supports multiple connections)
+oc scale deployment/rhoai-ai-feature-sizing-api --replicas=3 -n llama-stack
+
+# Check all pods are ready
+oc get pods -n llama-stack -l app=rhoai-ai-feature-sizing-api
+```
 
 ## 🐛 Getting Help
 

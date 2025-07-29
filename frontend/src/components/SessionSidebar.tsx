@@ -26,6 +26,7 @@ import {
 import { CubeIcon, PlusIcon, TrashIcon } from '@patternfly/react-icons';
 import { CreateSessionRequest, Session, SessionStatus } from '../types/api';
 import { apiService } from '../services/api';
+import { loadCustomPrompts } from '../services/localStorage';
 
 type SessionSidebarProps = {
   selectedSession: Session | null;
@@ -60,7 +61,6 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
     const [totalSessions, setTotalSessions] = useState(0);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [jiraKey, setJiraKey] = useState('');
-    const [softMode, setSoftMode] = useState(true);
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
 
@@ -99,9 +99,15 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
         setCreating(true);
         setCreateError(null);
 
+        // Load custom prompts from localStorage
+        const customPrompts = loadCustomPrompts();
+        const hasCustomPrompts = Object.keys(customPrompts).length > 0;
+
         const request: CreateSessionRequest = {
           jira_key: jiraKey.trim(),
-          soft_mode: softMode,
+          soft_mode: true,
+          // Only include custom_prompts if there are any custom prompts
+          ...(hasCustomPrompts && { custom_prompts: customPrompts }),
         };
 
         const newSession = await apiService.createSession(request);
@@ -111,7 +117,6 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
 
         // Clear form and close modal
         setJiraKey('');
-        setSoftMode(false);
         setShowCreateModal(false);
 
         // Select the new session
@@ -121,7 +126,7 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
       } finally {
         setCreating(false);
       }
-    }, [jiraKey, softMode, onSessionSelect]);
+    }, [jiraKey, onSessionSelect]);
 
     const handleDeleteSession = useCallback(
       async (sessionId: string, event: React.MouseEvent) => {
@@ -347,8 +352,7 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
                   label="Soft Mode"
                   isDisabled
                   description="Soft mode will block any jira creation requests. This is useful for testing the system without creating actual jira tickets."
-                  isChecked={softMode}
-                  onChange={(_event, checked) => setSoftMode(checked)}
+                  isChecked={true}
                 />
               </FlexItem>
             </Flex>
