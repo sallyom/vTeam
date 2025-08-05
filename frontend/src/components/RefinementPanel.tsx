@@ -12,7 +12,7 @@ import {
   ToolbarItem,
 } from '@patternfly/react-core';
 import { DownloadIcon, FileIcon } from '@patternfly/react-icons';
-import { Session, Output } from '../types/api';
+import { Output, Session } from '../types/api';
 import { apiService } from '../services/api';
 
 type RefinementPanelProps = {
@@ -193,18 +193,12 @@ const RefinementPanel: React.FunctionComponent<RefinementPanelProps> = ({ sessio
   }
 
   return (
-    <PageSection>
-      <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsLg' }}>
+    <>
+      <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsSm' }}>
         {/* Header with actions */}
         <FlexItem>
           <Toolbar>
             <ToolbarContent>
-              <ToolbarItem>
-                <Title headingLevel="h2" size="lg">
-                  Refinement Document
-                </Title>
-              </ToolbarItem>
-              <ToolbarItem variant="separator" />
               <ToolbarItem>
                 <span style={{ color: 'var(--pf-global--Color--200)', fontSize: '0.875rem' }}>
                   Generated: {new Date(refinementOutput.created_at).toLocaleString()}
@@ -224,7 +218,6 @@ const RefinementPanel: React.FunctionComponent<RefinementPanelProps> = ({ sessio
           <div
             style={{
               backgroundColor: 'var(--pf-global--BackgroundColor--100)',
-              padding: '2rem',
               borderRadius: '8px',
               border: '1px solid var(--pf-global--BorderColor--100)',
               maxHeight: '70vh',
@@ -237,7 +230,7 @@ const RefinementPanel: React.FunctionComponent<RefinementPanelProps> = ({ sessio
           </div>
         </FlexItem>
       </Flex>
-    </PageSection>
+    </>
   );
 };
 

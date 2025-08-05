@@ -320,6 +320,46 @@ class SessionService:
             f"Added output {filename} to session {session_id} for stage {stage}"
         )
 
+    def update_output(
+        self, session_id: uuid.UUID, stage: Stage, filename: str, content: str
+    ) -> bool:
+        """Update an existing output file or create it if it doesn't exist."""
+        with self.get_db_session() as db_session:
+            # Try to find existing output
+            existing_output = (
+                db_session.query(Output)
+                .filter(
+                    Output.session_id == session_id,
+                    Output.stage == stage,
+                    Output.filename == filename,
+                )
+                .first()
+            )
+
+            if existing_output:
+                # Update existing output
+                existing_output.content = content
+                existing_output.created_at = datetime.now()  # Update timestamp
+                self.logger.info(
+                    f"Updated output {filename} for session {session_id} stage {stage}"
+                )
+                return True
+            else:
+                # Create new output if it doesn't exist
+                output = Output(
+                    id=uuid.uuid4(),
+                    session_id=session_id,
+                    stage=stage,
+                    filename=filename,
+                    content=content,
+                    created_at=datetime.now(),
+                )
+                db_session.add(output)
+                self.logger.info(
+                    f"Created new output {filename} for session {session_id} stage {stage}"
+                )
+                return False  # False means it was created, not updated
+
     def get_session_outputs(
         self, session_id: uuid.UUID, stage: Optional[Stage] = None
     ) -> List[OutputResponse]:

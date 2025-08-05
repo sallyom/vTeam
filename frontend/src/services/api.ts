@@ -4,6 +4,8 @@ import {
 	BackgroundTaskInfo,
 	BulkIngestionTaskRequest,
 	BulkIngestionTaskResponse,
+	ChatMessageRequest,
+	ChatMessageResponse,
 	ChunkBrowseRequest,
 	ChunkBrowseResponse,
 	CreateSessionRequest,
@@ -103,6 +105,11 @@ class ApiService {
 		const response = await this.api.get(`/sessions/${sessionId}/messages`, {
 			params: { limit, stage }
 		});
+		return response.data;
+	}
+
+	async sendChatMessage(sessionId: string, request: ChatMessageRequest): Promise<ChatMessageResponse> {
+		const response = await this.api.post(`/sessions/${sessionId}/chat`, request);
 		return response.data;
 	}
 

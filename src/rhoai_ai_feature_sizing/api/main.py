@@ -1,5 +1,6 @@
 """FastAPI application for RHOAI AI Feature Sizing."""
 
+import json
 import logging
 import uuid
 import asyncio
@@ -21,6 +22,7 @@ from contextlib import asynccontextmanager
 
 from .models import (
     init_database,
+    MessageRole,
     SessionStatus,
     Stage,
     Document,
@@ -31,6 +33,8 @@ from .models import (
 from .schemas import (
     ChunkBrowseRequest,
     ChunkBrowseResponse,
+    ChatMessageRequest,
+    ChatMessageResponse,
     ComponentMetrics,
     CreateSessionRequest,
     DocumentIngestionRequest,
@@ -364,6 +368,112 @@ async def get_session_messages(
         raise
     except Exception as e:
         logging.error(f"Error getting messages for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/sessions/{session_id}/chat", response_model=ChatMessageResponse)
+async def send_chat_message(
+    session_id: uuid.UUID,
+    request: ChatMessageRequest,
+    service: SessionService = Depends(get_session_service),
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Send a chat message to the session and get an interactive response."""
+    try:
+        session = service.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Import interactive agent
+        from ..stages.interactive_chat_agent import InteractiveChatAgent
+
+        # Create interactive agent
+        chat_agent = InteractiveChatAgent(rag_service=rag_service)
+
+        # Add user message to session
+        user_message_id = service.add_message(
+            session_id,
+            MessageRole.USER,
+            request.message,
+            Stage.REFINE,  # Default stage, could be dynamic based on context
+        )
+
+        # Build session context for the agent
+        session_context = {
+            "jira_key": session.jira_key,
+            "status": session.status.value,
+            "soft_mode": session.soft_mode,
+            "outputs": [
+                {
+                    "stage": output.stage.value,
+                    "filename": output.filename,
+                    "content": output.content,
+                    "created_at": output.created_at.isoformat(),
+                }
+                for output in service.get_session_outputs(session_id)
+            ],
+        }
+
+        # Parse custom prompts and vector DB IDs from session
+        custom_prompts = None
+        vector_db_ids = None
+
+        if session.custom_prompts:
+            try:
+                custom_prompts = (
+                    json.loads(session.custom_prompts)
+                    if isinstance(session.custom_prompts, str)
+                    else session.custom_prompts
+                )
+            except json.JSONDecodeError:
+                logging.warning(
+                    f"Failed to parse custom prompts for session {session_id}"
+                )
+
+        if session.vector_db_ids:
+            try:
+                vector_db_ids = (
+                    json.loads(session.vector_db_ids)
+                    if isinstance(session.vector_db_ids, str)
+                    else session.vector_db_ids
+                )
+            except json.JSONDecodeError:
+                logging.warning(
+                    f"Failed to parse vector DB IDs for session {session_id}"
+                )
+
+        # Process chat message
+        response_content, actions_taken, updated_outputs = (
+            await chat_agent.process_chat_message(
+                session_id=str(session_id),
+                user_message=request.message,
+                session_context=session_context,
+                session_service=service,
+                vector_db_ids=vector_db_ids,
+                custom_prompts=custom_prompts,
+            )
+        )
+
+        # Add agent response to session
+        agent_message_id = service.add_message(
+            session_id,
+            MessageRole.AGENT,
+            response_content,
+            Stage.REFINE,  # Default stage, could be dynamic
+        )
+
+        return ChatMessageResponse(
+            message_id=str(user_message_id),
+            response_id=str(agent_message_id),
+            response_content=response_content,
+            actions_taken=actions_taken,
+            updated_outputs=updated_outputs,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error processing chat message for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -219,13 +219,12 @@ Please provide a comprehensive answer based on the context provided above."""
             response = agent.create_turn(
                 messages=[{"role": "user", "content": user_message}],
                 session_id=agent_session_id,
+                stream=False,
             )
 
             # Extract response content
-            if hasattr(response, "content"):
-                return response.content
-            elif hasattr(response, "messages") and response.messages:
-                return response.messages[-1].get("content", "No response generated")
+            if hasattr(response, "output_message") and response.output_message:
+                return response.output_message.content
             else:
                 return "No response generated"
 

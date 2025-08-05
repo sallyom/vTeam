@@ -603,3 +603,29 @@ class StoryListResponse(BaseModel):
 
     stories: List[StoryResponse]
     total: int
+
+
+# Chat-related schemas
+class ChatMessageRequest(BaseModel):
+    """Request to send a chat message."""
+
+    message: str = Field(..., description="The chat message content")
+    context_type: Optional[str] = Field(
+        None,
+        description="Optional context type hint for the agent (e.g., 'refinement', 'jiras', 'general')",
+    )
+
+
+class ChatMessageResponse(BaseModel):
+    """Response from sending a chat message."""
+
+    message_id: str = Field(..., description="ID of the user's message")
+    response_id: str = Field(..., description="ID of the agent's response")
+    response_content: str = Field(..., description="The agent's response")
+    actions_taken: Optional[List[str]] = Field(
+        default_factory=list,
+        description="List of actions taken by the agent (e.g., ['updated_refinement', 'updated_jiras'])",
+    )
+    updated_outputs: Optional[List[str]] = Field(
+        default_factory=list, description="List of output filenames that were updated"
+    )

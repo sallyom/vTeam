@@ -1,22 +1,8 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import {
-  Alert,
-  Badge,
-  Button,
-  Flex,
-  FlexItem,
-  Label,
-  Modal,
-  ModalVariant,
-  PageSection,
-  Progress,
-  Spinner,
-  Title,
-  Tooltip,
-} from '@patternfly/react-core';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, Badge, Button, Flex, FlexItem, Label, Progress, Spinner, Title, Tooltip } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
-import { ExclamationTriangleIcon, ClockIcon, ListIcon } from '@patternfly/react-icons';
-import { Epic, Session, Story } from '../types/api';
+import { ClockIcon, ExclamationTriangleIcon, ListIcon } from '@patternfly/react-icons';
+import { Epic, Session } from '../types/api';
 import { apiService } from '../services/api';
 import StoriesModal from './StoriesModal';
 
@@ -47,19 +33,6 @@ const EpicsPanel: React.FunctionComponent<EpicsPanelProps> = ({ session }) => {
   useEffect(() => {
     loadEpics();
   }, [loadEpics]);
-
-  const getStatusVariant = (status: string) => {
-    switch (status) {
-      case 'done':
-        return 'success';
-      case 'in-progress':
-        return 'warning';
-      case 'cancelled':
-        return 'danger';
-      default:
-        return 'info';
-    }
-  };
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -127,50 +100,44 @@ const EpicsPanel: React.FunctionComponent<EpicsPanelProps> = ({ session }) => {
 
   if (loading) {
     return (
-      <PageSection>
-        <Flex justifyContent={{ default: 'justifyContentCenter' }}>
-          <Spinner size="lg" />
-        </Flex>
-      </PageSection>
+      <Flex justifyContent={{ default: 'justifyContentCenter' }}>
+        <Spinner size="lg" />
+      </Flex>
     );
   }
 
   if (error) {
     return (
-      <PageSection>
-        <Alert variant="danger" title="Error loading epics">
-          {error}
-        </Alert>
-      </PageSection>
+      <Alert variant="danger" title="Error loading epics">
+        {error}
+      </Alert>
     );
   }
 
   if (epics.length === 0) {
     return (
-      <PageSection>
-        <Flex
-          direction={{ default: 'column' }}
-          alignItems={{ default: 'alignItemsCenter' }}
-          spaceItems={{ default: 'spaceItemsLg' }}
-        >
-          <FlexItem>
-            <ListIcon size={48} color="var(--pf-global--Color--200)" />
-          </FlexItem>
-          <FlexItem>
-            <div>
-              <Title headingLevel="h3" size="md">
-                No epics found
-              </Title>
-              <p>Epics will appear here after the JIRA drafting stage completes.</p>
-            </div>
-          </FlexItem>
-        </Flex>
-      </PageSection>
+      <Flex
+        direction={{ default: 'column' }}
+        alignItems={{ default: 'alignItemsCenter' }}
+        spaceItems={{ default: 'spaceItemsLg' }}
+      >
+        <FlexItem>
+          <ListIcon size={48} color="var(--pf-global--Color--200)" />
+        </FlexItem>
+        <FlexItem>
+          <div>
+            <Title headingLevel="h3" size="md">
+              No epics found
+            </Title>
+            <p>Epics will appear here after the JIRA drafting stage completes.</p>
+          </div>
+        </FlexItem>
+      </Flex>
     );
   }
 
   return (
-    <PageSection>
+    <>
       <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsMd' }}>
         <FlexItem>
           <Title headingLevel="h2" size="lg">
@@ -291,7 +258,7 @@ const EpicsPanel: React.FunctionComponent<EpicsPanelProps> = ({ session }) => {
           onStoryUpdate={loadEpics} // Refresh epics when stories are updated
         />
       )}
-    </PageSection>
+    </>
   );
 };
 

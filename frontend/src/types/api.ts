@@ -341,4 +341,18 @@ export type EpicListResponse = {
 export type StoryListResponse = {
 	stories: Story[];
 	total: number;
+};
+
+// Chat message types
+export type ChatMessageRequest = {
+	message: string;
+	context_type?: string;
+};
+
+export type ChatMessageResponse = {
+	message_id: string;
+	response_id: string;
+	response_content: string;
+	actions_taken?: string[];
+	updated_outputs?: string[];
 }; 
