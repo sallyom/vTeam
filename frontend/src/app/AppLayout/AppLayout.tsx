@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Button,
   Masthead,
@@ -15,7 +15,7 @@ import {
   ToolbarContent,
   ToolbarItem,
 } from '@patternfly/react-core';
-import { ChartLineIcon, CogIcon } from '@patternfly/react-icons';
+import { ChartLineIcon, CogIcon, DatabaseIcon } from '@patternfly/react-icons';
 import SessionSidebar from '../../components/SessionSidebar';
 import PromptSettings from '../../components/PromptSettings';
 import JiraMetrics from '../../components/JiraMetrics';
@@ -30,6 +30,7 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
   const [isJiraMetricsOpen, setIsJiraMetricsOpen] = React.useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   const handleSessionSelect = (session: Session) => {
     setSelectedSession(session);
@@ -98,6 +99,15 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
                 aria-label="JIRA Metrics"
               >
                 Metrics
+              </Button>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
+                variant={location.pathname.includes('rag') ? 'control' : 'plain'}
+                icon={<DatabaseIcon />}
+                onClick={() => navigate('/rag')}
+              >
+                RAG
               </Button>
             </ToolbarItem>
             <ToolbarItem>

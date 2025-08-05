@@ -92,7 +92,11 @@ class RAGEnhancedAgent:
         return agent
 
     async def enhance_query_with_rag(
-        self, query: str, vector_db_ids: Optional[List[str]] = None, max_chunks: int = 3
+        self,
+        query: str,
+        vector_db_ids: Optional[List[str]] = None,
+        max_chunks: int = 3,
+        session_id: Optional[str] = None,
     ) -> str:
         """
         Enhance a query with relevant context from RAG.
@@ -117,7 +121,17 @@ class RAGEnhancedAgent:
                 max_chunks=max_chunks,
             )
 
-            rag_response = await self.rag_service.query_rag(rag_request)
+            # Convert session_id string to UUID if provided
+            session_uuid = None
+            if session_id:
+                try:
+                    import uuid
+
+                    session_uuid = uuid.UUID(session_id)
+                except ValueError:
+                    self.logger.warning(f"Invalid session ID format: {session_id}")
+
+            rag_response = await self.rag_service.query_rag(rag_request, session_uuid)
 
             # If we got relevant context, enhance the query
             if rag_response.chunks:

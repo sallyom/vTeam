@@ -128,6 +128,7 @@ async def estimate_feature_with_rag(
             f"Estimate the effort for this feature:\n\n{feature_content}",
             vector_db_ids=vector_db_ids,
             max_chunks=5,
+            session_id=session_id,
         )
 
         # Process with RAG context
@@ -197,6 +198,7 @@ Use your knowledge search to find relevant examples and patterns that inform the
             f"Estimate the effort for these JIRA tickets:\n\n{jira_tickets_content}",
             vector_db_ids=vector_db_ids,
             max_chunks=4,
+            session_id=session_id,
         )
 
         # Process with RAG context

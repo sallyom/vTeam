@@ -1076,27 +1076,82 @@ class RAGService:
         client = self._get_client()
         start_time = time.time()
 
+        # Determine which vector databases to use
+        vector_db_ids_to_use = request.vector_db_ids
+
+        # If session_id is provided, use session-specific vector databases
+        if session_id:
+            try:
+                with self.get_db_session() as db:
+                    from .models import Session
+
+                    session = db.query(Session).filter(Session.id == session_id).first()
+                    if session and session.vector_db_ids:
+                        import json
+
+                        try:
+                            # Parse session vector database IDs
+                            if isinstance(session.vector_db_ids, str):
+                                session_vector_db_ids = json.loads(
+                                    session.vector_db_ids
+                                )
+                            elif isinstance(session.vector_db_ids, list):
+                                session_vector_db_ids = session.vector_db_ids
+                            else:
+                                session_vector_db_ids = []
+
+                            if session_vector_db_ids:
+                                # Convert session vector database internal IDs to actual vector_db_id strings
+                                session_vector_dbs = []
+                                for db_id in session_vector_db_ids:
+                                    # The session stores vector_db_id strings (like "rhoai_docs"), not internal IDs
+                                    session_vector_dbs.append(db_id)
+
+                                # Use session-specific vector databases, overriding request ones
+                                vector_db_ids_to_use = session_vector_dbs
+                                self.logger.info(
+                                    f"Using session-specific vector databases: {vector_db_ids_to_use}"
+                                )
+                            else:
+                                self.logger.info(
+                                    "Session has no vector databases configured, using request vector databases"
+                                )
+                        except json.JSONDecodeError:
+                            self.logger.warning(
+                                "Failed to parse session vector_db_ids, using request vector databases"
+                            )
+                    else:
+                        self.logger.info(
+                            "Session not found or has no vector databases configured, using request vector databases"
+                        )
+            except Exception as e:
+                self.logger.warning(
+                    f"Failed to load session vector databases: {e}, using request vector databases"
+                )
+
         # Log RAG query details
         self.logger.info("=== RAG QUERY START ===")
         self.logger.info(f"Query: '{request.query}'")
-        self.logger.info(f"Vector DBs to search: {request.vector_db_ids}")
+        self.logger.info(f"Vector DBs to search: {vector_db_ids_to_use}")
         self.logger.info(f"Max chunks requested: {request.max_chunks}")
+        if session_id:
+            self.logger.info(f"Session ID: {session_id}")
 
         # Try to get human-readable vector DB names and document counts
         try:
             with self.get_db_session() as db:
                 db_info = []
                 total_docs = 0
-                for db_id in request.vector_db_ids:
+                for db_id in vector_db_ids_to_use:
                     vector_db = (
                         db.query(VectorDatabase)
-                        .filter(VectorDatabase.id == db_id)
+                        .filter(VectorDatabase.vector_db_id == db_id)
                         .first()
                     )
                     if vector_db:
                         doc_count = (
                             db.query(Document)
-                            .filter(Document.vector_db_id == db_id)
+                            .filter(Document.vector_db_id == vector_db.id)
                             .count()
                         )
                         db_info.append(f"{vector_db.name} ({doc_count} docs)")
@@ -1105,7 +1160,7 @@ class RAGService:
                         # Log a few sample document names from this vector DB
                         sample_docs = (
                             db.query(Document)
-                            .filter(Document.vector_db_id == db_id)
+                            .filter(Document.vector_db_id == vector_db.id)
                             .limit(3)
                             .all()
                         )
@@ -1128,7 +1183,7 @@ class RAGService:
         try:
             # Query using Llama Stack RAG tool
             results = client.tool_runtime.rag_tool.query(
-                vector_db_ids=request.vector_db_ids,
+                vector_db_ids=vector_db_ids_to_use,
                 content=request.query,
                 query_config={
                     "max_chunks": request.max_chunks,
@@ -1218,7 +1273,7 @@ class RAGService:
                 rag_query = RAGQuery(
                     session_id=session_id,
                     query_text=request.query,
-                    vector_db_ids=request.vector_db_ids,
+                    vector_db_ids=vector_db_ids_to_use,
                     chunks_retrieved=len(chunks),
                     query_time_ms=query_time_ms,
                     timestamp=datetime.utcnow(),
@@ -1228,7 +1283,7 @@ class RAGService:
             return RAGQueryResponse(
                 chunks=chunks,
                 total_chunks_found=len(chunks),
-                vector_dbs_searched=request.vector_db_ids,
+                vector_dbs_searched=vector_db_ids_to_use,
                 query_time_ms=query_time_ms,
             )
 
@@ -1240,7 +1295,7 @@ class RAGService:
             return RAGQueryResponse(
                 chunks=[],
                 total_chunks_found=0,
-                vector_dbs_searched=request.vector_db_ids,
+                vector_dbs_searched=vector_db_ids_to_use,
                 query_time_ms=query_time_ms,
             )
 

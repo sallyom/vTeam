@@ -104,6 +104,7 @@ class SessionService:
         jira_key: str,
         soft_mode: bool = False,
         custom_prompts: Optional[Dict[str, str]] = None,
+        vector_db_ids: Optional[List[str]] = None,
     ) -> uuid.UUID:
         """Create a new processing session."""
         session_id = uuid.uuid4()
@@ -114,6 +115,7 @@ class SessionService:
                 jira_key=jira_key,
                 soft_mode=soft_mode,
                 custom_prompts=json.dumps(custom_prompts) if custom_prompts else None,
+                vector_db_ids=json.dumps(vector_db_ids) if vector_db_ids else None,
                 status=SessionStatus.PENDING,
                 started_at=datetime.now(),
                 created_at=datetime.now(),
@@ -121,7 +123,10 @@ class SessionService:
             )
             db_session.add(session)
 
-        self.logger.info(f"Created session {session_id} for JIRA key {jira_key}")
+        vector_db_info = f" with vector DBs {vector_db_ids}" if vector_db_ids else ""
+        self.logger.info(
+            f"Created session {session_id} for JIRA key {jira_key}{vector_db_info}"
+        )
         return session_id
 
     def get_session(self, session_id: uuid.UUID) -> Optional[SessionResponse]:
@@ -481,24 +486,50 @@ class SessionService:
             MessageStatus.LOADING,
         )
 
-        # Get session to check for custom prompts
+        # Get session to check for custom prompts and vector database IDs
         session = self.get_session(session_id)
         custom_prompts = None
-        if session and session.custom_prompts:
-            try:
-                # Handle both string (JSON) and dict cases
-                if isinstance(session.custom_prompts, str):
-                    custom_prompts = json.loads(session.custom_prompts)
-                elif isinstance(session.custom_prompts, dict):
-                    custom_prompts = session.custom_prompts
-                else:
+        vector_db_ids = None
+
+        if session:
+            # Handle custom prompts
+            if session.custom_prompts:
+                try:
+                    # Handle both string (JSON) and dict cases
+                    if isinstance(session.custom_prompts, str):
+                        custom_prompts = json.loads(session.custom_prompts)
+                    elif isinstance(session.custom_prompts, dict):
+                        custom_prompts = session.custom_prompts
+                    else:
+                        self.logger.warning(
+                            f"Unexpected custom_prompts type for session {session_id}: {type(session.custom_prompts)}"
+                        )
+                except json.JSONDecodeError:
                     self.logger.warning(
-                        f"Unexpected custom_prompts type for session {session_id}: {type(session.custom_prompts)}"
+                        f"Failed to parse custom prompts for session {session_id}"
                     )
-            except json.JSONDecodeError:
-                self.logger.warning(
-                    f"Failed to parse custom prompts for session {session_id}"
-                )
+
+            # Handle vector database IDs
+            if session.vector_db_ids:
+                try:
+                    # Handle both string (JSON) and list cases
+                    if isinstance(session.vector_db_ids, str):
+                        vector_db_ids = json.loads(session.vector_db_ids)
+                    elif isinstance(session.vector_db_ids, list):
+                        vector_db_ids = session.vector_db_ids
+                    else:
+                        self.logger.warning(
+                            f"Unexpected vector_db_ids type for session {session_id}: {type(session.vector_db_ids)}"
+                        )
+
+                    if vector_db_ids:
+                        self.logger.info(
+                            f"Using session-specific vector databases for refinement: {vector_db_ids}"
+                        )
+                except json.JSONDecodeError:
+                    self.logger.warning(
+                        f"Failed to parse vector database IDs for session {session_id}"
+                    )
 
         # Load template - use custom prompt if available
         if custom_prompts and "refine_feature" in custom_prompts:
@@ -531,7 +562,7 @@ class SessionService:
                 session_id,
                 custom_prompts,
                 True,  # use_rag
-                None,  # vector_db_ids (use default)
+                vector_db_ids,  # session-specific vector database IDs
             )
 
             # Save output
@@ -599,24 +630,50 @@ class SessionService:
         with open(temp_file, "w", encoding="utf-8") as f:
             f.write(refined_output.content)
 
-        # Get session to check for custom prompts
+        # Get session to check for custom prompts and vector database IDs
         session = self.get_session(session_id)
         custom_prompts = None
-        if session and session.custom_prompts:
-            try:
-                # Handle both string (JSON) and dict cases
-                if isinstance(session.custom_prompts, str):
-                    custom_prompts = json.loads(session.custom_prompts)
-                elif isinstance(session.custom_prompts, dict):
-                    custom_prompts = session.custom_prompts
-                else:
+        vector_db_ids = None
+
+        if session:
+            # Handle custom prompts
+            if session.custom_prompts:
+                try:
+                    # Handle both string (JSON) and dict cases
+                    if isinstance(session.custom_prompts, str):
+                        custom_prompts = json.loads(session.custom_prompts)
+                    elif isinstance(session.custom_prompts, dict):
+                        custom_prompts = session.custom_prompts
+                    else:
+                        self.logger.warning(
+                            f"Unexpected custom_prompts type for session {session_id}: {type(session.custom_prompts)}"
+                        )
+                except json.JSONDecodeError:
                     self.logger.warning(
-                        f"Unexpected custom_prompts type for session {session_id}: {type(session.custom_prompts)}"
+                        f"Failed to parse custom prompts for session {session_id}"
                     )
-            except json.JSONDecodeError:
-                self.logger.warning(
-                    f"Failed to parse custom prompts for session {session_id}"
-                )
+
+            # Handle vector database IDs
+            if session.vector_db_ids:
+                try:
+                    # Handle both string (JSON) and list cases
+                    if isinstance(session.vector_db_ids, str):
+                        vector_db_ids = json.loads(session.vector_db_ids)
+                    elif isinstance(session.vector_db_ids, list):
+                        vector_db_ids = session.vector_db_ids
+                    else:
+                        self.logger.warning(
+                            f"Unexpected vector_db_ids type for session {session_id}: {type(session.vector_db_ids)}"
+                        )
+
+                    if vector_db_ids:
+                        self.logger.info(
+                            f"Using session-specific vector databases for draft jiras: {vector_db_ids}"
+                        )
+                except json.JSONDecodeError:
+                    self.logger.warning(
+                        f"Failed to parse vector database IDs for session {session_id}"
+                    )
 
         start_time = time.time()
 
@@ -635,7 +692,7 @@ class SessionService:
                 soft_mode,
                 custom_prompts,
                 True,  # use_rag
-                None,  # vector_db_ids (use default)
+                vector_db_ids,  # session-specific vector database IDs
             )
 
             # Save output

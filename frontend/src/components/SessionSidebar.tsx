@@ -5,6 +5,9 @@ import {
   Badge,
   Button,
   Checkbox,
+  Dropdown,
+  DropdownItem,
+  DropdownList,
   EmptyState,
   EmptyStateBody,
   Flex,
@@ -12,6 +15,8 @@ import {
   FormGroup,
   List,
   ListItem,
+  MenuToggle,
+  MenuToggleElement,
   Modal,
   ModalBody,
   ModalFooter,
@@ -23,8 +28,9 @@ import {
   TextInput,
   Title,
 } from '@patternfly/react-core';
-import { CubeIcon, PlusIcon, TrashIcon } from '@patternfly/react-icons';
-import { CreateSessionRequest, Session, SessionStatus } from '../types/api';
+import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
+import { ChevronDownIcon, CubeIcon, PlusIcon, TrashIcon } from '@patternfly/react-icons';
+import { CreateSessionRequest, Session, SessionStatus, VectorDBInfo } from '../types/api';
 import { apiService } from '../services/api';
 import { loadCustomPrompts } from '../services/localStorage';
 
@@ -64,6 +70,12 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
 
+    // Vector database selection state
+    const [availableVectorDbs, setAvailableVectorDbs] = useState<VectorDBInfo[]>([]);
+    const [selectedVectorDbIds, setSelectedVectorDbIds] = useState<string[]>([]);
+    const [vectorDbDropdownOpen, setVectorDbDropdownOpen] = useState(false);
+    const [loadingVectorDbs, setLoadingVectorDbs] = useState(false);
+
     const loadSessions = useCallback(
       async (currentPage: number = page, showLoader: boolean = false) => {
         try {
@@ -89,6 +101,18 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
       [page, pageSize, sessions, totalSessions],
     );
 
+    const loadVectorDatabases = useCallback(async () => {
+      try {
+        setLoadingVectorDbs(true);
+        const response = await apiService.listVectorDatabases();
+        setAvailableVectorDbs(response.vector_dbs);
+      } catch (err) {
+        console.error('Failed to load vector databases:', err);
+      } finally {
+        setLoadingVectorDbs(false);
+      }
+    }, []);
+
     const handleCreateSession = useCallback(async () => {
       if (!jiraKey.trim()) {
         setCreateError('JIRA key is required');
@@ -108,6 +132,8 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
           soft_mode: true,
           // Only include custom_prompts if there are any custom prompts
           ...(hasCustomPrompts && { custom_prompts: customPrompts }),
+          // Include selected vector databases
+          ...(selectedVectorDbIds.length > 0 && { vector_db_ids: selectedVectorDbIds }),
         };
 
         const newSession = await apiService.createSession(request);
@@ -117,6 +143,7 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
 
         // Clear form and close modal
         setJiraKey('');
+        setSelectedVectorDbIds([]);
         setShowCreateModal(false);
 
         // Select the new session
@@ -126,7 +153,7 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
       } finally {
         setCreating(false);
       }
-    }, [jiraKey, onSessionSelect]);
+    }, [jiraKey, selectedVectorDbIds, onSessionSelect]);
 
     const handleDeleteSession = useCallback(
       async (sessionId: string, event: React.MouseEvent) => {
@@ -165,6 +192,18 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
       [loadSessions],
     );
 
+    const handleVectorDbSelection = useCallback((vectorDbId: string, selected: boolean) => {
+      setSelectedVectorDbIds((prev) => (selected ? [...prev, vectorDbId] : prev.filter((id) => id !== vectorDbId)));
+    }, []);
+
+    const handleRemoveVectorDb = useCallback((vectorDbId: string) => {
+      setSelectedVectorDbIds((prev) => prev.filter((id) => id !== vectorDbId));
+    }, []);
+
+    const getSelectedVectorDbs = useCallback(() => {
+      return availableVectorDbs.filter((db) => selectedVectorDbIds.includes(db.vector_db_id));
+    }, [availableVectorDbs, selectedVectorDbIds]);
+
     useEffect(() => {
       loadSessions(page, true); // Show loader for initial load
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,6 +223,13 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
       return undefined;
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [sessions, page]);
+
+    // Load vector databases when create modal opens
+    useEffect(() => {
+      if (showCreateModal) {
+        loadVectorDatabases();
+      }
+    }, [showCreateModal, loadVectorDatabases]);
 
     // Component content directly
 
@@ -354,6 +400,102 @@ const SessionSidebar: React.FunctionComponent<SessionSidebarProps> = React.memo(
                   description="Soft mode will block any jira creation requests. This is useful for testing the system without creating actual jira tickets."
                   isChecked={true}
                 />
+              </FlexItem>
+
+              <FlexItem>
+                <FormGroup label="Vector Databases" fieldId="vector-databases">
+                  <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsSm' }}>
+                    <FlexItem>
+                      <Dropdown
+                        isOpen={vectorDbDropdownOpen}
+                        onSelect={() => setVectorDbDropdownOpen(false)}
+                        onOpenChange={(isOpen) => setVectorDbDropdownOpen(isOpen)}
+                        toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                          <MenuToggle
+                            ref={toggleRef}
+                            onClick={() => setVectorDbDropdownOpen(!vectorDbDropdownOpen)}
+                            isExpanded={vectorDbDropdownOpen}
+                            isDisabled={loadingVectorDbs}
+                            style={{ width: '100%' }}
+                          >
+                            {loadingVectorDbs ? 'Loading databases...' : 'Select Vector Databases'}
+                            <ChevronDownIcon />
+                          </MenuToggle>
+                        )}
+                      >
+                        <DropdownList>
+                          {availableVectorDbs.map((vectorDb) => (
+                            <DropdownItem
+                              key={vectorDb.vector_db_id}
+                              onClick={(e) => e.stopPropagation()}
+                              isDisabled={false}
+                            >
+                              <Checkbox
+                                id={`vector-db-${vectorDb.vector_db_id}`}
+                                label={`${vectorDb.name} (${vectorDb.document_count} docs, ${vectorDb.total_chunks} chunks)`}
+                                isChecked={selectedVectorDbIds.includes(vectorDb.vector_db_id)}
+                                onChange={(_event, checked) => handleVectorDbSelection(vectorDb.vector_db_id, checked)}
+                                description={vectorDb.description}
+                              />
+                            </DropdownItem>
+                          ))}
+                          {availableVectorDbs.length === 0 && !loadingVectorDbs && (
+                            <DropdownItem isDisabled>No vector databases available</DropdownItem>
+                          )}
+                        </DropdownList>
+                      </Dropdown>
+                    </FlexItem>
+
+                    {selectedVectorDbIds.length > 0 && (
+                      <FlexItem>
+                        <Title headingLevel="h4" size="md">
+                          Selected Databases ({selectedVectorDbIds.length})
+                        </Title>
+                        <Table variant="compact" borders={false}>
+                          <Thead>
+                            <Tr>
+                              <Th>Database</Th>
+                              <Th>Documents</Th>
+                              <Th>Chunks</Th>
+                              <Th>Use Case</Th>
+                              <Th></Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {getSelectedVectorDbs().map((vectorDb) => (
+                              <Tr key={vectorDb.vector_db_id}>
+                                <Td>
+                                  <div>
+                                    <strong>{vectorDb.name}</strong>
+                                    {vectorDb.description && (
+                                      <div style={{ fontSize: '0.875rem', color: 'var(--pf-v5-global--Color--200)' }}>
+                                        {vectorDb.description}
+                                      </div>
+                                    )}
+                                  </div>
+                                </Td>
+                                <Td>{vectorDb.document_count}</Td>
+                                <Td>{vectorDb.total_chunks.toLocaleString()}</Td>
+                                <Td>
+                                  <Badge>{vectorDb.use_case}</Badge>
+                                </Td>
+                                <Td>
+                                  <Button
+                                    variant="plain"
+                                    icon={<TrashIcon />}
+                                    onClick={() => handleRemoveVectorDb(vectorDb.vector_db_id)}
+                                    size="sm"
+                                    aria-label={`Remove ${vectorDb.name}`}
+                                  />
+                                </Td>
+                              </Tr>
+                            ))}
+                          </Tbody>
+                        </Table>
+                      </FlexItem>
+                    )}
+                  </Flex>
+                </FormGroup>
               </FlexItem>
             </Flex>
           </ModalBody>

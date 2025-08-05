@@ -228,7 +228,10 @@ async def create_session(
     try:
         # Create session
         session_id = service.create_session(
-            request.jira_key, request.soft_mode, request.custom_prompts
+            request.jira_key,
+            request.soft_mode,
+            request.custom_prompts,
+            request.vector_db_ids,
         )
 
         # Start processing in background using asyncio.create_task

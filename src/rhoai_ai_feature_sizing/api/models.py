@@ -138,6 +138,7 @@ class Session(Base):
     current_stage = Column(SQLEnum(Stage), nullable=True)
     soft_mode = Column(Boolean, default=True, nullable=False)
     custom_prompts = Column(Text, nullable=True)  # JSON string for custom prompts
+    vector_db_ids = Column(Text, nullable=True)  # JSON string for vector database IDs
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False

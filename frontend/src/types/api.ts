@@ -11,6 +11,7 @@ export type Session = {
 	status: SessionStatus;
 	current_stage: Stage | null;
 	custom_prompts?: Record<string, string>;
+	vector_db_ids?: string[];
 	error_message: string | null;
 	started_at: string;
 	completed_at: string | null;
@@ -74,6 +75,7 @@ export type CreateSessionRequest = {
 	jira_key: string;
 	soft_mode: boolean;
 	custom_prompts?: Record<string, string>;
+	vector_db_ids?: string[];
 };
 
 export type ComponentMetrics = {

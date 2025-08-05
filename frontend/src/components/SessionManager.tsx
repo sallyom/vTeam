@@ -1,23 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import {
-  Alert,
-  Flex,
-  FlexItem,
-  PageSection,
-  Split,
-  SplitItem,
-  Tab,
-  Tabs,
-  TabTitleText,
-  Title,
-} from '@patternfly/react-core';
+import { Alert, Flex, FlexItem, PageSection, Tab, TabTitleText, Tabs, Title } from '@patternfly/react-core';
 import { Session } from '../types/api';
 import { apiService } from '../services/api';
 import ChatPanel from './ChatPanel';
 import EpicsPanel from './EpicsPanel';
 import RefinementPanel from './RefinementPanel';
-import OutputPanel from './OutputPanel';
 
 const SessionManager: React.FunctionComponent = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -90,7 +78,7 @@ const SessionManager: React.FunctionComponent = () => {
   }
 
   const handleTabClick = (
-    event: React.MouseEvent<any> | React.KeyboardEvent | MouseEvent,
+    event: React.MouseEvent<unknown> | React.KeyboardEvent | MouseEvent,
     tabIndex: string | number,
   ) => {
     setActiveTabKey(tabIndex);

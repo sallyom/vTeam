@@ -32,6 +32,10 @@ class CreateSessionRequest(BaseModel):
         None,
         description="Optional custom prompts for stages. Keys should be prompt names (e.g., 'refine_feature', 'draft_jiras')",
     )
+    vector_db_ids: Optional[List[str]] = Field(
+        None,
+        description="Optional list of vector database IDs to use for RAG queries in this session",
+    )
 
 
 class JiraMetricsRequest(BaseModel):
@@ -275,6 +279,9 @@ class SessionResponse(BaseModel):
     custom_prompts: Optional[Dict[str, str]] = Field(
         None, description="Custom prompts used for this session"
     )
+    vector_db_ids: Optional[List[str]] = Field(
+        None, description="Vector database IDs selected for this session"
+    )
     created_at: datetime
     updated_at: datetime
     started_at: Optional[datetime]
@@ -283,7 +290,7 @@ class SessionResponse(BaseModel):
 
     @classmethod
     def from_model(cls, session):
-        """Create response from model, handling JSON deserialization of custom_prompts."""
+        """Create response from model, handling JSON deserialization of custom_prompts and vector_db_ids."""
         custom_prompts = None
         if session.custom_prompts:
             try:
@@ -297,6 +304,19 @@ class SessionResponse(BaseModel):
             except json.JSONDecodeError:
                 custom_prompts = None
 
+        vector_db_ids = None
+        if session.vector_db_ids:
+            try:
+                # Handle both string (JSON) and list cases
+                if isinstance(session.vector_db_ids, str):
+                    vector_db_ids = json.loads(session.vector_db_ids)
+                elif isinstance(session.vector_db_ids, list):
+                    vector_db_ids = session.vector_db_ids
+                else:
+                    vector_db_ids = None
+            except json.JSONDecodeError:
+                vector_db_ids = None
+
         return cls(
             id=session.id,
             jira_key=session.jira_key,
@@ -304,6 +324,7 @@ class SessionResponse(BaseModel):
             current_stage=session.current_stage,
             soft_mode=session.soft_mode,
             custom_prompts=custom_prompts,
+            vector_db_ids=vector_db_ids,
             created_at=session.created_at,
             updated_at=session.updated_at,
             started_at=session.started_at,
