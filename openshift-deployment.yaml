@@ -25,6 +25,9 @@ data:
         config:
           url: ${env.VLLM_URL}
           api_token: ${env.VLLM_API_TOKEN:=fake}
+      - provider_id: sentence-transformers
+        provider_type: inline::sentence-transformers
+        config: {}
       safety:
       - provider_id: llama-guard
         provider_type: inline::llama-guard
@@ -49,6 +52,9 @@ data:
             type: sqlite
             db_path: ${env.SQLITE_STORE_DIR:=/tmp}/vector_kvstore.db
       tool_runtime:
+      - provider_id: rag-runtime
+        provider_type: inline::rag-runtime
+        config: {}
       - provider_id: model-context-protocol
         provider_type: remote::model-context-protocol
         config: {}
@@ -74,12 +80,19 @@ data:
       model_id: ${env.VLLM_INFERENCE_MODEL}
       provider_id: vllm
       model_type: llm
+    - metadata:
+        embedding_dimension: 384
+      model_id: all-MiniLM-L6-v2
+      provider_id: sentence-transformers
+      model_type: embedding
     shields: []
     vector_dbs: []
     datasets: []
     scoring_fns: []
     benchmarks: []
     tool_groups:
+      - toolgroup_id: builtin::rag
+        provider_id: rag-runtime
       - toolgroup_id: mcp::atlassian
         provider_id: model-context-protocol
         mcp_endpoint:

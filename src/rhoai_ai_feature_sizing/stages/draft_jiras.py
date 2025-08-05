@@ -4,7 +4,10 @@ import time
 from pathlib import Path
 from llama_stack_client import Agent
 from rhoai_ai_feature_sizing.llama_stack_setup import get_llama_stack_client
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Any
+
+from .rag_enhanced_agent import create_rag_enhanced_jira_agent
+from ..api.rag_service import RAGService
 
 
 INSTRUCTIONS = "You are a senior Agile coach and technical lead expert at breaking down RHOAI features into implementable Jira tickets. Follow the provided template and examples precisely."
@@ -32,19 +35,26 @@ def _load_draft_template() -> str:
         return f.read()
 
 
-def generate_jira_structure_with_agent(
+async def generate_jira_structure_with_agent(
     input_content: str,
     soft_mode: bool = True,
     custom_prompts: Optional[Dict[str, str]] = None,
+    use_rag: bool = True,
+    vector_db_ids: Optional[List[str]] = None,
 ) -> str:
     """
-    Generate a comprehensive Jira tickets structure using the Llama Stack agent.
+    Generate a comprehensive Jira tickets structure using RAG-enhanced agent.
     Uses LLM-based validation with iteration for quality improvement.
 
     Args:
         input_content: The content from refined or epics document
         soft_mode: If True, only generate ticket structure without creating actual Jira tickets
         custom_prompts: Optional custom prompts dictionary
+        use_rag: Whether to use RAG-enhanced agent (default: True)
+        vector_db_ids: Specific vector databases to use for RAG context
+
+    Returns:
+        Generated JIRA tickets structure with RAG-enhanced insights
     """
     logger = logging.getLogger("draft_jiras")
     INFERENCE_MODEL = os.getenv("INFERENCE_MODEL")
@@ -73,7 +83,26 @@ def generate_jira_structure_with_agent(
         else:
             validation_template = _load_validation_template()
 
-        # Create generation agent
+        # Create RAG-enhanced generation agent or fallback to basic agent
+        if use_rag:
+            logger.info(
+                f"Using RAG-enhanced JIRA agent with vector DBs: {vector_db_ids or 'default'}"
+            )
+            rag_service = RAGService()
+            rag_agent = create_rag_enhanced_jira_agent(rag_service)
+            generation_agent = await rag_agent.create_agent_with_rag_tools(
+                vector_db_ids=vector_db_ids, custom_instructions=INSTRUCTIONS
+            )
+            # Add Jira tools if not in soft mode
+            if not soft_mode:
+                logger.warning(
+                    "RAG agent with JIRA tools not fully implemented - falling back to basic agent"
+                )
+                # Note: The RAG agent doesn't directly support tools parameter,
+                # so we might need to create a hybrid approach or enhance the RAG agent
+                pass
+        else:
+            logger.info("Using basic agent (RAG disabled)")
         generation_agent = Agent(
             client,
             model=INFERENCE_MODEL,
@@ -132,6 +161,13 @@ def generate_jira_structure_with_agent(
 
             content = response.output_message.content
             duration = time.time() - start_time
+
+            # Log the full raw LLM response for debugging
+            logger.info(f"=== RAW LLM RESPONSE (iteration {iteration + 1}) ===")
+            logger.info(f"Response length: {len(content)} characters")
+            logger.info("--- FULL RESPONSE START ---")
+            logger.info(content)
+            logger.info("--- FULL RESPONSE END ---")
 
             logger.info(
                 f"Generated tickets structure in {duration:.2f}s (iteration {iteration + 1}, length: {len(content)} chars)"
@@ -362,10 +398,42 @@ def _basic_fallback_validation(content: str) -> dict:
     }
 
 
+# Synchronous wrapper for backward compatibility
+def generate_jira_structure_with_agent_sync(
+    input_content: str,
+    soft_mode: bool = True,
+    custom_prompts: Optional[Dict[str, str]] = None,
+    use_rag: bool = True,
+    vector_db_ids: Optional[List[str]] = None,
+) -> str:
+    """
+    Synchronous wrapper for RAG-enhanced JIRA structure generation.
+
+    Args:
+        input_content: The content from refined or epics document
+        soft_mode: If True, only generate ticket structure without creating actual Jira tickets
+        custom_prompts: Optional custom prompts dictionary
+        use_rag: Whether to use RAG-enhanced agent (default: True)
+        vector_db_ids: Specific vector databases to use for RAG context
+
+    Returns:
+        Generated JIRA tickets structure with RAG-enhanced insights
+    """
+    import asyncio
+
+    return asyncio.run(
+        generate_jira_structure_with_agent(
+            input_content, soft_mode, custom_prompts, use_rag, vector_db_ids
+        )
+    )
+
+
 def draft_jiras_from_file(
     input_file: Path,
     soft_mode: bool = True,
     custom_prompts: Optional[Dict[str, str]] = None,
+    use_rag: bool = True,
+    vector_db_ids: Optional[List[str]] = None,
 ) -> str:
     """
     Generate Jira tickets structure from an input file.
@@ -374,9 +442,11 @@ def draft_jiras_from_file(
         input_file: Path to the input file (refined or epics document)
         soft_mode: If True, only generate ticket structure without creating actual Jira tickets
         custom_prompts: Optional custom prompts dictionary
+        use_rag: Whether to use RAG-enhanced agent (default: True)
+        vector_db_ids: Specific vector databases to use for RAG context
 
     Returns:
-        Generated Jira tickets structure content
+        Generated Jira tickets structure content with RAG-enhanced insights
     """
     logger = logging.getLogger("draft_jiras")
 
@@ -393,4 +463,188 @@ def draft_jiras_from_file(
     if not input_content.strip():
         raise ValueError("Input file is empty")
 
-    return generate_jira_structure_with_agent(input_content, soft_mode, custom_prompts)
+    return generate_jira_structure_with_agent_sync(
+        input_content, soft_mode, custom_prompts, use_rag, vector_db_ids
+    )
+
+
+def extract_epic_story_data(jira_json_response: str) -> Dict[str, Any]:
+    """
+    Extract structured epic and story data from generated JIRA JSON response.
+
+    Args:
+        jira_json_response: The generated JIRA tickets structure as JSON string
+
+    Returns:
+        Dictionary with extracted epics and stories data
+    """
+    import json
+    import re
+
+    logger = logging.getLogger("draft_jiras")
+
+    # Log what we're about to parse
+    logger.info("=== PARSING JSON RESPONSE ===")
+    logger.info(f"Original response length: {len(jira_json_response)} characters")
+    logger.info("--- ORIGINAL RESPONSE START ---")
+    logger.info(jira_json_response)
+    logger.info("--- ORIGINAL RESPONSE END ---")
+
+    try:
+        # Clean the response - remove any markdown code block markers
+        cleaned_response = jira_json_response.strip()
+        if cleaned_response.startswith("```json"):
+            cleaned_response = cleaned_response[7:]
+        if cleaned_response.endswith("```"):
+            cleaned_response = cleaned_response[:-3]
+        cleaned_response = cleaned_response.strip()
+
+        logger.info("--- CLEANED RESPONSE START ---")
+        logger.info(cleaned_response)
+        logger.info("--- CLEANED RESPONSE END ---")
+
+        # Parse the JSON
+        data = json.loads(cleaned_response)
+
+        if "epics" not in data:
+            raise ValueError("JSON response missing 'epics' field")
+
+        epics = data["epics"]
+        total_stories = 0
+
+        # Validate and normalize the data
+        for epic in epics:
+            # Ensure required fields exist
+            epic.setdefault("title", "Untitled Epic")
+            epic.setdefault("description", "")
+            epic.setdefault("component_team", None)
+            epic.setdefault("estimated_hours", None)
+            epic.setdefault("stories", [])
+
+            # Process stories
+            for story in epic["stories"]:
+                story.setdefault("title", "Untitled Story")
+                story.setdefault("description", "")
+                story.setdefault("story_points", None)
+                story.setdefault("estimated_hours", None)
+
+                total_stories += 1
+
+        logger.info(f"Extracted {len(epics)} epics with {total_stories} total stories")
+
+        # Log detailed extraction results
+        logger.info("=== EXTRACTION RESULTS ===")
+        for i, epic in enumerate(epics):
+            logger.info(
+                f"Epic {i+1}: '{epic.get('title', 'No title')}' - {len(epic.get('stories', []))} stories"
+            )
+            logger.info(f"  Component Team: {epic.get('component_team', 'None')}")
+            logger.info(f"  Estimated Hours: {epic.get('estimated_hours', 'None')}")
+
+            for j, story in enumerate(epic.get("stories", [])):
+                logger.info(
+                    f"    Story {j+1}: '{story.get('title', 'No title')}' - {story.get('story_points', 'No points')} pts"
+                )
+
+        return {
+            "epics": epics,
+            "total_epics": len(epics),
+            "total_stories": total_stories,
+        }
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON response: {e}")
+        logger.error(f"Response content: {jira_json_response[:500]}...")
+
+        # Fallback: try to extract JSON from mixed content
+        json_match = re.search(r"\{.*\}", jira_json_response, re.DOTALL)
+        if json_match:
+            try:
+                data = json.loads(json_match.group())
+                logger.info("Successfully extracted JSON from mixed content")
+                return extract_epic_story_data(
+                    json_match.group()
+                )  # Recursive call with cleaned JSON
+            except json.JSONDecodeError:
+                pass
+
+        # Return empty structure if parsing fails
+        return {
+            "epics": [],
+            "total_epics": 0,
+            "total_stories": 0,
+        }
+
+    except Exception as e:
+        logger.error(f"Error processing epic/story data: {e}")
+        return {
+            "epics": [],
+            "total_epics": 0,
+            "total_stories": 0,
+        }
+
+
+def create_epics_and_stories_from_extracted_data(
+    session_id: str, extracted_data: Dict[str, Any], session_service: Any
+) -> Dict[str, Any]:
+    """
+    Create Epic and Story objects in the database from extracted data.
+
+    Args:
+        session_id: Session ID to associate epics with
+        extracted_data: Output from extract_epic_story_data
+        session_service: SessionService instance for database operations
+
+    Returns:
+        Dictionary with created epic and story IDs
+    """
+    import uuid
+    from ..api.schemas import EpicCreate, StoryCreate, Priority
+
+    logger = logging.getLogger("draft_jiras")
+
+    created_epics = []
+
+    try:
+        for epic_data in extracted_data["epics"]:
+            # Create stories data
+            stories_data = []
+            for story_data in epic_data["stories"]:
+                story_create = StoryCreate(
+                    title=story_data["title"],
+                    description=story_data["description"],
+                    story_points=story_data["story_points"],
+                    estimated_hours=story_data["estimated_hours"],
+                    assignee=story_data.get("assignee"),
+                )
+                stories_data.append(story_create)
+
+            # Create epic with stories
+            epic_create = EpicCreate(
+                title=epic_data["title"],
+                description=epic_data["description"],
+                component_team=epic_data.get("component_team"),
+                priority=Priority.MEDIUM,  # Default priority since we removed it from JSON structure
+                estimated_hours=epic_data["estimated_hours"],
+                stories=stories_data,
+            )
+
+            # Create in database
+            created_epic = session_service.create_epic(
+                uuid.UUID(session_id), epic_create
+            )
+            created_epics.append(created_epic)
+
+        logger.info(
+            f"Created {len(created_epics)} epics in database for session {session_id}"
+        )
+
+        return {
+            "created_epics": created_epics,
+            "total_epics": len(created_epics),
+            "total_stories": sum(len(epic.stories) for epic in created_epics),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create epics and stories in database: {e}")
+        raise RuntimeError(f"Database creation failed: {e}") from e

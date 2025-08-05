@@ -1,9 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Alert, Flex, FlexItem, PageSection, Split, SplitItem, Title } from '@patternfly/react-core';
+import {
+  Alert,
+  Flex,
+  FlexItem,
+  PageSection,
+  Split,
+  SplitItem,
+  Tab,
+  Tabs,
+  TabTitleText,
+  Title,
+} from '@patternfly/react-core';
 import { Session } from '../types/api';
 import { apiService } from '../services/api';
 import ChatPanel from './ChatPanel';
+import EpicsPanel from './EpicsPanel';
+import RefinementPanel from './RefinementPanel';
 import OutputPanel from './OutputPanel';
 
 const SessionManager: React.FunctionComponent = () => {
@@ -11,6 +24,7 @@ const SessionManager: React.FunctionComponent = () => {
   const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTabKey, setActiveTabKey] = useState<string | number>(0);
 
   // Load session when sessionId changes
   useEffect(() => {
@@ -75,20 +89,44 @@ const SessionManager: React.FunctionComponent = () => {
     );
   }
 
+  const handleTabClick = (
+    event: React.MouseEvent<any> | React.KeyboardEvent | MouseEvent,
+    tabIndex: string | number,
+  ) => {
+    setActiveTabKey(tabIndex);
+  };
+
   return (
     <PageSection hasBodyWrapper={false} style={{ height: '100vh', overflow: 'hidden' }}>
       {selectedSession ? (
-        <Split hasGutter>
-          {/* Chat Panel - Left Side */}
-          <SplitItem isFilled style={{ minWidth: '40%' }}>
-            <ChatPanel session={selectedSession} />
-          </SplitItem>
+        <Tabs
+          activeKey={activeTabKey}
+          onSelect={handleTabClick}
+          isBox
+          style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+        >
+          <Tab eventKey={0} title={<TabTitleText>Chat</TabTitleText>} style={{ height: '100%', overflow: 'hidden' }}>
+            <div style={{ height: 'calc(100vh - 140px)', overflow: 'hidden' }}>
+              <ChatPanel session={selectedSession} />
+            </div>
+          </Tab>
 
-          {/* Output Panel - Right Side */}
-          <SplitItem isFilled style={{ minWidth: '40%' }}>
-            <OutputPanel session={selectedSession} />
-          </SplitItem>
-        </Split>
+          <Tab eventKey={1} title={<TabTitleText>JIRAs</TabTitleText>} style={{ height: '100%', overflow: 'auto' }}>
+            <div style={{ height: 'calc(100vh - 140px)', overflow: 'auto' }}>
+              <EpicsPanel session={selectedSession} />
+            </div>
+          </Tab>
+
+          <Tab
+            eventKey={2}
+            title={<TabTitleText>Refinement</TabTitleText>}
+            style={{ height: '100%', overflow: 'auto' }}
+          >
+            <div style={{ height: 'calc(100vh - 140px)', overflow: 'auto' }}>
+              <RefinementPanel session={selectedSession} />
+            </div>
+          </Tab>
+        </Tabs>
       ) : (
         <Flex
           direction={{ default: 'column' }}

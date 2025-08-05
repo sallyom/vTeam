@@ -53,7 +53,7 @@ const JiraMetrics: React.FunctionComponent<JiraMetricsProps> = ({ isOpen, onClos
     setMetrics(null);
 
     try {
-      const response = await apiService.getJiraMetrics({ jira_key: jiraKey.trim() });
+      const response = await apiService.getJiraMetrics(jiraKey.trim());
       setMetrics(response);
     } catch (err: unknown) {
       const errorMessage =

@@ -19,27 +19,60 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from .models import init_database, SessionStatus, Stage
+from .models import (
+    init_database,
+    SessionStatus,
+    Stage,
+    Document,
+    IngestionRequest,
+    Epic,
+    Story,
+)
 from .schemas import (
+    ChunkBrowseRequest,
+    ChunkBrowseResponse,
+    ComponentMetrics,
     CreateSessionRequest,
-    SessionResponse,
-    SessionDetailResponse,
+    DocumentIngestionRequest,
+    DocumentIngestionResponse,
+    DocumentListResponse,
+    EpicCreate,
+    EpicUpdate,
+    EpicResponse,
+    EpicListResponse,
+    HealthResponse,
+    JiraMetricsRequest,
+    JiraMetricsResponse,
+    MCPUsageResponse,
     MessageResponse,
     OutputResponse,
-    MCPUsageResponse,
-    HealthResponse,
     ProgressResponse,
+    RAGQueryRequest,
+    RAGQueryResponse,
+    SessionDetailResponse,
     SessionListResponse,
-    JiraMetricsRequest,
-    ComponentMetrics,
-    JiraMetricsResponse,
+    SessionResponse,
+    StoryCreate,
+    StoryUpdate,
+    StoryResponse,
+    StoryListResponse,
+    VectorDBConfig,
+    VectorDBInfo,
+    VectorDBListResponse,
+    VectorDBUpdateRequest,
+    BackgroundTaskInfo,
+    BulkIngestionTaskRequest,
+    BulkIngestionTaskResponse,
 )
 from .services import SessionService
+from .rag_service import RAGService
+from .task_manager import task_manager
 from ..llama_stack_setup import get_llama_stack_client
 
 
 # Global service instance
 session_service = None
+rag_service = None
 
 
 class WebSocketManager:
@@ -84,24 +117,52 @@ ws_manager = WebSocketManager()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global session_service
+    global session_service, rag_service
 
-    # Startup
-    logging.info("Initializing database...")
-    init_database()
+    try:
+        # Initialize database
+        engine = init_database()
+        logging.info("Database initialized successfully")
 
-    logging.info("Creating session service...")
-    session_service = SessionService()
+        # Initialize services
+        session_service = SessionService()
+        rag_service = RAGService()
 
-    # Set WebSocket manager on session service
-    session_service.set_websocket_manager(ws_manager)
+        # Setup predefined vector databases
+        try:
+            created_dbs = await rag_service.setup_predefined_vector_dbs()
+            if created_dbs:
+                logging.info(f"Created predefined vector databases: {created_dbs}")
+        except Exception as e:
+            logging.warning(f"Failed to setup predefined vector databases: {e}")
 
-    logging.info("API startup complete")
+        # Synchronize vector databases between Application Database and Llama Stack
+        try:
+            sync_results = await rag_service.sync_vector_databases()
+            if sync_results["cleaned_orphans"]:
+                logging.info(
+                    f"Cleaned up orphaned vector databases: {sync_results['cleaned_orphans']}"
+                )
+            if sync_results["re_registered"]:
+                logging.info(
+                    f"Re-registered missing vector databases: {sync_results['re_registered']}"
+                )
+            if (
+                not sync_results["cleaned_orphans"]
+                and not sync_results["re_registered"]
+            ):
+                logging.info("Vector databases are already in sync")
+        except Exception as e:
+            logging.warning(f"Failed to sync vector databases: {e}")
 
-    yield
+        logging.info("Application startup completed")
+        yield
 
-    # Shutdown
-    logging.info("API shutdown complete")
+    except Exception as e:
+        logging.error(f"Startup failed: {e}")
+        raise
+    finally:
+        logging.info("Application shutdown completed")
 
 
 # Create FastAPI app
@@ -127,6 +188,13 @@ def get_session_service() -> SessionService:
     if session_service is None:
         raise HTTPException(status_code=503, detail="Service not initialized")
     return session_service
+
+
+def get_rag_service() -> RAGService:
+    """Dependency to get RAG service."""
+    if rag_service is None:
+        raise HTTPException(status_code=503, detail="RAG service not initialized")
+    return rag_service
 
 
 @app.get("/healthz", response_model=HealthResponse)
@@ -403,6 +471,616 @@ async def list_available_prompts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# RAG API Endpoints
+
+
+@app.get("/rag/vector-databases", response_model=VectorDBListResponse)
+async def list_vector_databases(rag_service: RAGService = Depends(get_rag_service)):
+    """List all vector databases."""
+    try:
+        return await rag_service.list_vector_databases()
+    except Exception as e:
+        logging.error(f"Error listing vector databases: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/vector-databases", response_model=VectorDBInfo)
+async def create_vector_database(
+    config: VectorDBConfig, rag_service: RAGService = Depends(get_rag_service)
+):
+    """Create a new vector database."""
+    try:
+        return await rag_service.create_vector_database(config)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error creating vector database: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/rag/vector-databases/{vector_db_id}", response_model=VectorDBInfo)
+async def get_vector_database(
+    vector_db_id: str, rag_service: RAGService = Depends(get_rag_service)
+):
+    """Get information about a specific vector database."""
+    try:
+        result = await rag_service.get_vector_database(vector_db_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Vector database not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting vector database {vector_db_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/rag/vector-databases/{vector_db_id}")
+async def delete_vector_database(
+    vector_db_id: str, rag_service: RAGService = Depends(get_rag_service)
+):
+    """Delete a vector database."""
+    try:
+        success = await rag_service.delete_vector_database(vector_db_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Vector database not found")
+        return {"message": "Vector database deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error deleting vector database {vector_db_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/vector-databases/{vector_db_id}/reset")
+async def reset_vector_database(
+    vector_db_id: str, rag_service: RAGService = Depends(get_rag_service)
+):
+    """Reset a vector database by deleting and recreating it fresh, cleaning up all orphaned chunks."""
+    try:
+        success = await rag_service.reset_vector_database(vector_db_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Vector database not found")
+        return {"message": "Vector database reset successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error resetting vector database {vector_db_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/ingest", response_model=DocumentIngestionResponse)
+async def ingest_documents(
+    request: DocumentIngestionRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Ingest documents into a vector database."""
+    try:
+        return await rag_service.ingest_documents(request)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error ingesting documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/ingest/llamaindex", response_model=DocumentIngestionResponse)
+async def ingest_documents_with_llamaindex(
+    request: DocumentIngestionRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Ingest documents using LlamaIndex data loaders for smarter processing."""
+    try:
+        return await rag_service.ingest_documents_with_llamaindex(request)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logging.error(f"Error during LlamaIndex document ingestion: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/bulk-ingest", response_model=BulkIngestionTaskResponse)
+async def start_bulk_ingestion(
+    request: BulkIngestionTaskRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Start a background bulk ingestion task."""
+    try:
+        # Create background task for bulk ingestion
+        task_id = task_manager.create_task(
+            _run_bulk_ingestion_task,
+            # Pass positional arguments for the task function first
+            rag_service,
+            request,
+            # Then keyword arguments
+            task_type="ingestion",
+            total_items=len(request.documents),
+            task_metadata={
+                "vector_db_id": request.vector_db_id,
+                "source_count": len(request.documents),
+                "use_llamaindex": request.use_llamaindex,
+            },
+        )
+
+        # Estimate duration based on number of documents
+        estimated_minutes = min(30, max(5, len(request.documents) * 2))
+
+        return BulkIngestionTaskResponse(
+            task_id=task_id,
+            status="pending",
+            message="Bulk ingestion task started. Use the task ID to check progress.",
+            estimated_duration_minutes=estimated_minutes,
+        )
+    except Exception as e:
+        logging.error(f"Error starting bulk ingestion task: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/rag/tasks/{task_id}", response_model=BackgroundTaskInfo)
+async def get_task_status(task_id: str):
+    """Get the status of a background task."""
+    task_info = task_manager.get_task(task_id)
+    if not task_info:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task_info
+
+
+@app.get("/rag/tasks")
+async def list_all_tasks(
+    limit: int = 50,
+    task_type: Optional[str] = None,
+    status: Optional[str] = None,
+    offset: int = 0,
+):
+    """List and search background tasks with filtering."""
+    if status or task_type:
+        tasks = task_manager.search_tasks(
+            status=status, task_type=task_type, limit=limit, offset=offset
+        )
+    else:
+        tasks = task_manager.list_tasks(limit=limit, task_type=task_type)
+
+    return {"tasks": tasks, "total": len(tasks), "limit": limit, "offset": offset}
+
+
+def _run_bulk_ingestion_task(
+    rag_service: RAGService,
+    request: BulkIngestionTaskRequest,
+    progress_callback=None,
+    task_id=None,
+):
+    """Background task function for bulk ingestion with enhanced tracking."""
+    import uuid
+    from .models import IngestionRequest, SessionLocal
+
+    request_id = str(uuid.uuid4())
+    start_time = datetime.utcnow()
+
+    try:
+        # Create ingestion request record
+        with SessionLocal() as db:
+            ingestion_request = IngestionRequest(
+                request_id=request_id,
+                task_id=task_id or "unknown",
+                vector_db_id=request.vector_db_id,
+                source_count=len(request.documents),
+                use_llamaindex=request.use_llamaindex,
+                chunk_size_in_tokens=request.chunk_size_in_tokens,
+                chunk_overlap_in_tokens=request.chunk_overlap_in_tokens,
+                source_urls=[doc.url for doc in request.documents],
+                source_metadata=[
+                    {
+                        "name": doc.name,
+                        "mime_type": doc.mime_type,
+                        "metadata": getattr(doc, "metadata", {}),
+                    }
+                    for doc in request.documents
+                ],
+                started_at=start_time,
+            )
+            db.add(ingestion_request)
+            db.commit()
+            ingestion_request_id = ingestion_request.id
+
+        # Enhanced progress callback that updates ingestion request
+        def enhanced_progress_callback(progress, step=None, processed=None, total=None):
+            if progress_callback:
+                progress_callback(progress, step, processed, total)
+
+            # Update ingestion request progress
+            try:
+                with SessionLocal() as db:
+                    ingestion_req = db.query(IngestionRequest).get(ingestion_request_id)
+                    if ingestion_req:
+                        if processed is not None:
+                            ingestion_req.sources_processed = processed
+                        db.commit()
+            except Exception as e:
+                logging.error(f"Failed to update ingestion request progress: {e}")
+
+        if request.use_llamaindex:
+            # Use LlamaIndex for smart processing
+            result = rag_service.ingest_documents_with_llamaindex_sync(
+                request, enhanced_progress_callback
+            )
+        else:
+            # Use basic ingestion
+            result = rag_service.ingest_documents_sync(
+                request, enhanced_progress_callback
+            )
+
+        # Update final results
+        end_time = datetime.utcnow()
+        processing_time = (end_time - start_time).total_seconds() * 1000
+
+        with SessionLocal() as db:
+            ingestion_req = db.query(IngestionRequest).get(ingestion_request_id)
+            if ingestion_req:
+                ingestion_req.completed_at = end_time
+                ingestion_req.processing_time_ms = processing_time
+                ingestion_req.total_chunks_created = result.get(
+                    "total_chunks_created", 0
+                )
+                ingestion_req.documents_created = len(
+                    result.get("ingested_documents", [])
+                )
+                ingestion_req.success_count = len(
+                    [d for d in result.get("ingested_documents", []) if d]
+                )
+                ingestion_req.error_count = len(result.get("errors", []))
+                ingestion_req.errors = result.get("errors", [])
+                db.commit()
+
+        return result
+
+    except Exception as e:
+        logging.error(f"Bulk ingestion task failed: {e}")
+
+        # Update ingestion request with failure
+        try:
+            with SessionLocal() as db:
+                ingestion_req = db.query(IngestionRequest).get(ingestion_request_id)
+                if ingestion_req:
+                    ingestion_req.completed_at = datetime.utcnow()
+                    ingestion_req.errors = [str(e)]
+                    ingestion_req.error_count = 1
+                    db.commit()
+        except Exception as db_error:
+            logging.error(f"Failed to update ingestion request with error: {db_error}")
+
+        raise
+
+
+@app.get("/rag/ingestion-requests")
+async def list_ingestion_requests(
+    limit: int = 50,
+    offset: int = 0,
+    vector_db_id: Optional[str] = None,
+    status: Optional[str] = None,
+):
+    """List ingestion requests with filtering options."""
+    from .models import SessionLocal, BackgroundTask
+
+    with SessionLocal() as db:
+        query = db.query(IngestionRequest).join(
+            BackgroundTask, IngestionRequest.task_id == BackgroundTask.task_id
+        )
+
+        if vector_db_id:
+            query = query.filter(IngestionRequest.vector_db_id == vector_db_id)
+
+        if status:
+            # Filter by task status
+            from .models import TaskStatus as ModelTaskStatus
+
+            try:
+                status_enum = ModelTaskStatus(status)
+                query = query.filter(BackgroundTask.status == status_enum)
+            except ValueError:
+                pass  # Invalid status, ignore filter
+
+        query = query.order_by(IngestionRequest.created_at.desc())
+        ingestion_requests = query.offset(offset).limit(limit).all()
+
+        results = []
+        for req in ingestion_requests:
+            results.append(
+                {
+                    "request_id": req.request_id,
+                    "task_id": req.task_id,
+                    "vector_db_id": req.vector_db_id,
+                    "source_count": req.source_count,
+                    "sources_processed": req.sources_processed,
+                    "use_llamaindex": req.use_llamaindex,
+                    "total_chunks_created": req.total_chunks_created,
+                    "documents_created": req.documents_created,
+                    "success_count": req.success_count,
+                    "error_count": req.error_count,
+                    "created_at": req.created_at.isoformat(),
+                    "started_at": (
+                        req.started_at.isoformat() if req.started_at else None
+                    ),
+                    "completed_at": (
+                        req.completed_at.isoformat() if req.completed_at else None
+                    ),
+                    "processing_time_ms": req.processing_time_ms,
+                    "source_urls": req.source_urls,
+                    "errors": req.errors,
+                    "task_status": req.task.status.value if req.task else "unknown",
+                }
+            )
+
+        return {
+            "ingestion_requests": results,
+            "total": len(results),
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+@app.get("/rag/vector-databases/{vector_db_id}/sources")
+async def list_sources(vector_db_id: str, limit: int = 50, offset: int = 0):
+    """List ingestion sources (aggregated by ingestion request) in a vector database."""
+    from .models import SessionLocal, BackgroundTask
+
+    with SessionLocal() as db:
+        # Get all ingestion requests for this vector database with their task info
+        query = (
+            db.query(IngestionRequest)
+            .join(BackgroundTask, IngestionRequest.task_id == BackgroundTask.task_id)
+            .filter(IngestionRequest.vector_db_id == vector_db_id)
+        )
+
+        query = query.order_by(IngestionRequest.created_at.desc())
+        ingestion_requests = query.offset(offset).limit(limit).all()
+
+        sources = []
+        for req in ingestion_requests:
+            # Calculate totals from the stored statistics
+            source_name = req.source_urls[0] if req.source_urls else "Unknown Source"
+
+            # Get first URL for display
+            primary_url = req.source_urls[0] if req.source_urls else ""
+
+            # Determine source type from URL
+            source_type = (
+                "github_repository" if "github.com" in primary_url else "web_page"
+            )
+
+            sources.append(
+                {
+                    "source_id": req.request_id,
+                    "source_name": source_name,
+                    "source_type": source_type,
+                    "primary_url": primary_url,
+                    "all_urls": req.source_urls,
+                    "document_count": req.documents_created,
+                    "total_chunks": req.total_chunks_created,
+                    "ingestion_method": "LlamaIndex" if req.use_llamaindex else "Basic",
+                    "created_at": req.created_at.isoformat(),
+                    "started_at": (
+                        req.started_at.isoformat() if req.started_at else None
+                    ),
+                    "completed_at": (
+                        req.completed_at.isoformat() if req.completed_at else None
+                    ),
+                    "processing_time_ms": req.processing_time_ms,
+                    "task_status": req.task.status.value if req.task else "unknown",
+                    "success_count": req.success_count,
+                    "error_count": req.error_count,
+                    "errors": req.errors or [],
+                }
+            )
+
+        return {
+            "vector_db_id": vector_db_id,
+            "sources": sources,
+            "total": len(sources),
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+@app.get(
+    "/rag/vector-databases/{vector_db_id}/documents",
+    response_model=DocumentListResponse,
+)
+async def list_documents(
+    vector_db_id: str, rag_service: RAGService = Depends(get_rag_service)
+):
+    """List documents in a vector database."""
+    try:
+        return await rag_service.list_documents(vector_db_id)
+    except Exception as e:
+        logging.error(f"Error listing documents for {vector_db_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/rag/vector-databases/{vector_db_id}/documents")
+async def update_documents(
+    vector_db_id: str,
+    request: VectorDBUpdateRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Update documents in a vector database."""
+    try:
+        # Ensure the vector_db_id matches
+        request.vector_db_id = vector_db_id
+        success = await rag_service.update_documents(request)
+        if not success:
+            raise HTTPException(status_code=404, detail="Vector database not found")
+        return {"message": "Documents updated successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating documents for {vector_db_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/query", response_model=RAGQueryResponse)
+async def query_rag(
+    request: RAGQueryRequest,
+    session_id: Optional[str] = Query(
+        None, description="Optional session ID for analytics"
+    ),
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Query the RAG system."""
+    try:
+        session_uuid = None
+        if session_id:
+            try:
+                session_uuid = uuid.UUID(session_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid session ID format")
+
+        return await rag_service.query_rag(request, session_uuid)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error querying RAG: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/rag/predefined-configs", response_model=List[VectorDBConfig])
+async def get_predefined_vector_db_configs(
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Get predefined vector database configurations."""
+    try:
+        return await rag_service.get_predefined_vector_dbs()
+    except Exception as e:
+        logging.error(f"Error getting predefined configs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/setup-predefined-dbs")
+async def setup_predefined_vector_dbs(
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Setup predefined vector databases."""
+    try:
+        created_dbs = await rag_service.setup_predefined_vector_dbs()
+        return {
+            "created_databases": created_dbs,
+            "message": f"Created {len(created_dbs)} databases",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/sync-databases")
+async def sync_vector_databases(
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """
+    Synchronize vector databases between Application Database and Llama Stack.
+
+    This endpoint:
+    1. Removes orphaned Llama Stack registrations (exist in LL but not in app DB)
+    2. Re-registers missing Llama Stack registrations (exist in app DB but not in LL)
+
+    Useful for fixing synchronization issues after system restarts or database resets.
+    """
+    try:
+        sync_results = await rag_service.sync_vector_databases()
+        return {
+            "cleaned_orphans": sync_results["cleaned_orphans"],
+            "re_registered": sync_results["re_registered"],
+            "message": f"Sync completed: cleaned {len(sync_results['cleaned_orphans'])} orphans, re-registered {len(sync_results['re_registered'])} missing",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/vector-databases/{vector_db_id}/cleanup-orphaned-chunks")
+async def cleanup_orphaned_chunks(
+    vector_db_id: str,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """
+    Clean up orphaned chunks in a vector database.
+
+    Identifies chunks that belong to deleted/inactive documents.
+    Currently only reports orphaned chunks as Llama Stack doesn't support individual chunk removal.
+    """
+    try:
+        cleanup_results = await rag_service.cleanup_orphaned_chunks(vector_db_id)
+        return {
+            "vector_db_id": vector_db_id,
+            "total_chunks": cleanup_results["total_chunks"],
+            "orphaned_chunks": cleanup_results["orphaned_chunks"],
+            "active_documents": cleanup_results["active_documents"],
+            "orphaned_document_ids": cleanup_results["orphaned_document_ids"],
+            "message": f"Found {cleanup_results['orphaned_chunks']} orphaned chunks out of {cleanup_results['total_chunks']} total chunks",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/vector-databases/{vector_db_id}/refresh-chunk-counts")
+async def refresh_chunk_counts(
+    vector_db_id: str, rag_service: RAGService = Depends(get_rag_service)
+):
+    """
+    Refresh chunk counts for all documents in a vector database.
+
+    Updates the database with actual chunk counts from Llama Stack.
+    Useful for fixing incorrect chunk counts from legacy data.
+    """
+    try:
+        # Get all active documents
+        documents_response = await rag_service.list_documents(vector_db_id)
+        document_ids = [doc.document_id for doc in documents_response.documents]
+
+        if not document_ids:
+            return {
+                "vector_db_id": vector_db_id,
+                "updated_documents": 0,
+                "message": "No active documents to update",
+            }
+
+        # Get actual chunk counts
+        actual_counts = await rag_service._get_actual_chunk_counts(
+            vector_db_id, document_ids
+        )
+
+        # Update database
+        updated_count = 0
+        with rag_service.get_db_session() as db:
+            for doc_id, chunk_count in actual_counts.items():
+                db_doc = db.query(Document).filter_by(document_id=doc_id).first()
+                if db_doc:
+                    old_count = db_doc.chunk_count
+                    db_doc.chunk_count = chunk_count
+                    updated_count += 1
+                    logging.info(
+                        f"Updated {doc_id}: {old_count} -> {chunk_count} chunks"
+                    )
+
+        return {
+            "vector_db_id": vector_db_id,
+            "updated_documents": updated_count,
+            "chunk_counts": actual_counts,
+            "message": f"Updated chunk counts for {updated_count} documents",
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/chunks/browse", response_model=ChunkBrowseResponse)
+async def browse_chunks(
+    request: ChunkBrowseRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Browse chunks in a vector database for debugging and visualization."""
+    try:
+        return await rag_service.browse_chunks(request)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/prompts/{prompt_name}")
 async def get_prompt_content(prompt_name: str):
     """Get the content of a specific prompt file."""
@@ -471,8 +1149,178 @@ async def get_jira_metrics(
         )
 
 
+# Epic and Story endpoints
+@app.get("/sessions/{session_id}/epics", response_model=EpicListResponse)
+async def get_session_epics(
+    session_id: uuid.UUID,
+    service: SessionService = Depends(get_session_service),
+):
+    """Get all epics for a session."""
+    try:
+        epics = service.get_session_epics(session_id)
+        return EpicListResponse(epics=epics, total=len(epics))
+    except Exception as e:
+        logging.error(f"Error getting epics for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/sessions/{session_id}/epics", response_model=EpicResponse)
+async def create_epic(
+    session_id: uuid.UUID,
+    epic_data: EpicCreate,
+    service: SessionService = Depends(get_session_service),
+):
+    """Create a new epic for a session."""
+    try:
+        epic = service.create_epic(session_id, epic_data)
+        return epic
+    except Exception as e:
+        logging.error(f"Error creating epic for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/epics/{epic_id}", response_model=EpicResponse)
+async def get_epic(
+    epic_id: uuid.UUID,
+    service: SessionService = Depends(get_session_service),
+):
+    """Get an epic by ID."""
+    try:
+        epic = service.get_epic(epic_id)
+        if not epic:
+            raise HTTPException(status_code=404, detail="Epic not found")
+        return epic
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting epic {epic_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/epics/{epic_id}", response_model=EpicResponse)
+async def update_epic(
+    epic_id: uuid.UUID,
+    epic_data: EpicUpdate,
+    service: SessionService = Depends(get_session_service),
+):
+    """Update an epic."""
+    try:
+        epic = service.update_epic(epic_id, epic_data)
+        if not epic:
+            raise HTTPException(status_code=404, detail="Epic not found")
+        return epic
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating epic {epic_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/epics/{epic_id}")
+async def delete_epic(
+    epic_id: uuid.UUID,
+    service: SessionService = Depends(get_session_service),
+):
+    """Delete an epic and all its stories."""
+    try:
+        success = service.delete_epic(epic_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Epic not found")
+        return {"message": "Epic deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error deleting epic {epic_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/epics/{epic_id}/stories", response_model=StoryListResponse)
+async def get_epic_stories(
+    epic_id: uuid.UUID,
+    service: SessionService = Depends(get_session_service),
+):
+    """Get all stories for an epic."""
+    try:
+        stories = service.get_epic_stories(epic_id)
+        return StoryListResponse(stories=stories, total=len(stories))
+    except Exception as e:
+        logging.error(f"Error getting stories for epic {epic_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/epics/{epic_id}/stories", response_model=StoryResponse)
+async def create_story(
+    epic_id: uuid.UUID,
+    story_data: StoryCreate,
+    service: SessionService = Depends(get_session_service),
+):
+    """Create a new story for an epic."""
+    try:
+        story = service.create_story(epic_id, story_data)
+        return story
+    except Exception as e:
+        logging.error(f"Error creating story for epic {epic_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/stories/{story_id}", response_model=StoryResponse)
+async def get_story(
+    story_id: uuid.UUID,
+    service: SessionService = Depends(get_session_service),
+):
+    """Get a story by ID."""
+    try:
+        story = service.get_story(story_id)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        return story
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error getting story {story_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/stories/{story_id}", response_model=StoryResponse)
+async def update_story(
+    story_id: uuid.UUID,
+    story_data: StoryUpdate,
+    service: SessionService = Depends(get_session_service),
+):
+    """Update a story."""
+    try:
+        story = service.update_story(story_id, story_data)
+        if not story:
+            raise HTTPException(status_code=404, detail="Story not found")
+        return story
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating story {story_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/stories/{story_id}")
+async def delete_story(
+    story_id: uuid.UUID,
+    service: SessionService = Depends(get_session_service),
+):
+    """Delete a story."""
+    try:
+        success = service.delete_story(story_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Story not found")
+        return {"message": "Story deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error deleting story {story_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# WebSocket endpoint for real-time updates
 @app.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: uuid.UUID):
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """WebSocket endpoint for real-time session updates."""
     await ws_manager.connect(websocket, session_id)
     try:

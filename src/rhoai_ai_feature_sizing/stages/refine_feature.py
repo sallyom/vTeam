@@ -4,7 +4,10 @@ import time
 from pathlib import Path
 from llama_stack_client import Agent, AgentEventLogger
 from rhoai_ai_feature_sizing.llama_stack_setup import get_llama_stack_client
-from typing import Optional, Dict
+from typing import Optional, Dict, List
+
+from .rag_enhanced_agent import create_rag_enhanced_refinement_agent
+from ..api.rag_service import RAGService
 
 
 def _filter_session_id_from_tool_calls(tool_calls):
@@ -48,15 +51,28 @@ def _load_validation_template() -> str:
         return f.read()
 
 
-def generate_refinement_with_agent(
+async def generate_refinement_with_agent(
     issue_key: str,
     template: str,
     session_id=None,
     custom_prompts: Optional[Dict[str, str]] = None,
+    use_rag: bool = True,
+    vector_db_ids: Optional[List[str]] = None,
 ) -> str:
     """
-    Generate a comprehensive refinement document using the Llama Stack agent.
+    Generate a comprehensive refinement document using RAG-enhanced agent.
     Uses LLM-based validation with iteration for quality improvement.
+
+    Args:
+        issue_key: JIRA issue key to refine
+        template: Refinement template to use
+        session_id: Optional session ID for tracking
+        custom_prompts: Optional custom prompts dictionary
+        use_rag: Whether to use RAG-enhanced agent (default: True)
+        vector_db_ids: Specific vector databases to use for RAG context
+
+    Returns:
+        Generated refinement document with RAG-enhanced insights
     """
     logger = logging.getLogger("refine_feature")
     INFERENCE_MODEL = os.getenv("INFERENCE_MODEL")
@@ -115,12 +131,23 @@ def generate_refinement_with_agent(
         else:
             validation_template = _load_validation_template()
 
-        # Create generation agent
-        generation_agent = Agent(
-            client,
-            model=INFERENCE_MODEL,
-            instructions=INSTRUCTIONS,
-        )
+        # Create RAG-enhanced generation agent or fallback to basic agent
+        if use_rag:
+            logger.info(
+                f"Using RAG-enhanced refinement agent with vector DBs: {vector_db_ids or 'default'}"
+            )
+            rag_service = RAGService()
+            rag_agent = create_rag_enhanced_refinement_agent(rag_service)
+            generation_agent = await rag_agent.create_agent_with_rag_tools(
+                vector_db_ids=vector_db_ids, custom_instructions=INSTRUCTIONS
+            )
+        else:
+            logger.info("Using basic agent (RAG disabled)")
+            generation_agent = Agent(
+                client,
+                model=INFERENCE_MODEL,
+                instructions=INSTRUCTIONS,
+            )
 
         # Create validation agent
         validation_agent = Agent(
@@ -292,6 +319,24 @@ def _create_improvement_prompt(
     issue_key: str, template: str, validation_result: dict, jira_data: str
 ) -> str:
     """Create an improvement prompt based on validation feedback."""
+    if validation_result is None:
+        # If validation failed, return a basic improvement prompt
+        return f"""
+Please improve and refine the following document to make it more comprehensive and detailed.
+
+JIRA Issue: {issue_key}
+Template: {template}
+
+Original JIRA Data:
+{jira_data}
+
+Focus on:
+- Adding more technical detail and implementation specifics
+- Expanding acceptance criteria and test scenarios
+- Including relevant architectural considerations
+- Providing clearer business value and user impact descriptions
+"""
+
     issues = validation_result.get("issues", [])
 
     feedback_text = "\n".join(
@@ -351,3 +396,35 @@ def _basic_fallback_validation(content: str) -> dict:
         "issues": issues,
         "summary": "Basic validation (LLM validation unavailable)",
     }
+
+
+# Synchronous wrapper for backward compatibility
+def generate_refinement_with_agent_sync(
+    issue_key: str,
+    template: str,
+    session_id=None,
+    custom_prompts: Optional[Dict[str, str]] = None,
+    use_rag: bool = True,
+    vector_db_ids: Optional[List[str]] = None,
+) -> str:
+    """
+    Synchronous wrapper for RAG-enhanced refinement generation.
+
+    Args:
+        issue_key: JIRA issue key to refine
+        template: Refinement template to use
+        session_id: Optional session ID for tracking
+        custom_prompts: Optional custom prompts dictionary
+        use_rag: Whether to use RAG-enhanced agent (default: True)
+        vector_db_ids: Specific vector databases to use for RAG context
+
+    Returns:
+        Generated refinement document with RAG-enhanced insights
+    """
+    import asyncio
+
+    return asyncio.run(
+        generate_refinement_with_agent(
+            issue_key, template, session_id, custom_prompts, use_rag, vector_db_ids
+        )
+    )

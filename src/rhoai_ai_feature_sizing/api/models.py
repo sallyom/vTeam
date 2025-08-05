@@ -15,6 +15,8 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    JSON,
+    Float,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
@@ -96,6 +98,33 @@ class MessageStatus(str, Enum):
     ERROR = "error"
 
 
+class EpicStatus(str, Enum):
+    """Status of an epic."""
+
+    TODO = "todo"
+    IN_PROGRESS = "in-progress"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
+class StoryStatus(str, Enum):
+    """Status of a story."""
+
+    TODO = "todo"
+    IN_PROGRESS = "in-progress"
+    DONE = "done"
+    CANCELLED = "cancelled"
+
+
+class Priority(str, Enum):
+    """Priority levels for epics and stories."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
 class Session(Base):
     """Main session tracking table."""
 
@@ -127,6 +156,10 @@ class Session(Base):
     mcp_usages = relationship(
         "MCPUsage", back_populates="session", cascade="all, delete-orphan"
     )
+    rag_queries = relationship(
+        "RAGQuery", back_populates="session", cascade="all, delete-orphan"
+    )
+    epics = relationship("Epic", back_populates="session", cascade="all, delete-orphan")
 
     def __repr__(self):
         return (
@@ -199,6 +232,73 @@ class MCPUsage(Base):
         return f"<MCPUsage(id={self.id}, tool_name={self.tool_name}, success={self.success})>"
 
 
+# RAG-related models
+class VectorDatabase(Base):
+    """Vector database configuration and metadata."""
+
+    __tablename__ = "vector_databases"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    vector_db_id = Column(
+        String(255), unique=True, nullable=False, index=True
+    )  # Used by Llama Stack
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    embedding_model = Column(String(255), nullable=False, default="all-MiniLM-L6-v2")
+    embedding_dimension = Column(Integer, nullable=False, default=384)
+    use_case = Column(
+        String(100), nullable=False
+    )  # 'patternfly', 'github_repos', 'documentation', etc.
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    documents = relationship(
+        "Document", back_populates="vector_db", cascade="all, delete-orphan"
+    )
+
+
+class Document(Base):
+    """Document metadata and ingestion tracking."""
+
+    __tablename__ = "documents"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    document_id = Column(String(255), nullable=False, index=True)  # Used by Llama Stack
+    vector_db_id = Column(GUID(), ForeignKey("vector_databases.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    source_url = Column(Text, nullable=False)
+    mime_type = Column(String(100), nullable=False, default="text/plain")
+    ingestion_date = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, nullable=True)
+    chunk_count = Column(Integer, default=0)
+    document_metadata = Column(JSON, nullable=True)  # Store additional metadata as JSON
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    vector_db = relationship("VectorDatabase", back_populates="documents")
+
+
+class RAGQuery(Base):
+    """RAG query history and analytics."""
+
+    __tablename__ = "rag_queries"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(
+        GUID(), ForeignKey("sessions.id"), nullable=True
+    )  # Optional link to session
+    query_text = Column(Text, nullable=False)
+    vector_db_ids = Column(JSON, nullable=False)  # List of vector DB IDs searched
+    chunks_retrieved = Column(Integer, default=0)
+    query_time_ms = Column(Float, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    session = relationship("Session", back_populates="rag_queries")
+
+
 # Database setup
 def get_database_url():
     """Get database URL from environment variables."""
@@ -234,6 +334,163 @@ def create_session_factory():
     """Create SQLAlchemy session factory."""
     engine = create_engine_instance()
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+# Create a global session factory for use throughout the application
+SessionLocal = create_session_factory()
+
+
+# Task Management Models
+class TaskStatus(Enum):
+    """Status of a background task."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class BackgroundTask(Base):
+    """Persistent storage for background tasks."""
+
+    __tablename__ = "background_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(String(36), unique=True, index=True, nullable=False)
+    status = Column(SQLEnum(TaskStatus), nullable=False, default=TaskStatus.PENDING)
+    task_type = Column(String(50), nullable=False)  # e.g., "ingestion", "processing"
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    progress = Column(Float, default=0.0, nullable=False)  # 0.0 to 1.0
+    current_step = Column(String(255), nullable=True)
+    total_items = Column(Integer, nullable=True)
+    processed_items = Column(Integer, default=0, nullable=False)
+
+    error_message = Column(Text, nullable=True)
+    result = Column(JSON, nullable=True)
+    task_metadata = Column(JSON, nullable=True)  # Task-specific metadata
+
+
+class IngestionRequest(Base):
+    """Persistent storage for document ingestion requests."""
+
+    __tablename__ = "ingestion_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(String(36), unique=True, index=True, nullable=False)
+    task_id = Column(String(36), ForeignKey("background_tasks.task_id"), nullable=False)
+
+    vector_db_id = Column(String(100), nullable=False)
+    source_count = Column(Integer, nullable=False)  # Number of sources to process
+    use_llamaindex = Column(Boolean, default=True, nullable=False)
+
+    chunk_size_in_tokens = Column(Integer, default=512, nullable=False)
+    chunk_overlap_in_tokens = Column(Integer, default=0, nullable=False)
+
+    # Progress tracking
+    sources_processed = Column(Integer, default=0, nullable=False)
+    total_chunks_created = Column(Integer, default=0, nullable=False)
+    documents_created = Column(Integer, default=0, nullable=False)
+
+    # Timing
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    processing_time_ms = Column(Float, nullable=True)
+
+    # Results and errors
+    success_count = Column(Integer, default=0, nullable=False)
+    error_count = Column(Integer, default=0, nullable=False)
+    errors = Column(JSON, nullable=True)  # List of error messages
+
+    # Source data
+    source_urls = Column(JSON, nullable=False)  # List of source URLs
+    source_metadata = Column(JSON, nullable=True)  # Additional source metadata
+
+    # Relationships
+    task = relationship("BackgroundTask", backref="ingestion_requests")
+
+
+class Epic(Base):
+    """Epic generated from JIRA analysis."""
+
+    __tablename__ = "epics"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    session_id = Column(
+        GUID(),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    component_team = Column(String(255), nullable=True)  # Team responsible for the epic
+    status = Column(SQLEnum(EpicStatus), default=EpicStatus.TODO, nullable=False)
+    priority = Column(SQLEnum(Priority), default=Priority.MEDIUM, nullable=False)
+
+    # Effort tracking
+    estimated_hours = Column(Float, nullable=True)
+    actual_hours = Column(Float, default=0.0, nullable=False)
+    completion_percentage = Column(Float, default=0.0, nullable=False)
+
+    # Dates
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+    due_date = Column(DateTime, nullable=True)
+
+    # Additional metadata
+    epic_metadata = Column(JSON, nullable=True)  # Additional metadata
+
+    # Relationships
+    session = relationship("Session", back_populates="epics")
+    stories = relationship("Story", back_populates="epic", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Epic(id={self.id}, title={self.title}, status={self.status})>"
+
+
+class Story(Base):
+    """Story/ticket under an epic."""
+
+    __tablename__ = "stories"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    epic_id = Column(
+        GUID(), ForeignKey("epics.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(SQLEnum(StoryStatus), default=StoryStatus.TODO, nullable=False)
+
+    # Story points and effort
+    story_points = Column(Integer, nullable=True)  # Fibonacci: 1, 2, 3, 5, 8, 13, 21
+    estimated_hours = Column(Float, nullable=True)
+    actual_hours = Column(Float, default=0.0, nullable=False)
+
+    # Assignment and tracking
+    assignee = Column(String(255), nullable=True)  # Username or email
+
+    # Dates
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+    due_date = Column(DateTime, nullable=True)
+
+    # Additional metadata
+    story_metadata = Column(JSON, nullable=True)  # Additional metadata
+
+    # Relationships
+    epic = relationship("Epic", back_populates="stories")
+
+    def __repr__(self):
+        return f"<Story(id={self.id}, title={self.title}, status={self.status}, points={self.story_points})>"
 
 
 def init_database():

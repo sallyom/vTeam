@@ -20,10 +20,15 @@ from .models import (
     Message,
     Output,
     MCPUsage,
+    Epic,
+    Story,
     SessionStatus,
     Stage,
     MessageRole,
     MessageStatus,
+    EpicStatus,
+    StoryStatus,
+    Priority,
     create_session_factory,
 )
 from .schemas import (
@@ -32,8 +37,14 @@ from .schemas import (
     MessageResponse,
     OutputResponse,
     MCPUsageResponse,
+    EpicCreate,
+    EpicUpdate,
+    EpicResponse,
+    StoryCreate,
+    StoryUpdate,
+    StoryResponse,
 )
-from ..stages.refine_feature import generate_refinement_with_agent
+from ..stages.refine_feature import generate_refinement_with_agent_sync
 from ..stages.draft_jiras import draft_jiras_from_file
 
 
@@ -514,11 +525,13 @@ class SessionService:
             loop = asyncio.get_event_loop()
             refinement_content = await loop.run_in_executor(
                 self.executor,
-                generate_refinement_with_agent,
+                generate_refinement_with_agent_sync,
                 jira_key,
                 template,
                 session_id,
                 custom_prompts,
+                True,  # use_rag
+                None,  # vector_db_ids (use default)
             )
 
             # Save output
@@ -621,11 +634,41 @@ class SessionService:
                 temp_file,
                 soft_mode,
                 custom_prompts,
+                True,  # use_rag
+                None,  # vector_db_ids (use default)
             )
 
             # Save output
             filename = f"jiras_{refined_output.filename.replace('refined_', '')}"
             self.add_output(session_id, Stage.JIRAS, filename, jira_content)
+
+            # Extract structured epic/story data and create in database
+            try:
+                from ..stages.draft_jiras import (
+                    extract_epic_story_data,
+                    create_epics_and_stories_from_extracted_data,
+                )
+
+                self.logger.info(
+                    f"Extracting structured data from JIRA markdown for session {session_id}"
+                )
+                extracted_data = extract_epic_story_data(jira_content)
+
+                # Create epics and stories in database
+                creation_result = create_epics_and_stories_from_extracted_data(
+                    str(session_id), extracted_data, self
+                )
+
+                self.logger.info(
+                    f"Created {creation_result['total_epics']} epics and {creation_result['total_stories']} stories for session {session_id}"
+                )
+
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to extract/create structured data for session {session_id}: {e}"
+                )
+                # Don't fail the whole stage if extraction fails, just log the error
+                pass
 
             duration = time.time() - start_time
             # Update loading message to success
@@ -1046,3 +1089,189 @@ class SessionService:
         except Exception as e:
             self.logger.error(f"Error deleting session {session_id}: {e}")
             raise
+
+    # Epic management methods
+    def get_session_epics(self, session_id: uuid.UUID) -> List[EpicResponse]:
+        """Get all epics for a session."""
+        with self.get_db_session() as db_session:
+            epics = db_session.query(Epic).filter(Epic.session_id == session_id).all()
+            return [EpicResponse.model_validate(epic) for epic in epics]
+
+    def create_epic(self, session_id: uuid.UUID, epic_data: EpicCreate) -> EpicResponse:
+        """Create a new epic for a session."""
+        with self.get_db_session() as db_session:
+            # Verify session exists
+            session = db_session.query(Session).filter(Session.id == session_id).first()
+            if not session:
+                raise ValueError(f"Session {session_id} not found")
+
+            # Create epic
+            epic = Epic(
+                id=uuid.uuid4(),
+                session_id=session_id,
+                title=epic_data.title,
+                description=epic_data.description,
+                component_team=epic_data.component_team,
+                priority=epic_data.priority,
+                estimated_hours=epic_data.estimated_hours,
+                due_date=epic_data.due_date,
+            )
+            db_session.add(epic)
+            db_session.flush()  # Flush to get the epic ID
+
+            # Create associated stories if provided
+            for story_data in epic_data.stories or []:
+                story = Story(
+                    id=uuid.uuid4(),
+                    epic_id=epic.id,
+                    title=story_data.title,
+                    description=story_data.description,
+                    story_points=story_data.story_points,
+                    estimated_hours=story_data.estimated_hours,
+                    assignee=story_data.assignee,
+                    due_date=story_data.due_date,
+                )
+                db_session.add(story)
+
+            db_session.commit()
+
+            # Refresh to get all relationships
+            db_session.refresh(epic)
+            return EpicResponse.model_validate(epic)
+
+    def get_epic(self, epic_id: uuid.UUID) -> Optional[EpicResponse]:
+        """Get an epic by ID."""
+        with self.get_db_session() as db_session:
+            epic = db_session.query(Epic).filter(Epic.id == epic_id).first()
+            if epic:
+                return EpicResponse.model_validate(epic)
+            return None
+
+    def update_epic(
+        self, epic_id: uuid.UUID, epic_data: EpicUpdate
+    ) -> Optional[EpicResponse]:
+        """Update an epic."""
+        with self.get_db_session() as db_session:
+            epic = db_session.query(Epic).filter(Epic.id == epic_id).first()
+            if not epic:
+                return None
+
+            # Update fields
+            if epic_data.title is not None:
+                epic.title = epic_data.title
+            if epic_data.description is not None:
+                epic.description = epic_data.description
+            if epic_data.status is not None:
+                epic.status = epic_data.status
+            if epic_data.priority is not None:
+                epic.priority = epic_data.priority
+            if epic_data.estimated_hours is not None:
+                epic.estimated_hours = epic_data.estimated_hours
+            if epic_data.actual_hours is not None:
+                epic.actual_hours = epic_data.actual_hours
+            if epic_data.completion_percentage is not None:
+                epic.completion_percentage = epic_data.completion_percentage
+            if epic_data.component_team is not None:
+                epic.component_team = epic_data.component_team
+            if epic_data.due_date is not None:
+                epic.due_date = epic_data.due_date
+
+            epic.updated_at = datetime.utcnow()
+            db_session.commit()
+            db_session.refresh(epic)
+            return EpicResponse.model_validate(epic)
+
+    def delete_epic(self, epic_id: uuid.UUID) -> bool:
+        """Delete an epic and all its stories."""
+        with self.get_db_session() as db_session:
+            epic = db_session.query(Epic).filter(Epic.id == epic_id).first()
+            if not epic:
+                return False
+
+            db_session.delete(epic)
+            db_session.commit()
+            return True
+
+    # Story management methods
+    def get_epic_stories(self, epic_id: uuid.UUID) -> List[StoryResponse]:
+        """Get all stories for an epic."""
+        with self.get_db_session() as db_session:
+            stories = db_session.query(Story).filter(Story.epic_id == epic_id).all()
+            return [StoryResponse.model_validate(story) for story in stories]
+
+    def create_story(
+        self, epic_id: uuid.UUID, story_data: StoryCreate
+    ) -> StoryResponse:
+        """Create a new story for an epic."""
+        with self.get_db_session() as db_session:
+            # Verify epic exists
+            epic = db_session.query(Epic).filter(Epic.id == epic_id).first()
+            if not epic:
+                raise ValueError(f"Epic {epic_id} not found")
+
+            # Create story
+            story = Story(
+                id=uuid.uuid4(),
+                epic_id=epic_id,
+                title=story_data.title,
+                description=story_data.description,
+                story_points=story_data.story_points,
+                estimated_hours=story_data.estimated_hours,
+                assignee=story_data.assignee,
+                due_date=story_data.due_date,
+            )
+            db_session.add(story)
+            db_session.commit()
+            db_session.refresh(story)
+            return StoryResponse.model_validate(story)
+
+    def get_story(self, story_id: uuid.UUID) -> Optional[StoryResponse]:
+        """Get a story by ID."""
+        with self.get_db_session() as db_session:
+            story = db_session.query(Story).filter(Story.id == story_id).first()
+            if story:
+                return StoryResponse.model_validate(story)
+            return None
+
+    def update_story(
+        self, story_id: uuid.UUID, story_data: StoryUpdate
+    ) -> Optional[StoryResponse]:
+        """Update a story."""
+        with self.get_db_session() as db_session:
+            story = db_session.query(Story).filter(Story.id == story_id).first()
+            if not story:
+                return None
+
+            # Update fields
+            if story_data.title is not None:
+                story.title = story_data.title
+            if story_data.description is not None:
+                story.description = story_data.description
+            if story_data.status is not None:
+                story.status = story_data.status
+            if story_data.story_points is not None:
+                story.story_points = story_data.story_points
+            if story_data.estimated_hours is not None:
+                story.estimated_hours = story_data.estimated_hours
+            if story_data.actual_hours is not None:
+                story.actual_hours = story_data.actual_hours
+            if story_data.assignee is not None:
+                story.assignee = story_data.assignee
+            if story_data.due_date is not None:
+                story.due_date = story_data.due_date
+
+            story.updated_at = datetime.utcnow()
+            db_session.commit()
+            db_session.refresh(story)
+            return StoryResponse.model_validate(story)
+
+    def delete_story(self, story_id: uuid.UUID) -> bool:
+        """Delete a story."""
+        with self.get_db_session() as db_session:
+            story = db_session.query(Story).filter(Story.id == story_id).first()
+            if not story:
+                return False
+
+            db_session.delete(story)
+            db_session.commit()
+            return True
