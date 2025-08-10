@@ -1,5 +1,9 @@
 import os
 from llama_stack_client import LlamaStackClient
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 LLAMA_STACK_URL = os.getenv("LLAMA_STACK_URL")
 MCP_ATLASSIAN_URL = os.getenv("MCP_ATLASSIAN_URL")

@@ -15,28 +15,15 @@ import {
   ToolbarContent,
   ToolbarItem,
 } from '@patternfly/react-core';
-import { ChartLineIcon, CogIcon, DatabaseIcon } from '@patternfly/react-icons';
-import SessionSidebar from '../../components/SessionSidebar';
-import PromptSettings from '../../components/PromptSettings';
-import JiraMetrics from '../../components/JiraMetrics';
-import { Session } from '../../types/api';
+import { DatabaseIcon } from '@patternfly/react-icons';
 
 interface IAppLayout {
   children: React.ReactNode;
 }
 
 const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
-  const [selectedSession, setSelectedSession] = React.useState<Session | null>(null);
-  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
-  const [isJiraMetricsOpen, setIsJiraMetricsOpen] = React.useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-
-  const handleSessionSelect = (session: Session) => {
-    setSelectedSession(session);
-    console.log(session);
-    navigate(`/sessions/${session.id}`);
-  };
 
   const masthead = (
     <Masthead>
@@ -93,45 +80,17 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
           <ToolbarContent>
             <ToolbarItem>
               <Button
-                variant="plain"
-                icon={<ChartLineIcon />}
-                onClick={() => setIsJiraMetricsOpen(true)}
-                aria-label="JIRA Metrics"
-              >
-                Metrics
-              </Button>
-            </ToolbarItem>
-            <ToolbarItem>
-              <Button
                 variant={location.pathname.includes('rag') ? 'control' : 'plain'}
                 icon={<DatabaseIcon />}
                 onClick={() => navigate('/rag')}
               >
-                RAG
-              </Button>
-            </ToolbarItem>
-            <ToolbarItem>
-              <Button
-                variant="plain"
-                icon={<CogIcon />}
-                onClick={() => setIsSettingsOpen(true)}
-                aria-label="Prompt Settings"
-              >
-                Settings
+                RAG Manager
               </Button>
             </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
       </MastheadContent>
     </Masthead>
-  );
-
-  const Sidebar = (
-    <PageSidebar>
-      <PageSidebarBody>
-        <SessionSidebar selectedSession={selectedSession} onSessionSelect={handleSessionSelect} />
-      </PageSidebarBody>
-    </PageSidebar>
   );
 
   const pageId = 'primary-app-container';
@@ -150,10 +109,8 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
   );
 
   return (
-    <Page mainContainerId={pageId} masthead={masthead} sidebar={Sidebar} skipToContent={PageSkipToContent}>
+    <Page mainContainerId={pageId} masthead={masthead} skipToContent={PageSkipToContent}>
       {children}
-      <PromptSettings isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      <JiraMetrics isOpen={isJiraMetricsOpen} onClose={() => setIsJiraMetricsOpen(false)} />
     </Page>
   );
 };

@@ -127,12 +127,10 @@ class RAGService:
                     name=vector_db.name,
                     description=vector_db.description,
                     embedding_model=vector_db.embedding_model,
-                    embedding_dimension=vector_db.embedding_dimension,
-                    use_case=vector_db.use_case,
                     document_count=0,
-                    total_chunks=0,
+                    chunk_count=0,
                     created_at=vector_db.created_at,
-                    last_updated=None,
+                    updated_at=None,
                 )
 
         except Exception as e:
@@ -158,12 +156,10 @@ class RAGService:
                         name=vdb.name,
                         description=vdb.description,
                         embedding_model=vdb.embedding_model,
-                        embedding_dimension=vdb.embedding_dimension,
-                        use_case=vdb.use_case,
                         document_count=doc_count,
-                        total_chunks=total_chunks,
+                        chunk_count=total_chunks,
                         created_at=vdb.created_at,
-                        last_updated=vdb.last_updated,
+                        updated_at=vdb.last_updated,
                     )
                 )
 
@@ -192,12 +188,10 @@ class RAGService:
                 name=vdb.name,
                 description=vdb.description,
                 embedding_model=vdb.embedding_model,
-                embedding_dimension=vdb.embedding_dimension,
-                use_case=vdb.use_case,
                 document_count=doc_count,
-                total_chunks=total_chunks,
+                chunk_count=total_chunks,
                 created_at=vdb.created_at,
-                last_updated=vdb.last_updated,
+                updated_at=vdb.last_updated,
             )
 
     async def delete_vector_database(self, vector_db_id: str) -> bool:
@@ -264,7 +258,7 @@ class RAGService:
                 client.tool_runtime.rag_tool.insert(
                     documents=rag_documents,
                     vector_db_id=request.vector_db_id,
-                    chunk_size_in_tokens=request.chunk_size_in_tokens,
+                    chunk_size_in_tokens=request.chunk_size,
                 )
             except Exception as e:
                 self.logger.error(f"Llama Stack ingestion failed: {e}")
@@ -280,7 +274,7 @@ class RAGService:
                         client.tool_runtime.rag_tool.insert(
                             documents=rag_documents,
                             vector_db_id=request.vector_db_id,
-                            chunk_size_in_tokens=request.chunk_size_in_tokens,
+                            chunk_size_in_tokens=request.chunk_size,
                         )
                         self.logger.info(
                             "Auto-recovery successful - ingestion completed after re-registration"
@@ -327,11 +321,13 @@ class RAGService:
                     ingested_docs.append(
                         DocumentInfo(
                             document_id=doc_id,
-                            source_url=doc_source.url,
+                            name=doc_source.name or f"Document {i+1}",
+                            url=doc_source.url,
                             mime_type=doc_source.mime_type,
-                            ingestion_date=document.ingestion_date,
+                            size=0,  # Size not available for URL-based documents
                             chunk_count=0,  # Will be updated below
-                            metadata=doc_source.metadata or {},
+                            created_at=document.ingestion_date,
+                            updated_at=document.ingestion_date,
                         )
                     )
 
@@ -410,11 +406,13 @@ class RAGService:
                     documents.append(
                         DocumentInfo(
                             document_id=doc.document_id,
-                            source_url=doc.source_url,
+                            name=doc.source_url.split("/")[-1] or "Unknown Document",
+                            url=doc.source_url,
                             mime_type=doc.mime_type,
-                            ingestion_date=doc.ingestion_date,
+                            size=0,  # Size not stored in current schema
                             chunk_count=doc.chunk_count,
-                            metadata=doc.document_metadata or {},
+                            created_at=doc.ingestion_date,
+                            updated_at=doc.ingestion_date,
                         )
                     )
 
@@ -591,7 +589,7 @@ class RAGService:
                 client.tool_runtime.rag_tool.insert(
                     documents=rag_documents,
                     vector_db_id=request.vector_db_id,
-                    chunk_size_in_tokens=request.chunk_size_in_tokens,
+                    chunk_size_in_tokens=request.chunk_size,
                 )
             except Exception as e:
                 self.logger.error(f"Llama Stack ingestion failed: {e}")
@@ -625,11 +623,12 @@ class RAGService:
                     doc_info = DocumentInfo(
                         document_id=doc_id,
                         name=file_info["name"],
-                        source_url=file_info["source_url"],
+                        url=file_info["source_url"],
                         mime_type=file_info["mime_type"],
+                        size=file_info.get("size", 0),
                         chunk_count=len(file_info["chunks"]),
-                        metadata=file_info["metadata"],
-                        ingestion_date=document.ingestion_date,
+                        created_at=document.ingestion_date,
+                        updated_at=document.ingestion_date,
                     )
                     ingested_docs.append(doc_info)
 
@@ -775,7 +774,7 @@ class RAGService:
                 client.tool_runtime.rag_tool.insert(
                     documents=rag_documents,
                     vector_db_id=request.vector_db_id,
-                    chunk_size_in_tokens=request.chunk_size_in_tokens,
+                    chunk_size_in_tokens=request.chunk_size,
                 )
             except Exception as e:
                 self.logger.error(f"Llama Stack ingestion failed: {e}")
@@ -849,7 +848,7 @@ class RAGService:
             basic_request = DocumentIngestionRequest(
                 vector_db_id=request.vector_db_id,
                 documents=request.documents,
-                chunk_size_in_tokens=request.chunk_size_in_tokens,
+                chunk_size_in_tokens=request.chunk_size,
                 chunk_overlap_in_tokens=request.chunk_overlap_in_tokens,
             )
         else:

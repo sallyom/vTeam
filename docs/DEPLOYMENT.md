@@ -1,8 +1,8 @@
 # Deployment Guide
 
-This guide shows you how to deploy the complete RHOAI AI Feature Sizing application to OpenShift, including both the React frontend and Python backend with external model providers.
+This comprehensive deployment guide covers all deployment scenarios for the RHOAI AI Feature Sizing system, from local development to production-scale OpenShift deployments.
 
-## 🎯 Overview
+## 🎯 Deployment Overview
 
 This deployment provides a **scalable, production-ready** setup with:
 

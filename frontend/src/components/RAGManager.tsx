@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Alert,
   Badge,
@@ -30,25 +29,33 @@ import {
   TextInput,
   Title,
 } from '@patternfly/react-core';
-import { ArrowRightIcon, DatabaseIcon, FileIcon, PlusCircleIcon, SearchIcon } from '@patternfly/react-icons';
+import {
+  ArrowRightIcon,
+  CheckIcon,
+  DatabaseIcon,
+  FileIcon,
+  PlusCircleIcon,
+  SearchIcon,
+  TrashIcon,
+} from '@patternfly/react-icons';
 
-import { apiService } from '../services/api';
-import type { VectorDBConfig, VectorDBInfo } from '../types/api';
+import { simpleApi } from '../services/simpleApi';
+import type { RAGStoreInfo } from '../services/simpleApi';
 
 const RAGManager: React.FC = () => {
-  const navigate = useNavigate();
-
   // State
-  const [vectorDbs, setVectorDbs] = useState<VectorDBInfo[]>([]);
+  const [vectorDbs, setVectorDbs] = useState<RAGStoreInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [selectedStore, setSelectedStore] = useState<string | null>(null);
 
   // Modal states
   const [showCreateDbModal, setShowCreateDbModal] = useState(false);
+  const [showIngestModal, setShowIngestModal] = useState(false);
 
   // Form states
-  const [newDbConfig, setNewDbConfig] = useState<VectorDBConfig>({
+  const [newDbConfig, setNewDbConfig] = useState({
     vector_db_id: '',
     name: '',
     description: '',
@@ -60,6 +67,28 @@ const RAGManager: React.FC = () => {
   // Select states
   const [isUseCaseSelectOpen, setIsUseCaseSelectOpen] = useState(false);
 
+  // Document ingestion states
+  const [ingestDocuments, setIngestDocuments] = useState('');
+  const [isIngesting, setIsIngesting] = useState(false);
+  const [documentList, setDocumentList] = useState<
+    Array<{
+      id: string;
+      name: string;
+      url: string;
+      mime_type: string;
+      metadata: Record<string, unknown>;
+    }>
+  >([]);
+  const [showAdvancedForm, setShowAdvancedForm] = useState(false);
+
+  // New document form states
+  const [newDoc, setNewDoc] = useState({
+    name: '',
+    url: '',
+    mime_type: 'text/html',
+    metadata: {} as Record<string, unknown>,
+  });
+
   useEffect(() => {
     loadVectorDatabases();
   }, []);
@@ -67,10 +96,10 @@ const RAGManager: React.FC = () => {
   const loadVectorDatabases = async () => {
     try {
       setLoading(true);
-      const response = await apiService.listVectorDatabases();
-      setVectorDbs(response.vector_dbs);
+      const response = await simpleApi.listRAGStores();
+      setVectorDbs(response.stores);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load vector databases');
+      setError(err instanceof Error ? err.message : 'Failed to load RAG stores');
     } finally {
       setLoading(false);
     }
@@ -78,8 +107,8 @@ const RAGManager: React.FC = () => {
 
   const handleCreateDatabase = async () => {
     try {
-      await apiService.createVectorDatabase(newDbConfig);
-      setSuccess('Vector database created successfully');
+      await simpleApi.createRAGStore(newDbConfig.vector_db_id, newDbConfig.name, newDbConfig.description);
+      setSuccess('RAG store created successfully');
       setShowCreateDbModal(false);
       setNewDbConfig({
         vector_db_id: '',
@@ -91,36 +120,109 @@ const RAGManager: React.FC = () => {
       });
       loadVectorDatabases();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create vector database');
+      setError(err instanceof Error ? err.message : 'Failed to create RAG store');
     }
   };
 
   const handleSetupPredefined = async () => {
     try {
-      await apiService.setupPredefinedVectorDatabases();
-      setSuccess('Predefined vector databases set up successfully');
+      setLoading(true);
+      const result = await simpleApi.setupPredefinedRAGStores();
+      setSuccess(`${result.message}. Check the logs for details.`);
       loadVectorDatabases();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to setup predefined databases');
+      setError(err instanceof Error ? err.message : 'Failed to setup predefined stores');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const navigateToDatabase = (vectorDbId: string) => {
-    navigate(`/rag/db/${vectorDbId}`);
+  const handleStoreSelect = (storeId: string) => {
+    setSelectedStore(selectedStore === storeId ? null : storeId);
   };
 
-  const getUseCaseBadgeColor = (useCase: string) => {
-    switch (useCase.toLowerCase()) {
-      case 'patternfly':
-        return 'blue';
-      case 'documentation':
-        return 'green';
-      case 'github_repos':
-        return 'purple';
-      case 'custom':
-        return 'orange';
-      default:
-        return 'grey';
+  const addDocumentToList = () => {
+    if (!newDoc.url.trim()) return;
+
+    const doc = {
+      id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      name: newDoc.name.trim() || `Document ${documentList.length + 1}`,
+      url: newDoc.url.trim(),
+      mime_type: newDoc.mime_type,
+      metadata: newDoc.metadata,
+    };
+
+    setDocumentList([...documentList, doc]);
+    setNewDoc({ name: '', url: '', mime_type: 'text/html', metadata: {} });
+  };
+
+  const removeDocumentFromList = (id: string) => {
+    setDocumentList(documentList.filter((doc) => doc.id !== id));
+  };
+
+  const addSampleDocuments = () => {
+    const samples = [
+      {
+        id: `doc-${Date.now()}-1`,
+        name: 'PatternFly Documentation',
+        url: 'https://www.patternfly.org/get-started/',
+        mime_type: 'text/html',
+        metadata: { category: 'design-system' },
+      },
+      {
+        id: `doc-${Date.now()}-2`,
+        name: 'React Documentation',
+        url: 'https://react.dev/learn',
+        mime_type: 'text/html',
+        metadata: { category: 'framework' },
+      },
+    ];
+    setDocumentList([...documentList, ...samples]);
+  };
+
+  const handleIngestDocuments = async () => {
+    if (!selectedStore) return;
+
+    let documents: Array<Record<string, unknown>> = [];
+
+    if (showAdvancedForm && documentList.length > 0) {
+      documents = documentList.map((doc) => ({
+        name: doc.name,
+        url: doc.url,
+        mime_type: doc.mime_type,
+        metadata: doc.metadata,
+      }));
+    } else if (!showAdvancedForm && ingestDocuments.trim()) {
+      // Parse simple text input
+      try {
+        documents = JSON.parse(ingestDocuments);
+      } catch {
+        // If not JSON, treat as newline-separated URLs
+        documents = ingestDocuments
+          .split('\n')
+          .map((url) => url.trim())
+          .filter((url) => url)
+          .map((url) => ({ url }));
+      }
+    }
+
+    if (documents.length === 0) return;
+
+    try {
+      setIsIngesting(true);
+      setError(null);
+
+      await simpleApi.ingestDocuments(selectedStore, documents);
+      setSuccess('Documents ingested successfully');
+      setIngestDocuments('');
+      setDocumentList([]);
+      setShowIngestModal(false);
+      loadVectorDatabases(); // Refresh the list
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to ingest documents';
+      setError(errorMessage);
+    } finally {
+      setIsIngesting(false);
     }
   };
 
@@ -212,9 +314,10 @@ const RAGManager: React.FC = () => {
         <Gallery hasGutter minWidths={{ default: '350px' }}>
           {vectorDbs.map((vdb) => (
             <Card
-              key={vdb.vector_db_id}
-              onClick={() => navigateToDatabase(vdb.vector_db_id)}
-              style={{ cursor: 'pointer' }}
+              key={vdb.store_id}
+              isClickable
+              isSelected={selectedStore === vdb.store_id}
+              onClick={() => handleStoreSelect(vdb.store_id)}
             >
               <CardHeader>
                 <CardTitle>
@@ -227,7 +330,11 @@ const RAGManager: React.FC = () => {
                       {vdb.name}
                     </FlexItem>
                     <FlexItem>
-                      <ArrowRightIcon />
+                      {selectedStore === vdb.store_id ? (
+                        <CheckIcon color="var(--pf-global--success-color--100)" />
+                      ) : (
+                        <ArrowRightIcon />
+                      )}
                     </FlexItem>
                   </Flex>
                 </CardTitle>
@@ -235,7 +342,7 @@ const RAGManager: React.FC = () => {
               <CardBody>
                 <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsSm' }}>
                   <FlexItem>
-                    <Badge color={getUseCaseBadgeColor(vdb.use_case)}>{vdb.use_case}</Badge>
+                    <Badge color="blue">RAG Store</Badge>
                   </FlexItem>
 
                   {vdb.description && (
@@ -264,7 +371,7 @@ const RAGManager: React.FC = () => {
                             <SearchIcon style={{ color: '#3e8635' }} />
                           </FlexItem>
                           <FlexItem>
-                            <strong>{vdb.total_chunks}</strong>
+                            <strong>N/A</strong>
                           </FlexItem>
                           <FlexItem style={{ fontSize: '0.75rem', color: '#6a6e73' }}>Chunks</FlexItem>
                         </Flex>
@@ -275,16 +382,11 @@ const RAGManager: React.FC = () => {
                   <FlexItem style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #d2d2d2' }}>
                     <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsXs' }}>
                       <FlexItem style={{ fontSize: '0.75rem', color: '#6a6e73' }}>
-                        <strong>Model:</strong> {vdb.embedding_model}
+                        <strong>Store ID:</strong> {vdb.store_id}
                       </FlexItem>
                       <FlexItem style={{ fontSize: '0.75rem', color: '#6a6e73' }}>
                         <strong>Created:</strong> {new Date(vdb.created_at).toLocaleDateString()}
                       </FlexItem>
-                      {vdb.last_updated && (
-                        <FlexItem style={{ fontSize: '0.75rem', color: '#6a6e73' }}>
-                          <strong>Updated:</strong> {new Date(vdb.last_updated).toLocaleDateString()}
-                        </FlexItem>
-                      )}
                     </Flex>
                   </FlexItem>
                 </Flex>
@@ -292,6 +394,48 @@ const RAGManager: React.FC = () => {
             </Card>
           ))}
         </Gallery>
+      )}
+
+      {/* Selected Store Details */}
+      {selectedStore && (
+        <PageSection>
+          <Title headingLevel="h3">Selected Store Details</Title>
+          {(() => {
+            const store = vectorDbs.find((vdb) => vdb.store_id === selectedStore);
+            if (!store) return null;
+
+            return (
+              <Card>
+                <CardBody>
+                  <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsSm' }}>
+                    <FlexItem>
+                      <strong>Store ID:</strong> {store.store_id}
+                    </FlexItem>
+                    <FlexItem>
+                      <strong>Name:</strong> {store.name}
+                    </FlexItem>
+                    {store.description && (
+                      <FlexItem>
+                        <strong>Description:</strong> {store.description}
+                      </FlexItem>
+                    )}
+                    <FlexItem>
+                      <strong>Document Count:</strong> {store.document_count}
+                    </FlexItem>
+                    <FlexItem>
+                      <strong>Created:</strong> {new Date(store.created_at).toLocaleString()}
+                    </FlexItem>
+                    <FlexItem>
+                      <Button variant="primary" icon={<PlusCircleIcon />} onClick={() => setShowIngestModal(true)}>
+                        Ingest Documents
+                      </Button>
+                    </FlexItem>
+                  </Flex>
+                </CardBody>
+              </Card>
+            );
+          })()}
+        </PageSection>
       )}
 
       {/* Create Database Modal */}
@@ -381,6 +525,215 @@ const RAGManager: React.FC = () => {
             Create Database
           </Button>
           <Button variant="link" onClick={() => setShowCreateDbModal(false)}>
+            Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
+
+      {/* Document Ingestion Modal */}
+      <Modal
+        variant={ModalVariant.large}
+        title="Ingest Documents"
+        isOpen={showIngestModal}
+        onClose={() => {
+          setShowIngestModal(false);
+          setDocumentList([]);
+          setIngestDocuments('');
+          setShowAdvancedForm(false);
+        }}
+      >
+        <ModalBody>
+          <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsMd' }}>
+            {/* Toggle between simple and advanced modes */}
+            <FlexItem>
+              <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
+                <FlexItem>
+                  <Button
+                    variant={!showAdvancedForm ? 'primary' : 'secondary'}
+                    onClick={() => setShowAdvancedForm(false)}
+                  >
+                    Simple Mode
+                  </Button>
+                </FlexItem>
+                <FlexItem>
+                  <Button
+                    variant={showAdvancedForm ? 'primary' : 'secondary'}
+                    onClick={() => setShowAdvancedForm(true)}
+                  >
+                    Advanced Mode
+                  </Button>
+                </FlexItem>
+                <FlexItem>
+                  <Button variant="link" onClick={addSampleDocuments}>
+                    Add Sample Documents
+                  </Button>
+                </FlexItem>
+              </Flex>
+            </FlexItem>
+
+            {/* Simple Mode */}
+            {!showAdvancedForm && (
+              <FlexItem>
+                <Form>
+                  <FormGroup label="Documents" fieldId="simple-documents">
+                    <TextArea
+                      id="simple-documents"
+                      value={ingestDocuments}
+                      onChange={(_event, value) => setIngestDocuments(value)}
+                      placeholder={`Enter document URLs (one per line) or JSON array:
+
+Simple URLs:
+https://example.com/doc1.pdf
+https://example.com/doc2.html
+
+Or JSON:
+[{"name": "Doc 1", "url": "https://example.com/doc1.pdf"}]`}
+                      rows={8}
+                    />
+                  </FormGroup>
+                </Form>
+              </FlexItem>
+            )}
+
+            {/* Advanced Mode */}
+            {showAdvancedForm && (
+              <>
+                {/* Add Document Form */}
+                <FlexItem>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Add New Document</CardTitle>
+                    </CardHeader>
+                    <CardBody>
+                      <Form>
+                        <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsSm' }}>
+                          <FlexItem>
+                            <Flex spaceItems={{ default: 'spaceItemsMd' }}>
+                              <FlexItem flex={{ default: 'flex_2' }}>
+                                <FormGroup label="Document Name" fieldId="doc-name">
+                                  <TextInput
+                                    id="doc-name"
+                                    value={newDoc.name}
+                                    onChange={(_event, value) => setNewDoc({ ...newDoc, name: value })}
+                                    placeholder="Enter document name"
+                                  />
+                                </FormGroup>
+                              </FlexItem>
+                              <FlexItem flex={{ default: 'flex_3' }}>
+                                <FormGroup label="Document URL" isRequired fieldId="doc-url">
+                                  <TextInput
+                                    id="doc-url"
+                                    value={newDoc.url}
+                                    onChange={(_event, value) => setNewDoc({ ...newDoc, url: value })}
+                                    placeholder="https://example.com/document.pdf"
+                                  />
+                                </FormGroup>
+                              </FlexItem>
+                              <FlexItem flex={{ default: 'flex_1' }}>
+                                <FormGroup label="MIME Type" fieldId="doc-mime">
+                                  <Select
+                                    id="doc-mime"
+                                    selected={newDoc.mime_type}
+                                    onSelect={(_event, value) => setNewDoc({ ...newDoc, mime_type: value as string })}
+                                    toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                                      <MenuToggle ref={toggleRef} onClick={() => {}}>
+                                        {newDoc.mime_type}
+                                      </MenuToggle>
+                                    )}
+                                  >
+                                    <SelectList>
+                                      <SelectOption value="text/html">HTML</SelectOption>
+                                      <SelectOption value="application/pdf">PDF</SelectOption>
+                                      <SelectOption value="text/plain">Text</SelectOption>
+                                      <SelectOption value="application/json">JSON</SelectOption>
+                                      <SelectOption value="text/markdown">Markdown</SelectOption>
+                                    </SelectList>
+                                  </Select>
+                                </FormGroup>
+                              </FlexItem>
+                            </Flex>
+                          </FlexItem>
+                          <FlexItem>
+                            <Button
+                              variant="primary"
+                              onClick={addDocumentToList}
+                              isDisabled={!newDoc.url.trim()}
+                              icon={<PlusCircleIcon />}
+                            >
+                              Add Document
+                            </Button>
+                          </FlexItem>
+                        </Flex>
+                      </Form>
+                    </CardBody>
+                  </Card>
+                </FlexItem>
+
+                {/* Document List */}
+                {documentList.length > 0 && (
+                  <FlexItem>
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Documents to Ingest ({documentList.length})</CardTitle>
+                      </CardHeader>
+                      <CardBody>
+                        <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsSm' }}>
+                          {documentList.map((doc) => (
+                            <FlexItem key={doc.id}>
+                              <Card isCompact>
+                                <CardBody>
+                                  <Flex
+                                    justifyContent={{ default: 'justifyContentSpaceBetween' }}
+                                    alignItems={{ default: 'alignItemsCenter' }}
+                                  >
+                                    <FlexItem>
+                                      <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsXs' }}>
+                                        <FlexItem>
+                                          <strong>{doc.name}</strong>
+                                        </FlexItem>
+                                        <FlexItem>
+                                          <a href={doc.url} target="_blank" rel="noopener noreferrer">
+                                            {doc.url}
+                                          </a>
+                                        </FlexItem>
+                                        <FlexItem>
+                                          <Badge color="blue">{doc.mime_type}</Badge>
+                                        </FlexItem>
+                                      </Flex>
+                                    </FlexItem>
+                                    <FlexItem>
+                                      <Button
+                                        variant="plain"
+                                        aria-label="Remove document"
+                                        onClick={() => removeDocumentFromList(doc.id)}
+                                      >
+                                        <TrashIcon />
+                                      </Button>
+                                    </FlexItem>
+                                  </Flex>
+                                </CardBody>
+                              </Card>
+                            </FlexItem>
+                          ))}
+                        </Flex>
+                      </CardBody>
+                    </Card>
+                  </FlexItem>
+                )}
+              </>
+            )}
+          </Flex>
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="primary"
+            onClick={handleIngestDocuments}
+            isDisabled={isIngesting || (showAdvancedForm ? documentList.length === 0 : !ingestDocuments.trim())}
+            isLoading={isIngesting}
+          >
+            {isIngesting ? 'Ingesting...' : `Ingest ${showAdvancedForm ? documentList.length : 'Documents'}`}
+          </Button>
+          <Button variant="link" onClick={() => setShowIngestModal(false)}>
             Cancel
           </Button>
         </ModalFooter>

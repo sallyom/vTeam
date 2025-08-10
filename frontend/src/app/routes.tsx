@@ -1,9 +1,8 @@
 import * as React from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { NotFound } from '@app/NotFound/NotFound';
-import SessionManager from '../components/SessionManager';
 import RAGManager from '../components/RAGManager';
-import VectorDatabaseDetail from '../components/VectorDatabaseDetail';
+import SimpleFeatureSizing from '../components/SimpleFeatureSizing';
 
 export interface IAppRoute {
   label?: string; // Excluding the label will exclude the route from the nav sidebar in AppLayout
@@ -25,25 +24,18 @@ export type AppRouteConfig = IAppRoute | IAppRouteGroup;
 
 const routes: AppRouteConfig[] = [
   {
-    element: <SessionManager />,
+    element: <SimpleFeatureSizing />,
     exact: true,
-    label: 'Dashboard',
+    label: 'Feature Sizing',
     path: '/',
-    title: 'JIRA RFE Session Manager | Dashboard',
-  },
-  {
-    element: <SessionManager />,
-    exact: true,
-    label: 'Session Manager',
-    path: '/sessions/:sessionId',
-    title: 'JIRA RFE Session Manager | Session',
+    title: 'RHOAI Feature Sizing',
   },
   {
     element: <RAGManager />,
     exact: true,
     label: 'RAG Manager',
     path: '/rag',
-    title: 'JIRA RFE Session Manager | RAG Manager',
+    title: 'RHOAI Feature Sizing | RAG Manager',
   },
 ];
 
@@ -57,7 +49,6 @@ const AppRoutes = (): React.ReactElement => (
     {flattenedRoutes.map(({ path, element }, idx) => (
       <Route path={path} element={element} key={idx} />
     ))}
-    <Route path="/rag/db/:id" element={<VectorDatabaseDetail />} />
     <Route element={<NotFound />} />
   </Routes>
 );
