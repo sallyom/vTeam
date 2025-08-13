@@ -7,11 +7,12 @@ This comprehensive deployment guide covers all deployment scenarios for the RHOA
 This deployment provides a **scalable, production-ready** setup with:
 
 ### **Complete Web Application**
-- **React Frontend** with PatternFly UI components for JIRA session management
-- **Interactive Chat Panel** for real-time session monitoring
-- **Session Management** with create, view, delete functionality  
-- **Custom Prompt Configuration** via web interface
-- **nginx Proxy** serving frontend and routing API requests
+- **React Frontend** with PatternFly UI components for comprehensive session management
+- **Interactive Chat Interface** for real-time AI agent communication
+- **Session Management** with create, view, delete, and real-time monitoring
+- **RAG Store Management** with document ingestion and browsing capabilities
+- **Real-time Updates** for session progress and chat messages
+- **nginx Proxy** serving frontend and routing API requests (if containerized)
 
 ### **External Model Providers**
 Instead of using Ollama locally, connects to external providers like:
@@ -32,23 +33,24 @@ Instead of using Ollama locally, connects to external providers like:
 The deployment creates a complete web application with the following architecture:
 
 ```
-📱 User Browser → 🌐 OpenShift Route → nginx (Port 80) → {
-                                                          📄 Static Files (React App)
-                                                          🔀 /api/* → Python API (Port 8000)
-                                                        }
-                                                                    ↓
-                                        🐍 Python API → 🦙 LLAMA Stack → 🤖 External LLM
-                                             ↓                ↓
-                                        🗄️ PostgreSQL ← 📋 Jira MCP
+📱 User Browser → 🌐 OpenShift Route → {
+                                          📄 React Frontend (SessionManager, RAGManager, Chat)
+                                          🔀 /api/* → Python API (Port 8001)
+                                        }
+                                                    ↓
+                        🐍 FastAPI Server → 🦙 LLAMA Stack → 🤖 External LLM
+                             ↓                     ↓              ↓
+                        🗄️ PostgreSQL     📊 Vector DBs    📋 Jira MCP
+                        (Session Data)    (RAG Stores)     (Issue Data)
 ```
 
 **Components:**
-- **nginx**: Serves React frontend and proxies API requests
-- **React Frontend**: PatternFly-based UI for session management  
-- **Python API**: FastAPI backend for session processing
-- **LLAMA Stack**: AI orchestration layer
-- **PostgreSQL**: Persistent session storage
-- **Jira MCP**: Jira integration service
+- **React Frontend**: PatternFly-based UI with SessionManager, RAGManager, and Chat interfaces
+- **FastAPI Server**: Unified API backend for session, RAG, and chat operations (Port 8001)  
+- **LLAMA Stack**: AI orchestration with custom tools and RAG integration
+- **PostgreSQL**: Persistent session, refinement, and JIRA structure storage
+- **Vector Databases**: Multiple RAG stores for document retrieval (via FAISS)
+- **Jira MCP**: Jira integration service for issue fetching
 
 ## 🚀 Quick Start
 
@@ -242,11 +244,21 @@ The configuration is defined in `run.yaml` within the ConfigMap. Key sections:
 
 The deployment uses these environment variables for any API:
 
-**API Configuration:**
+**Core Application Configuration:**
+- `INFERENCE_MODEL`: Model identifier for LLAMA Stack
+- `LLAMA_STACK_URL`: URL of LLAMA Stack server
+- `DATABASE_URL`: PostgreSQL connection string
+- `MCP_ATLASSIAN_URL`: Jira MCP service WebSocket URL
+
+**API Provider Configuration:**
 - `CUSTOM_API_BASE_URL`: Base URL of your API endpoint
 - `CUSTOM_API_KEY`: API key (if required)
 - `CUSTOM_MODEL_NAME`: Model name for LLAMA Stack
 - `CUSTOM_MODEL_ID`: Actual model ID used by the API
+
+**RAG and Document Processing:**
+- `GITHUB_ACCESS_TOKEN`: GitHub token for private repository access
+- `DEFAULT_RAG_STORES`: Comma-separated list of default RAG stores
 
 **Examples:**
 - **OpenAI**: `https://api.openai.com/v1`, `your-api-key`, `gpt-4o-mini`, `gpt-4o-mini`

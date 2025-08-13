@@ -525,7 +525,7 @@ class RAGService:
             )
 
             # Load documents using LlamaIndex loaders
-            processed_docs = await llamaindex_service.load_documents(request.documents)
+            processed_docs = llamaindex_service.load_documents(request.documents)
 
             if not processed_docs:
                 ingestion_time_ms = (time.time() - start_time) * 1000
@@ -1281,8 +1281,7 @@ class RAGService:
 
             return RAGQueryResponse(
                 chunks=chunks,
-                total_chunks_found=len(chunks),
-                vector_dbs_searched=vector_db_ids_to_use,
+                total_found=len(chunks),
                 query_time_ms=query_time_ms,
             )
 
@@ -1293,8 +1292,7 @@ class RAGService:
 
             return RAGQueryResponse(
                 chunks=[],
-                total_chunks_found=0,
-                vector_dbs_searched=vector_db_ids_to_use,
+                total_found=0,
                 query_time_ms=query_time_ms,
             )
 

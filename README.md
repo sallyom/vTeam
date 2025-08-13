@@ -4,15 +4,38 @@ An autonomous AI agent that analyzes JIRA features and creates comprehensive imp
 
 ## 🚀 Quick Start
 
+### CLI Usage
 ```bash
-# Autonomous feature planning (new CLI)
+# Autonomous feature planning 
 ./plan-feature.sh RHOAIENG-12345
 
-# Interactive planning
-python cli_agent.py chat RHOAIENG-12345
+# Interactive planning with custom RAG stores
+python cli_agent.py chat RHOAIENG-12345 --rag-stores rhoai_docs github_repos
 
 # List available RAG stores
 python cli_agent.py list-stores
+```
+
+### Web UI Usage
+```bash
+# Start the API server with web interface
+python run_simple_api.py
+
+# Open web interface at http://localhost:8001
+# - Create and manage sessions
+# - Configure RAG stores and ingest documents  
+# - Chat with AI agent in real-time
+# - View refinement documents and JIRA plans
+```
+
+### API Integration
+```bash
+# Create session via API
+curl -X POST http://localhost:8001/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"jira_key": "RHOAIENG-12345", "rag_store_ids": ["default"]}'
+
+# Interactive API documentation at http://localhost:8001/docs
 ```
 
 ## 📋 Overview
@@ -93,6 +116,7 @@ cp env.template .env
 | [GETTING_STARTED.md](docs/GETTING_STARTED.md) | Comprehensive setup, installation, and configuration |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production deployment guides for various environments |
 | [CLI_GUIDE.md](docs/CLI_GUIDE.md) | Complete CLI reference and usage examples |
+| [API_REFERENCE.md](docs/API_REFERENCE.md) | Comprehensive REST API documentation and integration guides |
 
 ## 🎯 Key Features
 
@@ -114,20 +138,29 @@ cp env.template .env
 - **Batch operations**: Process multiple features
 - **Output formats**: Markdown, JSON, and database storage
 
+### ✅ Current Features
+- **Web UI**: React-based interface with PatternFly components for comprehensive session management
+- **Real-time Updates**: Live session monitoring and chat interface for collaboration
+- **RAG Store Management**: Create, configure, and manage knowledge bases via web interface
+- **Advanced Document Ingestion**: GitHub repositories, web scraping, and LlamaIndex processing
+- **Session-Specific Context**: Configure RAG stores per planning session for targeted research
+- **API Integration**: Full REST API for external system integration
+
 ### 🚧 Planned Features
-- **Web UI**: React-based interface for non-technical users
-- **Team collaboration**: Comments, reviews, and approval workflows
-- **Integration hooks**: Webhook support for CI/CD pipelines
-- **Advanced analytics**: Feature complexity metrics and estimation accuracy
+- **Team Collaboration**: Comments, reviews, and approval workflows
+- **Integration Hooks**: Webhook support for CI/CD pipelines  
+- **Advanced Analytics**: Feature complexity metrics and estimation accuracy
+- **Multi-tenancy**: Organization-level isolation and role-based access control
 
 ## 🔧 Technology Stack
 
-- **Core**: Python 3.12+, FastAPI, SQLAlchemy
-- **AI/ML**: Llama Stack, RAG with vector databases
+- **Backend**: Python 3.12+, FastAPI, SQLAlchemy
+- **AI/ML**: Llama Stack, RAG with Faiss vector databases, LlamaIndex document processing
+- **Frontend**: React + TypeScript, PatternFly UI components  
 - **Database**: PostgreSQL (production), SQLite (development)
-- **Frontend**: React with PatternFly (planned)
+- **RAG Systems**: Multiple vector databases, GitHub integration, web scraping
 - **Deployment**: Docker, Kubernetes, OpenShift
-- **Tools**: uv (package management), pytest (testing)
+- **Tools**: uv (package management), pytest (testing), webpack (frontend build)
 
 ## 🤝 Contributing
 

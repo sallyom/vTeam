@@ -12,6 +12,7 @@ This directory contains comprehensive documentation for the RHOAI AI Feature Siz
 | **[GETTING_STARTED.md](GETTING_STARTED.md)** | Comprehensive setup, installation, and configuration guide | All Users |
 | **[DEPLOYMENT.md](DEPLOYMENT.md)** | Production deployment guides for various environments | DevOps, SysAdmins |
 | **[CLI_GUIDE.md](CLI_GUIDE.md)** | Complete CLI reference and usage examples | End Users, Developers |
+| **[API_REFERENCE.md](API_REFERENCE.md)** | Comprehensive REST API documentation and integration guides | Developers, Integrators |
 
 ### Specialized Guides
 

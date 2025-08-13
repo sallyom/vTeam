@@ -86,7 +86,7 @@ nano .env  # or your preferred editor
 ```bash
 # Model and inference
 INFERENCE_MODEL="meta-llama/Llama-3.2-3B-Instruct"
-LLAMA_STACK_URL="http://localhost:11434"
+LLAMA_STACK_URL="http://localhost:8321"
 
 # JIRA integration
 JIRA_URL="https://your-company.atlassian.net"
@@ -101,22 +101,32 @@ CONFIGURE_TOOLGROUPS="true"
 **Database Configuration:**
 ```bash
 # For development (SQLite)
-SQLITE_DB_PATH="./feature_sizing.db"
+SQLITE_DB_PATH="./rhoai_sessions.db"
 
 # For production (PostgreSQL)
 DATABASE_URL="postgresql://user:password@localhost:5432/rhoai_db"
 ```
 
+**RAG and Document Processing:**
+```bash
+# GitHub integration (for ingesting private repos)
+GITHUB_ACCESS_TOKEN="your-github-token"
+
+# Default RAG stores to use
+DEFAULT_RAG_STORES="default,github_repos"
+```
+
 **Optional Settings:**
 ```bash
-# Output directory
+# Output directory for CLI results
 OUTPUT_DIR="./outputs"
+
+# API server configuration
+API_HOST="0.0.0.0"
+API_PORT="8001"
 
 # Logging level
 LOG_LEVEL="INFO"
-
-# RAG configuration
-DEFAULT_RAG_STORES="rhoai_docs,patternfly_docs,kubernetes_docs"
 ```
 
 ### Step 3: Service Dependencies
@@ -178,7 +188,25 @@ export DATABASE_URL="postgresql://user:password@localhost:5432/rhoai_db"
 python cli_agent.py plan TEST-123
 ```
 
-### Step 5: Verification
+### Step 5: RAG Store Setup (Optional)
+
+Set up knowledge bases for enhanced context during planning:
+
+```bash
+# List available RAG stores
+python cli_agent.py list-stores
+
+# Setup predefined stores (creates default and github_repos stores)
+python run_simple_api.py &  # Start API server
+curl -X POST http://localhost:8001/rag/setup-predefined
+
+# Or manually create and populate stores via web UI:
+# 1. Open http://localhost:8001
+# 2. Navigate to RAG Manager
+# 3. Create new stores and ingest documents
+```
+
+### Step 6: Verification
 
 Test your complete setup:
 
@@ -189,8 +217,15 @@ python cli_agent.py --help
 # Test service connections
 python cli_agent.py list-stores
 
+# Test API server
+python run_simple_api.py &
+curl http://localhost:8001/health
+
 # Test end-to-end planning (with a real JIRA issue)
 python cli_agent.py plan YOUR-JIRA-KEY
+
+# Test web UI (if frontend is built)
+# Open http://localhost:8001 in browser
 ```
 
 ## 🔑 Service Setup Guides
@@ -338,15 +373,31 @@ chmod +x plan-feature.sh
 ./plan-feature.sh RHOAIENG-12345 --max-turns 20 --output-dir ./custom-output
 ```
 
-### API Server Mode
+### API Server and Web UI
 
 ```bash
-# Start the API server
+# Start the API server (includes web UI)
 python run_simple_api.py
 
+# API server runs on http://localhost:8001
 # Test API endpoints
-curl http://localhost:8000/health
-curl http://localhost:8000/api/v1/rag/stores
+curl http://localhost:8001/health
+curl http://localhost:8001/rag/stores
+
+# Web UI available at http://localhost:8001 (if frontend is built)
+# Interactive API docs at http://localhost:8001/docs
+```
+
+### Web UI Development
+
+```bash
+# For frontend development (separate terminal)
+cd frontend
+npm install
+npm run dev
+
+# Frontend dev server runs on http://localhost:3000
+# API calls will be proxied to http://localhost:8001
 ```
 
 ## 🔍 Troubleshooting

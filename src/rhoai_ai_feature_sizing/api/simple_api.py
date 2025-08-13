@@ -624,8 +624,8 @@ async def query_rag_stores(
 
         return RAGQueryResponse(
             results=result.chunks,
-            total_found=result.total_chunks_found,
-            stores_searched=result.vector_dbs_searched,
+            total_found=result.total_found,
+            stores_searched=request.rag_store_ids,
             query_time_ms=result.query_time_ms,
         )
     except Exception as e:

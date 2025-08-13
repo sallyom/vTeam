@@ -15,11 +15,21 @@ Complete command-line interface documentation for the RHOAI AI Feature Sizing sy
    
    **Required variables in .env:**
    ```bash
+   # Core AI Configuration
    INFERENCE_MODEL="meta-llama/Llama-3.2-3B-Instruct"
    LLAMA_STACK_URL="http://your-llama-stack-server:8321"
+   
+   # JIRA Integration
    MCP_ATLASSIAN_URL="ws://your-mcp-server:3001/mcp"
    CONFIGURE_TOOLGROUPS="true"
+   
+   # Database Configuration
    SQLITE_DB_PATH="./rhoai_sessions.db"
+   # Or for PostgreSQL:
+   # DATABASE_URL="postgresql://user:password@localhost:5432/rhoai_db"
+   
+   # GitHub Integration (for RAG document ingestion)
+   GITHUB_ACCESS_TOKEN="your-github-token"  # Optional, for private repos
    ```
 
 2. **Install dependencies** (if not already done):
@@ -69,33 +79,54 @@ python cli_agent.py list-stores
 ### `plan` - Autonomous Feature Planning
 Runs the complete autonomous planning loop:
 1. Fetches JIRA issue details
-2. Researches components using RAG
+2. Researches components using RAG stores
 3. Creates refinement document
 4. Generates JIRA epics and stories
 5. Validates plan coverage
 6. Saves everything to database
 
 **Options:**
-- `--rag-stores STORE1 STORE2` - Specify RAG stores to use
+- `--rag-stores STORE1 STORE2` - Specify RAG stores to use (defaults to available stores)
 - `--max-turns N` - Maximum agent turns (default: 12)
 - `--no-validation` - Skip final validation
 - `--output-dir DIR` - Save outputs to files
+- `--session-id ID` - Use existing session ID for continuation
 
 ### `chat` - Interactive Mode
 Start an interactive chat session with the agent. Useful for:
 - Refining existing plans
 - Asking questions about the feature
 - Iterative improvements
+- Real-time collaboration
 
 **Chat Commands:**
 - `help` - Show available commands
 - `status` - Show current session state
 - `refinement` - Display current refinement document
 - `jira` - Display current JIRA plan
+- `rag query "your question"` - Query RAG stores directly
+- `save` - Save current progress to database
 - `quit`/`exit` - End session
 
 ### `list-stores` - Show RAG Stores
-Lists available RAG stores for context research.
+Lists available RAG stores for context research. Shows:
+- Store ID and name
+- Document count
+- Creation date
+- Store description
+
+### `setup-rag` - RAG Store Setup
+Initialize and populate RAG stores with documentation:
+```bash
+# Setup default stores
+python cli_agent.py setup-rag
+
+# Setup specific store
+python cli_agent.py setup-rag --store-id rhoai_docs
+
+# Ingest GitHub repository
+python cli_agent.py setup-rag --github-repo https://github.com/your-org/docs
+```
 
 ## 🎛️ How It Works
 
@@ -113,6 +144,15 @@ Lists available RAG stores for context research.
 - Refinement docs stored in `outputs` table
 - JIRA plans stored as both JSON snapshots and normalized `epics`/`stories`
 - Session management with UUIDs
+- RAG query history tracked for analytics
+
+### RAG Store Management
+The system now includes comprehensive RAG (Retrieval-Augmented Generation) capabilities:
+- **Vector Database Management**: Create, list, and manage multiple RAG stores
+- **Document Ingestion**: Support for GitHub repositories, web scraping, and file uploads
+- **LlamaIndex Integration**: Advanced document loading with smart chunking
+- **Session-Specific Context**: RAG stores can be selected per session
+- **Real-time Querying**: Direct RAG queries during chat sessions
 
 ### Custom Tools
 The agent uses custom Llama Stack tools to persist work:
@@ -121,6 +161,7 @@ The agent uses custom Llama Stack tools to persist work:
 - `get_jira_plan(session_uuid, jira_key)`
 - `set_jira_plan(session_uuid, jira_key, plan_json)`
 - `patch_jira_plan(session_uuid, jira_key, json_patch_ops)`
+- **RAG Integration**: Automatic context retrieval based on session configuration
 
 ## 📊 Example Output
 
@@ -206,6 +247,36 @@ Epics: 1, Stories: 3
 - Check agent session logs in the database
 - Use `chat` mode for interactive debugging
 
+## 🌐 Web UI Integration
+
+The system now includes a React-based web interface:
+
+### Starting the API Server
+```bash
+# Start the API server
+python run_simple_api.py
+
+# Server will be available at http://localhost:8001
+# API documentation at http://localhost:8001/docs
+```
+
+### Web Interface Features
+- **Session Management**: Create, view, and manage feature planning sessions
+- **Real-time Updates**: Watch sessions process in real-time
+- **RAG Store Management**: Configure and manage RAG stores via web interface
+- **Chat Interface**: Interactive chat with the AI agent
+- **Document Viewing**: View refinement documents and JIRA structures
+
+### API Endpoints
+The system exposes REST API endpoints for integration:
+- `GET /sessions` - List all sessions
+- `POST /sessions` - Create new session
+- `GET /sessions/{id}` - Get session details
+- `GET /sessions/{id}/updates` - Get real-time updates
+- `POST /sessions/{id}/chat` - Send chat messages
+- `GET /rag/stores` - List RAG stores
+- `POST /rag/ingest` - Ingest documents into RAG stores
+
 ## 🚀 OpenShift Deployment
 
 For OpenShift environments, make sure:
@@ -217,6 +288,9 @@ For OpenShift environments, make sure:
 ```bash
 # In OpenShift pod
 python cli_agent.py plan RHOAIENG-12345 --output-dir /tmp/outputs
+
+# Or use the web interface
+# Access via OpenShift route: https://your-route/
 ```
 
 ## 💡 Tips

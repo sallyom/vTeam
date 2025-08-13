@@ -12,8 +12,11 @@ The RHOAI AI Feature Sizing system follows a **microservices architecture** with
 ┌─────────────────────────────────────────────────────────────────┐
 │                        User Interfaces                          │
 ├─────────────────────┬─────────────────────┬─────────────────────┤
-│   CLI Agent         │   Web UI (Planned)  │   API Clients       │
-│   cli_agent.py      │   React/PatternFly   │   REST/WebSocket    │
+│   CLI Agent         │   Web UI            │   API Clients       │
+│   cli_agent.py      │   React/PatternFly   │   REST/GraphQL      │
+│                     │   - SessionManager   │   - External Apps   │
+│                     │   - RAGManager       │   - CI/CD Systems   │
+│                     │   - Chat Interface   │   - Webhooks        │
 └─────────────────────┴─────────────────────┴─────────────────────┘
                                 │
                                 ▼
@@ -22,8 +25,9 @@ The RHOAI AI Feature Sizing system follows a **microservices architecture** with
 ├─────────────────────┬─────────────────────┬─────────────────────┤
 │  Unified Agent      │   Simple API        │   RAG Service       │
 │  unified_agent.py   │   simple_api.py     │   rag_service.py    │
-│  - Planning Loop    │   - REST Endpoints  │   - Vector Search   │
-│  - Custom Tools     │   - Job Management  │   - Doc Retrieval   │
+│  - Planning Loop    │   - REST Endpoints  │   - Vector DBs      │
+│  - Custom Tools     │   - Session Mgmt    │   - LlamaIndex      │
+│  - RAG Integration  │   - Real-time Chat  │   - Doc Ingestion   │
 └─────────────────────┴─────────────────────┴─────────────────────┘
                                 │
                                 ▼
@@ -144,13 +148,84 @@ Stories
 
 ### 4. RAG Service (`rag_service.py`)
 
-**Purpose**: Provides context-aware document retrieval for informed planning decisions.
+**Purpose**: Comprehensive Retrieval-Augmented Generation service for context-aware document management and retrieval.
 
 **Architecture**:
-- **Vector databases**: Multiple stores for different documentation types
-- **Semantic search**: Embedding-based retrieval for relevant context
-- **Scoped queries**: Component-specific searches for targeted results
-- **Integration**: Seamless integration with Llama Stack tools
+- **Vector Database Management**: Create, configure, and manage multiple vector databases
+- **Document Ingestion Pipeline**: Support for multiple document sources and formats
+- **Advanced Document Processing**: LlamaIndex integration for intelligent chunking and metadata extraction
+- **Session-Aware Queries**: Context retrieval based on session-specific RAG store configurations
+- **Real-time Synchronization**: Automatic sync between application database and Llama Stack
+
+**Key Features**:
+```python
+class RAGService:
+    # Vector Database Management
+    async def create_vector_database(config: VectorDBConfig)
+    async def list_vector_databases() -> VectorDBListResponse
+    async def delete_vector_database(vector_db_id: str)
+    async def reset_vector_database(vector_db_id: str)
+    
+    # Document Management
+    async def ingest_documents(request: DocumentIngestionRequest)
+    async def ingest_documents_with_llamaindex(request: DocumentIngestionRequest)
+    async def list_documents(vector_db_id: str)
+    async def update_documents(request: VectorDBUpdateRequest)
+    
+    # Query and Retrieval
+    async def query_rag(request: RAGQueryRequest, session_id: Optional[UUID])
+    async def browse_chunks(request: ChunkBrowseRequest)
+    
+    # System Management
+    async def ensure_vector_dbs_registered()
+    async def sync_vector_databases()
+```
+
+**Document Sources Supported**:
+- GitHub repositories (public and private with token)
+- Web scraping and URL content
+- File uploads (PDF, Markdown, text files)
+- API endpoints and structured data
+- Documentation websites with sitemap parsing
+
+### 5. Web UI (`frontend/`)
+
+**Purpose**: React-based web interface providing intuitive access to all system capabilities.
+
+**Architecture**:
+- **Component-Based Design**: Modular React components with PatternFly UI
+- **Real-time Updates**: Live session monitoring and chat interfaces
+- **State Management**: Local state with API service integration
+- **Responsive Design**: Works on desktop and mobile devices
+
+**Key Components**:
+```typescript
+// Session Management
+SessionManager: React.FunctionComponent
+- Create, view, and manage planning sessions
+- Real-time status updates and progress tracking
+- Session filtering and search capabilities
+
+// RAG Store Management  
+RAGManager: React.FunctionComponent
+- Create and configure vector databases
+- Ingest documents from various sources
+- Browse and search document chunks
+- Monitor ingestion progress
+
+// Interactive Chat
+SimpleFeatureSizing: React.FunctionComponent
+- Real-time chat with AI agent
+- Session-specific context awareness
+- Document viewing and editing
+- Progress visualization
+```
+
+**API Integration**:
+- **REST API Client**: TypeScript service layer for all API calls
+- **Real-time Updates**: Polling-based updates for session progress
+- **Error Handling**: Comprehensive error states and user feedback
+- **Caching Strategy**: Local storage for performance optimization
 
 ## 🔄 Process Flow
 
@@ -294,7 +369,10 @@ Complete Feature Plan (Output)
 | **Database** | PostgreSQL/SQLite | Relational data, ACID properties, mature ecosystem |
 | **API Framework** | FastAPI | Async support, automatic docs, type hints |
 | **ORM** | SQLAlchemy | Mature, flexible, supports both databases |
-| **Vector Search** | Various (configurable) | Pluggable RAG backend support |
+| **Vector Search** | Faiss (via Llama Stack) | High-performance similarity search, configurable backends |
+| **Document Processing** | LlamaIndex | Advanced document loaders, intelligent chunking |
+| **Frontend Framework** | React + TypeScript | Component-based UI, type safety, large ecosystem |
+| **UI Components** | PatternFly | Enterprise-grade design system, accessibility |
 | **Serialization** | JSON/Pydantic | Type safety, validation, interoperability |
 
 ### Development Tools
@@ -348,24 +426,35 @@ Complete Feature Plan (Output)
 
 ## 🔄 Future Architecture Evolution
 
+### Recently Implemented
+
+1. **✅ Web UI Integration**
+   - React frontend with PatternFly components *(Completed)*
+   - Real-time session updates and progress tracking *(Completed)*
+   - Interactive chat interface *(Completed)*
+   - RAG store management interface *(Completed)*
+
+2. **✅ Advanced RAG Capabilities**
+   - Multiple vector database support *(Completed)*
+   - LlamaIndex integration for document processing *(Completed)*
+   - GitHub repository ingestion *(Completed)*
+   - Session-specific RAG context *(Completed)*
+
 ### Planned Enhancements
 
-1. **Web UI Integration**
-   - React frontend with PatternFly components
-   - Real-time updates via WebSocket
-   - Collaborative editing capabilities
-
-2. **Advanced Analytics**
+3. **Advanced Analytics** *(In Progress)*
    - Feature complexity metrics
    - Estimation accuracy tracking
+   - RAG query analytics and optimization
    - Team performance analytics
 
-3. **Integration Ecosystem**
+4. **Integration Ecosystem** *(Planned)*
+   - WebSocket for real-time updates
    - Webhook support for CI/CD
    - Slack/Teams notifications
    - GitHub/GitLab integration
 
-4. **Multi-Tenant Architecture**
+5. **Multi-Tenant Architecture** *(Future)*
    - Organization-level isolation
    - Role-based access control
    - Resource quotas and limits
