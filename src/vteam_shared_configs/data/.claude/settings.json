@@ -1,0 +1,45 @@
+{
+  "hooks": {
+    "preToolUse": [
+      {
+        "name": "enforce-vteam-config",
+        "description": "Ensure latest vTeam shared configuration is active before Git operations",
+        "match": {
+          "tool": "Bash",
+          "command": "git commit*"
+        },
+        "command": "vteam-config install --force"
+      },
+      {
+        "name": "enforce-vteam-config-push",
+        "description": "Ensure latest vTeam shared configuration is active before Git push",
+        "match": {
+          "tool": "Bash", 
+          "command": "git push*"
+        },
+        "command": "vteam-config install --force"
+      }
+    ],
+    "sessionStart": [
+      {
+        "name": "vteam-welcome",
+        "description": "Display vTeam configuration status on session start",
+        "command": "vteam-config status"
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(python:*)",
+      "Bash(uv:*)",
+      "Bash(black:*)",
+      "Bash(isort:*)",
+      "Bash(flake8:*)",
+      "Bash(pytest:*)",
+      "Bash(shellcheck:*)",
+      "Bash(markdownlint:*)"
+    ]
+  }
+}
