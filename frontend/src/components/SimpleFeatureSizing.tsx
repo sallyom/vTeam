@@ -5,11 +5,16 @@ import {
   Button,
   Card,
   CardBody,
-  CardTitle,
+  Flex,
+  FlexItem,
   Form,
   FormGroup,
-  Split,
-  SplitItem,
+  MenuToggle,
+  MenuToggleElement,
+  PageSection,
+  Select,
+  SelectList,
+  SelectOption,
   Stack,
   StackItem,
   Tab,
@@ -17,6 +22,7 @@ import {
   Tabs,
   TextArea,
   TextInput,
+  Title,
 } from '@patternfly/react-core';
 import {
   ChatMessage,
@@ -24,7 +30,7 @@ import {
   CreateSessionRequest,
   RAGStoreInfo,
   SessionDetailResponse,
-  simpleApi,
+  simpleApiService,
 } from '../services/simpleApi';
 
 const SimpleFeatureSizing: React.FC = () => {
@@ -32,6 +38,7 @@ const SimpleFeatureSizing: React.FC = () => {
   const [jiraKey, setJiraKey] = useState('');
   const [selectedRAGStores, setSelectedRAGStores] = useState<string[]>([]);
   const [existingRefinement, setExistingRefinement] = useState('');
+  const [isRAGSelectOpen, setIsRAGSelectOpen] = useState(false);
 
   // State for current session
   const [currentSession, setCurrentSession] = useState<SessionDetailResponse | null>(null);
@@ -41,6 +48,10 @@ const SimpleFeatureSizing: React.FC = () => {
   // State for chat
   const [chatMessage, setChatMessage] = useState('');
   const [isSendingMessage, setIsSendingMessage] = useState(false);
+
+  // State for real-time updates
+  const [isPolling, setIsPolling] = useState(false);
+  const [lastMessageCount, setLastMessageCount] = useState(0);
 
   // State for RAG stores
   const [ragStores, setRAGStores] = useState<RAGStoreInfo[]>([]);
@@ -53,9 +64,65 @@ const SimpleFeatureSizing: React.FC = () => {
     loadRAGStores();
   }, []);
 
+  // Polling effect for real-time updates when session is processing
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+
+    const startPolling = () => {
+      if (currentSession?.status !== 'processing') {
+        return;
+      }
+
+      setIsPolling(true);
+      intervalId = setInterval(async () => {
+        try {
+          const updates = await simpleApiService.getSessionUpdates(currentSession.id, lastMessageCount);
+
+          if (updates.has_updates) {
+            // Update session info
+            setCurrentSession((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    ...updates.session,
+                    chat_history: [...prev.chat_history, ...updates.new_messages],
+                  }
+                : null,
+            );
+
+            // Update message count
+            setLastMessageCount(updates.total_messages);
+          }
+
+          // Stop polling if session is no longer processing
+          if (updates.session.status !== 'processing') {
+            setIsPolling(false);
+            if (intervalId) {
+              clearInterval(intervalId);
+              intervalId = null;
+            }
+          }
+        } catch (error) {
+          console.error('Failed to get session updates:', error);
+        }
+      }, 1000); // Poll every second
+    };
+
+    if (currentSession?.status === 'processing') {
+      startPolling();
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      setIsPolling(false);
+    };
+  }, [currentSession?.id, currentSession?.status, lastMessageCount]);
+
   const loadRAGStores = async () => {
     try {
-      const response = await simpleApi.listRAGStores();
+      const response = await simpleApiService.listRagStores();
       setRAGStores(response.stores);
     } catch (error) {
       console.error('Failed to load RAG stores:', error);
@@ -79,10 +146,14 @@ const SimpleFeatureSizing: React.FC = () => {
         existing_refinement: existingRefinement.trim() || undefined,
       };
 
-      const session = await simpleApi.createSession(request);
+      const session = await simpleApiService.createSession(request);
 
-      // Poll for session updates
-      pollSessionUpdates(session.id);
+      // Initialize session and start polling
+      const fullSession = await simpleApiService.getSession(session.id);
+      setCurrentSession(fullSession);
+      setLastMessageCount(fullSession.chat_history.length);
+
+      // The useEffect will handle polling automatically when status is 'processing'
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Failed to create session';
       setError(errorMessage);
@@ -90,23 +161,12 @@ const SimpleFeatureSizing: React.FC = () => {
     }
   };
 
-  const pollSessionUpdates = async (sessionId: string) => {
-    try {
-      const session = await simpleApi.getSession(sessionId);
-      setCurrentSession(session);
-
-      // Continue polling if still processing
-      if (session.status === 'processing' || session.status === 'pending') {
-        setTimeout(() => pollSessionUpdates(sessionId), 2000);
-      } else {
-        setIsLoading(false);
-      }
-    } catch (error) {
-      console.error('Failed to fetch session:', error);
-      setError('Failed to fetch session status. Please try again.');
+  // Stop loading when session is no longer processing
+  useEffect(() => {
+    if (currentSession?.status !== 'processing' && currentSession?.status !== 'pending') {
       setIsLoading(false);
     }
-  };
+  }, [currentSession?.status]);
 
   const handleSendMessage = async () => {
     if (!chatMessage.trim() || !currentSession) return;
@@ -118,10 +178,10 @@ const SimpleFeatureSizing: React.FC = () => {
         message: chatMessage.trim(),
       };
 
-      await simpleApi.sendChatMessage(currentSession.id, request);
+      await simpleApiService.sendChatMessage(currentSession.id, request);
 
       // Refresh session to get updated chat history
-      const updatedSession = await simpleApi.getSession(currentSession.id);
+      const updatedSession = await simpleApiService.getSession(currentSession.id);
       setCurrentSession(updatedSession);
 
       setChatMessage('');
@@ -133,11 +193,15 @@ const SimpleFeatureSizing: React.FC = () => {
     }
   };
 
-  const handleRAGStoreToggle = (selection: string) => {
-    if (selectedRAGStores.includes(selection)) {
-      setSelectedRAGStores(selectedRAGStores.filter((item) => item !== selection));
+  const handleRAGStoreSelect = (
+    _event: React.MouseEvent<Element, MouseEvent> | undefined,
+    selection: string | number | undefined,
+  ) => {
+    const value = selection as string;
+    if (selectedRAGStores.includes(value)) {
+      setSelectedRAGStores(selectedRAGStores.filter((item) => item !== value));
     } else {
-      setSelectedRAGStores([...selectedRAGStores, selection]);
+      setSelectedRAGStores([...selectedRAGStores, value]);
     }
   };
 
@@ -159,238 +223,426 @@ const SimpleFeatureSizing: React.FC = () => {
     const isSystem = message.role === 'system';
 
     return (
-      <div
+      <Card
         key={message.id}
+        isCompact
         style={{
-          marginBottom: '1rem',
-          padding: '0.75rem',
-          borderRadius: '8px',
-          backgroundColor: isUser ? '#f0f8ff' : isSystem ? '#f5f5f5' : '#fff',
-          border: `1px solid ${isUser ? '#cce7ff' : isSystem ? '#ddd' : '#e1e1e1'}`,
+          backgroundColor: isUser
+            ? 'var(--pf-v5-global--palette--blue-50)'
+            : isSystem
+              ? 'var(--pf-v5-global--palette--gray-50)'
+              : 'var(--pf-v5-global--BackgroundColor--100)',
+          border: `1px solid ${
+            isUser
+              ? 'var(--pf-v5-global--palette--blue-200)'
+              : isSystem
+                ? 'var(--pf-v5-global--palette--gray-200)'
+                : 'var(--pf-v5-global--BorderColor--100)'
+          }`,
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-          <strong>{message.role === 'user' ? 'You' : message.role === 'agent' ? 'AI Agent' : 'System'}</strong>
-          <small>{new Date(message.timestamp).toLocaleTimeString()}</small>
-        </div>
-        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{message.content}</div>
-        {message.actions && message.actions.length > 0 && (
-          <div style={{ marginTop: '0.5rem' }}>
-            {message.actions.map((action) => (
-              <Badge key={action} color="blue" style={{ marginRight: '0.25rem' }}>
-                {action}
-              </Badge>
-            ))}
-          </div>
-        )}
-      </div>
+        <CardBody>
+          <Stack hasGutter>
+            <StackItem>
+              <Flex
+                justifyContent={{ default: 'justifyContentSpaceBetween' }}
+                alignItems={{ default: 'alignItemsCenter' }}
+              >
+                <FlexItem>
+                  <p style={{ fontSize: 'var(--pf-v5-global--FontSize--sm)', margin: 0 }}>
+                    <strong>
+                      {message.role === 'user' ? 'You' : message.role === 'agent' ? 'AI Agent' : 'System'}
+                    </strong>
+                  </p>
+                </FlexItem>
+                <FlexItem>
+                  <p
+                    style={{
+                      color: 'var(--pf-v5-global--Color--200)',
+                      fontSize: 'var(--pf-v5-global--FontSize--sm)',
+                      margin: 0,
+                    }}
+                  >
+                    {new Date(message.timestamp).toLocaleTimeString()}
+                  </p>
+                </FlexItem>
+              </Flex>
+            </StackItem>
+            <StackItem>
+              <p style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>{message.content}</p>
+            </StackItem>
+            {message.actions && message.actions.length > 0 && (
+              <StackItem>
+                <Flex spaceItems={{ default: 'spaceItemsXs' }}>
+                  {message.actions.map((action) => (
+                    <FlexItem key={action}>
+                      <Badge color="blue">{action}</Badge>
+                    </FlexItem>
+                  ))}
+                </Flex>
+              </StackItem>
+            )}
+          </Stack>
+        </CardBody>
+      </Card>
     );
   };
 
   if (!currentSession) {
     return (
-      <Card>
-        <CardTitle>Create New Feature Sizing Session</CardTitle>
-        <CardBody>
-          <Form>
+      <PageSection>
+        <Card isCompact>
+          <CardBody>
             <Stack hasGutter>
               <StackItem>
-                <FormGroup label="JIRA Key" isRequired>
-                  <TextInput
-                    value={jiraKey}
-                    onChange={(_event, value) => setJiraKey(value)}
-                    placeholder="e.g., RHOAIENG-1234"
-                  />
-                </FormGroup>
+                <Title headingLevel="h1" size="lg">
+                  Create New Feature Sizing Session
+                </Title>
               </StackItem>
 
               <StackItem>
-                <FormGroup label="RAG Knowledge Stores">
-                  <div>
-                    <p>Available stores: {ragStores.map((store) => store.name).join(', ')}</p>
-                    <p>Selected: {selectedRAGStores.join(', ') || 'None'}</p>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '8px' }}>
-                      {ragStores.map((store) => (
-                        <Button
-                          key={store.store_id}
-                          variant={selectedRAGStores.includes(store.store_id) ? 'primary' : 'secondary'}
-                          size="sm"
-                          onClick={() => handleRAGStoreToggle(store.store_id)}
-                        >
-                          {store.name} ({store.document_count} docs)
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                </FormGroup>
-              </StackItem>
+                <Form>
+                  <Stack hasGutter>
+                    <StackItem>
+                      <Flex spaceItems={{ default: 'spaceItemsMd' }}>
+                        <FlexItem flex={{ default: 'flex_1' }}>
+                          <FormGroup label="JIRA Key" isRequired fieldId="jira-key">
+                            <TextInput
+                              id="jira-key"
+                              value={jiraKey}
+                              onChange={(_event, value) => setJiraKey(value)}
+                              placeholder="e.g., RHOAIENG-1234"
+                            />
+                          </FormGroup>
+                        </FlexItem>
+                        <FlexItem flex={{ default: 'flex_1' }}>
+                          <FormGroup label="RAG Knowledge Stores" fieldId="rag-stores">
+                            <Select
+                              role="menu"
+                              id="rag-stores-select"
+                              isOpen={isRAGSelectOpen}
+                              selected={selectedRAGStores}
+                              onSelect={handleRAGStoreSelect}
+                              onOpenChange={(nextOpen: boolean) => setIsRAGSelectOpen(nextOpen)}
+                              toggle={(toggleRef: React.Ref<MenuToggleElement>) => (
+                                <MenuToggle
+                                  ref={toggleRef}
+                                  onClick={() => setIsRAGSelectOpen(!isRAGSelectOpen)}
+                                  isExpanded={isRAGSelectOpen}
+                                  style={{ width: '100%' }}
+                                >
+                                  {selectedRAGStores.length === 0
+                                    ? 'Select RAG stores...'
+                                    : `${selectedRAGStores.length} store${selectedRAGStores.length > 1 ? 's' : ''} selected`}
+                                </MenuToggle>
+                              )}
+                            >
+                              <SelectList>
+                                {ragStores.map((store) => (
+                                  <SelectOption
+                                    key={store.store_id}
+                                    value={store.store_id}
+                                    isSelected={selectedRAGStores.includes(store.store_id)}
+                                  >
+                                    <Flex
+                                      spaceItems={{ default: 'spaceItemsSm' }}
+                                      alignItems={{ default: 'alignItemsCenter' }}
+                                    >
+                                      <FlexItem>{store.name}</FlexItem>
+                                      <FlexItem>
+                                        <Badge isRead={store.document_count === 0}>{store.document_count} docs</Badge>
+                                      </FlexItem>
+                                    </Flex>
+                                  </SelectOption>
+                                ))}
+                              </SelectList>
+                            </Select>
+                          </FormGroup>
+                        </FlexItem>
+                      </Flex>
+                    </StackItem>
 
-              <StackItem>
-                <FormGroup label="Existing Refinement Document (Optional)">
-                  <TextArea
-                    value={existingRefinement}
-                    onChange={(_event, value) => setExistingRefinement(value)}
-                    placeholder="Paste existing refinement document here if you have one..."
-                    rows={5}
-                  />
-                </FormGroup>
-              </StackItem>
+                    <StackItem>
+                      <FormGroup label="Existing Refinement Document (Optional)" fieldId="existing-refinement">
+                        <TextArea
+                          id="existing-refinement"
+                          value={existingRefinement}
+                          onChange={(_event, value) => setExistingRefinement(value)}
+                          placeholder="Paste existing refinement document here if you have one..."
+                          rows={4}
+                        />
+                      </FormGroup>
+                    </StackItem>
 
-              {error && (
-                <StackItem>
-                  <Alert variant="danger" title="Error">
-                    {error}
-                  </Alert>
-                </StackItem>
-              )}
+                    {error && (
+                      <StackItem>
+                        <Alert variant="danger" title="Error" isInline>
+                          {error}
+                        </Alert>
+                      </StackItem>
+                    )}
 
-              <StackItem>
-                <Button
-                  variant="primary"
-                  onClick={handleCreateSession}
-                  isLoading={isLoading}
-                  isDisabled={isLoading || !jiraKey.trim()}
-                >
-                  {isLoading ? 'Processing Feature...' : 'Start Feature Sizing'}
-                </Button>
+                    <StackItem>
+                      <Flex justifyContent={{ default: 'justifyContentFlexEnd' }}>
+                        <FlexItem>
+                          <Button
+                            variant="primary"
+                            onClick={handleCreateSession}
+                            isLoading={isLoading}
+                            isDisabled={isLoading || !jiraKey.trim()}
+                          >
+                            {isLoading ? 'Processing Feature...' : 'Start Feature Sizing'}
+                          </Button>
+                        </FlexItem>
+                      </Flex>
+                    </StackItem>
+                  </Stack>
+                </Form>
               </StackItem>
             </Stack>
-          </Form>
-        </CardBody>
-      </Card>
+          </CardBody>
+        </Card>
+      </PageSection>
     );
   }
 
   return (
-    <Stack hasGutter>
-      {/* Session Header */}
-      <StackItem>
-        <Card>
-          <CardBody>
-            <Split hasGutter>
-              <SplitItem>
-                <strong>JIRA:</strong> {currentSession.jira_key}
-              </SplitItem>
-              <SplitItem>
-                <Badge color={getStatusColor(currentSession.status)}>{currentSession.status.toUpperCase()}</Badge>
-              </SplitItem>
-              <SplitItem isFilled>
-                {currentSession.progress_message && (
-                  <span style={{ fontStyle: 'italic' }}>{currentSession.progress_message}</span>
-                )}
-              </SplitItem>
-              <SplitItem>
-                <Button variant="link" onClick={() => setCurrentSession(null)}>
-                  New Session
-                </Button>
-              </SplitItem>
-            </Split>
-          </CardBody>
-        </Card>
-      </StackItem>
-
-      {/* Main Content Tabs */}
-      <StackItem>
-        <Card>
-          <CardBody>
-            <Tabs activeKey={activeTab} onSelect={(_event, tabIndex) => setActiveTab(tabIndex)}>
-              <Tab eventKey="chat" title={<TabTitleText>Chat</TabTitleText>}>
-                <Stack hasGutter style={{ marginTop: '1rem' }}>
-                  {/* Chat Messages */}
-                  <StackItem>
-                    <div
-                      style={{
-                        maxHeight: '400px',
-                        overflowY: 'auto',
-                        padding: '1rem',
-                        border: '1px solid #ddd',
-                        borderRadius: '4px',
-                      }}
-                    >
-                      {currentSession.chat_history.length === 0 ? (
-                        <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic' }}>
-                          No messages yet. Start a conversation with the AI agent!
-                        </div>
-                      ) : (
-                        currentSession.chat_history.map(renderChatMessage)
-                      )}
-                    </div>
-                  </StackItem>
-
-                  {/* Chat Input */}
-                  <StackItem>
-                    <Split hasGutter>
-                      <SplitItem isFilled>
-                        <TextArea
-                          value={chatMessage}
-                          onChange={(_event, value) => setChatMessage(value)}
-                          placeholder="Ask the AI agent to modify the refinement, update JIRA structure, or answer questions..."
-                          rows={3}
-                        />
-                      </SplitItem>
-                      <SplitItem>
-                        <Button
-                          variant="primary"
-                          onClick={handleSendMessage}
-                          isLoading={isSendingMessage}
-                          isDisabled={isSendingMessage || !chatMessage.trim()}
+    <PageSection>
+      <Stack hasGutter>
+        {/* Session Header */}
+        <StackItem>
+          <Card isCompact>
+            <CardBody>
+              <Flex
+                justifyContent={{ default: 'justifyContentSpaceBetween' }}
+                alignItems={{ default: 'alignItemsCenter' }}
+              >
+                <FlexItem>
+                  <Flex alignItems={{ default: 'alignItemsCenter' }} spaceItems={{ default: 'spaceItemsSm' }}>
+                    <FlexItem>
+                      <Title headingLevel="h2" size="md">
+                        {currentSession.jira_key}
+                      </Title>
+                    </FlexItem>
+                    <FlexItem>
+                      <Badge color={getStatusColor(currentSession.status)}>{currentSession.status.toUpperCase()}</Badge>
+                    </FlexItem>
+                    {currentSession.progress_message && (
+                      <FlexItem>
+                        <p
+                          style={{
+                            fontStyle: 'italic',
+                            color: 'var(--pf-v5-global--Color--200)',
+                            fontSize: 'var(--pf-v5-global--FontSize--sm)',
+                            margin: 0,
+                          }}
                         >
-                          Send
-                        </Button>
-                      </SplitItem>
-                    </Split>
-                  </StackItem>
-                </Stack>
-              </Tab>
+                          {currentSession.progress_message}
+                        </p>
+                      </FlexItem>
+                    )}
+                    {isPolling && (
+                      <FlexItem>
+                        <p
+                          style={{
+                            fontStyle: 'italic',
+                            color: 'var(--pf-v5-global--palette--blue-300)',
+                            fontSize: 'var(--pf-v5-global--FontSize--sm)',
+                            margin: 0,
+                          }}
+                        >
+                          🔄 Live updates active
+                        </p>
+                      </FlexItem>
+                    )}
+                  </Flex>
+                </FlexItem>
+                <FlexItem>
+                  <Button variant="secondary" size="sm" onClick={() => setCurrentSession(null)}>
+                    New Session
+                  </Button>
+                </FlexItem>
+              </Flex>
+            </CardBody>
+          </Card>
+        </StackItem>
 
-              <Tab eventKey="refinement" title={<TabTitleText>Refinement</TabTitleText>}>
-                <div style={{ marginTop: '1rem' }}>
-                  {currentSession.refinement_content ? (
-                    <pre
-                      style={{
-                        whiteSpace: 'pre-wrap',
-                        padding: '1rem',
-                        backgroundColor: '#f8f8f8',
-                        borderRadius: '4px',
-                        fontSize: '14px',
-                      }}
-                    >
-                      {currentSession.refinement_content}
-                    </pre>
-                  ) : (
-                    <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic', padding: '2rem' }}>
-                      No refinement document available yet.
-                    </div>
-                  )}
-                </div>
-              </Tab>
+        {/* Main Content Tabs */}
+        <StackItem>
+          <Card>
+            <CardBody>
+              <Tabs activeKey={activeTab} onSelect={(_event, tabIndex) => setActiveTab(tabIndex)}>
+                <Tab eventKey="chat" title={<TabTitleText>Chat</TabTitleText>}>
+                  <Stack hasGutter style={{ marginTop: 'var(--pf-v5-global--spacer--md)' }}>
+                    {/* Chat Messages */}
+                    <StackItem>
+                      <Card>
+                        <CardBody style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                          {currentSession.chat_history.length === 0 ? (
+                            <Flex
+                              justifyContent={{ default: 'justifyContentCenter' }}
+                              alignItems={{ default: 'alignItemsCenter' }}
+                              style={{ minHeight: '200px' }}
+                            >
+                              <FlexItem>
+                                <p
+                                  style={{
+                                    textAlign: 'center',
+                                    color: 'var(--pf-v5-global--Color--200)',
+                                    fontStyle: 'italic',
+                                    margin: 0,
+                                  }}
+                                >
+                                  No messages yet. Start a conversation with the AI agent!
+                                </p>
+                              </FlexItem>
+                            </Flex>
+                          ) : (
+                            <Stack hasGutter>
+                              {currentSession.chat_history.map((message) => (
+                                <StackItem key={message.id}>{renderChatMessage(message)}</StackItem>
+                              ))}
+                            </Stack>
+                          )}
+                        </CardBody>
+                      </Card>
+                    </StackItem>
 
-              <Tab eventKey="jiras" title={<TabTitleText>JIRA Structure</TabTitleText>}>
-                <div style={{ marginTop: '1rem' }}>
-                  {currentSession.jira_structure ? (
-                    <pre
-                      style={{
-                        whiteSpace: 'pre-wrap',
-                        padding: '1rem',
-                        backgroundColor: '#f8f8f8',
-                        borderRadius: '4px',
-                        fontSize: '14px',
-                      }}
-                    >
-                      {JSON.stringify(currentSession.jira_structure, null, 2)}
-                    </pre>
-                  ) : (
-                    <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic', padding: '2rem' }}>
-                      No JIRA structure available yet.
-                    </div>
-                  )}
-                </div>
-              </Tab>
-            </Tabs>
-          </CardBody>
-        </Card>
-      </StackItem>
-    </Stack>
+                    {/* Chat Input */}
+                    <StackItem>
+                      <Card>
+                        <CardBody>
+                          <Form>
+                            <FormGroup fieldId="chat-input">
+                              <Flex
+                                alignItems={{ default: 'alignItemsFlexEnd' }}
+                                spaceItems={{ default: 'spaceItemsMd' }}
+                              >
+                                <FlexItem flex={{ default: 'flex_1' }}>
+                                  <TextArea
+                                    id="chat-input"
+                                    value={chatMessage}
+                                    onChange={(_event, value) => setChatMessage(value)}
+                                    placeholder="Ask the AI agent to modify the refinement, update JIRA structure, or answer questions..."
+                                    rows={3}
+                                  />
+                                </FlexItem>
+                                <FlexItem>
+                                  <Button
+                                    variant="primary"
+                                    onClick={handleSendMessage}
+                                    isLoading={isSendingMessage}
+                                    isDisabled={isSendingMessage || !chatMessage.trim()}
+                                  >
+                                    Send
+                                  </Button>
+                                </FlexItem>
+                              </Flex>
+                            </FormGroup>
+                          </Form>
+                        </CardBody>
+                      </Card>
+                    </StackItem>
+                  </Stack>
+                </Tab>
+
+                <Tab eventKey="refinement" title={<TabTitleText>Refinement</TabTitleText>}>
+                  <Stack hasGutter style={{ marginTop: 'var(--pf-v5-global--spacer--md)' }}>
+                    <StackItem>
+                      {currentSession.refinement_content ? (
+                        <Card>
+                          <CardBody>
+                            <pre
+                              style={{
+                                whiteSpace: 'pre-wrap',
+                                fontSize: '14px',
+                                margin: 0,
+                                fontFamily: 'var(--pf-v5-global--FontFamily--monospace)',
+                              }}
+                            >
+                              {currentSession.refinement_content}
+                            </pre>
+                          </CardBody>
+                        </Card>
+                      ) : (
+                        <Card>
+                          <CardBody>
+                            <Flex
+                              justifyContent={{ default: 'justifyContentCenter' }}
+                              alignItems={{ default: 'alignItemsCenter' }}
+                              style={{ minHeight: '200px' }}
+                            >
+                              <FlexItem>
+                                <p
+                                  style={{
+                                    textAlign: 'center',
+                                    color: 'var(--pf-v5-global--Color--200)',
+                                    fontStyle: 'italic',
+                                    margin: 0,
+                                  }}
+                                >
+                                  No refinement document available yet.
+                                </p>
+                              </FlexItem>
+                            </Flex>
+                          </CardBody>
+                        </Card>
+                      )}
+                    </StackItem>
+                  </Stack>
+                </Tab>
+
+                <Tab eventKey="jiras" title={<TabTitleText>JIRA Structure</TabTitleText>}>
+                  <Stack hasGutter style={{ marginTop: 'var(--pf-v5-global--spacer--md)' }}>
+                    <StackItem>
+                      {currentSession.jira_structure ? (
+                        <Card>
+                          <CardBody>
+                            <pre
+                              style={{
+                                whiteSpace: 'pre-wrap',
+                                fontSize: '14px',
+                                margin: 0,
+                                fontFamily: 'var(--pf-v5-global--FontFamily--monospace)',
+                              }}
+                            >
+                              {JSON.stringify(currentSession.jira_structure, null, 2)}
+                            </pre>
+                          </CardBody>
+                        </Card>
+                      ) : (
+                        <Card>
+                          <CardBody>
+                            <Flex
+                              justifyContent={{ default: 'justifyContentCenter' }}
+                              alignItems={{ default: 'alignItemsCenter' }}
+                              style={{ minHeight: '200px' }}
+                            >
+                              <FlexItem>
+                                <p
+                                  style={{
+                                    textAlign: 'center',
+                                    color: 'var(--pf-v5-global--Color--200)',
+                                    fontStyle: 'italic',
+                                    margin: 0,
+                                  }}
+                                >
+                                  No JIRA structure available yet.
+                                </p>
+                              </FlexItem>
+                            </Flex>
+                          </CardBody>
+                        </Card>
+                      )}
+                    </StackItem>
+                  </Stack>
+                </Tab>
+              </Tabs>
+            </CardBody>
+          </Card>
+        </StackItem>
+      </Stack>
+    </PageSection>
   );
 };
 

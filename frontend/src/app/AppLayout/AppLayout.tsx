@@ -15,7 +15,7 @@ import {
   ToolbarContent,
   ToolbarItem,
 } from '@patternfly/react-core';
-import { DatabaseIcon } from '@patternfly/react-icons';
+import { DatabaseIcon, ListIcon, HomeIcon } from '@patternfly/react-icons';
 
 interface IAppLayout {
   children: React.ReactNode;
@@ -78,6 +78,24 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
       <MastheadContent>
         <Toolbar>
           <ToolbarContent>
+            <ToolbarItem>
+              <Button
+                variant={location.pathname === '/' ? 'control' : 'plain'}
+                icon={<HomeIcon />}
+                onClick={() => navigate('/')}
+              >
+                Feature Sizing
+              </Button>
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
+                variant={location.pathname.includes('sessions') ? 'control' : 'plain'}
+                icon={<ListIcon />}
+                onClick={() => navigate('/sessions')}
+              >
+                Sessions
+              </Button>
+            </ToolbarItem>
             <ToolbarItem>
               <Button
                 variant={location.pathname.includes('rag') ? 'control' : 'plain'}

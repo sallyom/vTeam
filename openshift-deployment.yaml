@@ -258,7 +258,7 @@ spec:
     spec:
       containers:
       - name: rhoai-ai-feature-sizing
-        image: quay.io/yourusername/rhoai-ai-feature-sizing:latest
+        image: quay.io/gkrumbach07/rhoai-ai-feature-sizing:latest
         # Uses combined frontend+backend image with nginx proxy
         ports:
         - containerPort: 80
@@ -365,30 +365,28 @@ spec:
     spec:
       containers:
       - name: postgresql
-        image: postgres:15
+        image: registry.redhat.io/rhel9/postgresql-15:latest
         ports:
         - containerPort: 5432
         env:
-        - name: POSTGRES_DB
+        - name: POSTGRESQL_DATABASE
           valueFrom:
             secretKeyRef:
               name: database-secrets
               key: POSTGRES_DB
-        - name: POSTGRES_USER
+        - name: POSTGRESQL_USER
           valueFrom:
             secretKeyRef:
               name: database-secrets
               key: POSTGRES_USER
-        - name: POSTGRES_PASSWORD
+        - name: POSTGRESQL_PASSWORD
           valueFrom:
             secretKeyRef:
               name: database-secrets
               key: POSTGRES_PASSWORD
-        - name: PGDATA
-          value: "/var/lib/postgresql/data/pgdata"
         volumeMounts:
         - name: postgresql-storage
-          mountPath: /var/lib/postgresql/data
+          mountPath: /var/lib/pgsql/data
         resources:
           requests:
             memory: "256Mi"
@@ -401,7 +399,7 @@ spec:
             command:
             - /bin/sh
             - -c
-            - pg_isready -U rhoai_user -d rhoai_sessions
+            - pg_isready -U ${POSTGRESQL_USER} -d ${POSTGRESQL_DATABASE}
           initialDelaySeconds: 15
           periodSeconds: 5
         livenessProbe:
@@ -409,7 +407,7 @@ spec:
             command:
             - /bin/sh
             - -c
-            - pg_isready -U rhoai_user -d rhoai_sessions
+            - pg_isready -U ${POSTGRESQL_USER} -d ${POSTGRESQL_DATABASE}
           initialDelaySeconds: 30
           periodSeconds: 10
       volumes:

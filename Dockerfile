@@ -6,7 +6,6 @@ WORKDIR /frontend
 
 # Copy frontend package files
 COPY frontend/package*.json ./
-COPY frontend/yarn.lock ./
 
 # Install frontend dependencies
 RUN npm install
@@ -29,14 +28,11 @@ RUN apt-get update && apt-get install -y \
     nginx \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pyproject.toml and install Python dependencies
+# Copy pyproject.toml and source code
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir -e .
-
-# Copy source code
 COPY src/ ./src/
 
-# Install the Python package in development mode
+# Install Python dependencies and package in development mode
 RUN pip install --no-cache-dir -e .
 
 # Copy built frontend from frontend-builder stage

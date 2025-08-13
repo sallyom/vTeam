@@ -336,7 +336,7 @@ Or just type your message to chat with the agent.
     def list_rag_stores(self):
         """List available RAG stores."""
         print("📚 Available RAG stores:")
-        default_stores = ["patternfly_docs", "rhoai_docs", "kubernetes_docs"]
+        default_stores = ["default"]
         for store in default_stores:
             print(f"  - {store}")
 
@@ -352,7 +352,7 @@ Examples:
   python cli_agent.py plan RHOAIENG-12345
 
   # Plan with specific RAG stores and custom settings
-  python cli_agent.py plan RHOAIENG-12345 --rag-stores rhoai_docs patternfly_docs --max-turns 15
+  python cli_agent.py plan RHOAIENG-12345 --rag-stores default --max-turns 15
 
   # Save outputs to a directory
   python cli_agent.py plan RHOAIENG-12345 --output-dir ./outputs

@@ -41,6 +41,13 @@ export interface SessionDetailResponse extends SessionResponse {
 	chat_history: ChatMessage[];
 }
 
+export interface SessionUpdatesResponse {
+	session: SessionResponse;
+	new_messages: ChatMessage[];
+	total_messages: number;
+	has_updates: boolean;
+}
+
 export interface ChatResponse {
 	message_id: string;
 	agent_message_id: string;
@@ -150,6 +157,13 @@ class SimpleApiService {
 		return response.data;
 	}
 
+	async getSessionUpdates(sessionId: string, lastMessageCount = 0): Promise<SessionUpdatesResponse> {
+		const response = await this.api.get<SessionUpdatesResponse>(`/sessions/${sessionId}/updates`, {
+			params: { last_message_count: lastMessageCount }
+		});
+		return response.data;
+	}
+
 	async listSessions(page = 1, pageSize = 20): Promise<SessionListResponse> {
 		const response = await this.api.get<SessionListResponse>('/sessions', {
 			params: { page, page_size: pageSize }
@@ -191,7 +205,7 @@ class SimpleApiService {
 	}
 
 	// RAG Store Management
-	async listRAGStores(): Promise<RAGStoreListResponse> {
+	async listRagStores(): Promise<RAGStoreListResponse> {
 		const response = await this.api.get<RAGStoreListResponse>('/rag/stores');
 		return response.data;
 	}
@@ -211,6 +225,14 @@ class SimpleApiService {
 
 	async ingestDocuments(storeId: string, documents: any[]): Promise<any> {
 		const response = await this.api.post('/rag/ingest', {
+			store_id: storeId,
+			documents
+		});
+		return response.data;
+	}
+
+	async ingestDocumentsWithLlamaIndex(storeId: string, documents: any[]): Promise<any> {
+		const response = await this.api.post('/rag/ingest/llamaindex', {
 			store_id: storeId,
 			documents
 		});
@@ -239,5 +261,5 @@ class SimpleApiService {
 }
 
 // Export singleton instance
-export const simpleApi = new SimpleApiService();
-export default simpleApi;
+export const simpleApiService = new SimpleApiService();
+export default simpleApiService;

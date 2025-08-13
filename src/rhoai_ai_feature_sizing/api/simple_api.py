@@ -4,7 +4,7 @@ import logging
 import asyncio
 import json
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Callable
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Query, Depends
@@ -27,7 +27,6 @@ from .simple_schemas import (
     JiraStructureResponse,
     EstimatesResponse,
     HealthResponse,
-    ErrorResponse,
     SimpleSession,
     SessionStatus,
     ChatRole,
@@ -126,6 +125,54 @@ class SimpleSessionService:
 session_service = SimpleSessionService()
 
 
+class StreamingLogHandler(logging.Handler):
+    """Custom log handler that streams log messages to session chat."""
+
+    def __init__(self, session_id: str, streaming_callback):
+        super().__init__()
+        self.session_id = session_id
+        self.streaming_callback = streaming_callback
+
+    def emit(self, record):
+        """Emit a log record by streaming it."""
+        try:
+            # Format the log message
+            message = self.format(record)
+
+            # Stream as system message (but don't await here as this is sync)
+            import asyncio
+
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(self.streaming_callback("system", f"📋 {message}"))
+            except RuntimeError:
+                # If no event loop is running, skip streaming
+                pass
+        except Exception:
+            # Don't let logging errors break the application
+            pass
+
+
+async def create_streaming_callback(session_id: str):
+    """Create a streaming callback that adds messages to session chat."""
+
+    async def callback(
+        message_type: str, content: str, metadata: Dict[str, Any] = None
+    ):
+        """Stream a message to the session."""
+        try:
+            # Determine the role based on message type
+            role = ChatRole.SYSTEM if message_type == "system" else ChatRole.AGENT
+
+            # Add the message to session chat
+            session_service.add_chat_message(session_id, role, content)
+
+        except Exception as e:
+            logger.error(f"Failed to stream message: {e}")
+
+    return callback
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -134,7 +181,7 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize services
         rag_service = RAGService()
-        unified_agent = UnifiedFeatureSizingAgent(rag_service)
+        unified_agent = UnifiedFeatureSizingAgent()
 
         # Setup predefined RAG stores
         try:
@@ -186,6 +233,7 @@ def get_rag_service() -> RAGService:
 
 
 # Health Check
+@app.get("/health", response_model=HealthResponse)
 @app.get("/healthz", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
@@ -251,6 +299,28 @@ async def get_session(session_id: str):
     )
 
 
+@app.get("/sessions/{session_id}/updates")
+async def get_session_updates(session_id: str, last_message_count: int = 0):
+    """Get real-time session updates including new messages."""
+    session = session_service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get messages after the last count
+    messages = (
+        session.chat_history[last_message_count:]
+        if last_message_count < len(session.chat_history)
+        else []
+    )
+
+    return {
+        "session": _session_to_response(session),
+        "new_messages": messages,
+        "total_messages": len(session.chat_history),
+        "has_updates": len(messages) > 0,
+    }
+
+
 @app.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session."""
@@ -284,13 +354,11 @@ async def send_chat_message(
             "jira_structure": session.jira_structure,
         }
 
-        # Process with agent
-        agent_response, actions_taken, updated_state = await agent.chat(
-            session_id=session_id,
-            user_message=request.message,
-            current_state=current_state,
-            rag_store_ids=session.rag_store_ids,
-        )
+        # Process with agent - Note: chat method doesn't exist in current unified agent
+        # For now, return a placeholder response
+        agent_response = "Chat functionality not yet implemented in the unified agent."
+        actions_taken = []
+        updated_state = current_state
 
         # Add agent response to session
         agent_message_id = session_service.add_chat_message(
@@ -499,6 +567,44 @@ async def ingest_documents(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/rag/ingest/llamaindex")
+async def ingest_documents_with_llamaindex(
+    request: IngestDocumentsRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Ingest documents using LlamaIndex for advanced processing (GitHub repos, web scraping, etc.)."""
+    try:
+        from .schemas import DocumentIngestionRequest, DocumentSource
+
+        # Convert documents to proper format
+        doc_sources = []
+        for doc in request.documents:
+            doc_source = DocumentSource(
+                name=doc.get("name", "Unknown"),
+                url=doc.get("url", ""),
+                mime_type=doc.get("mime_type", "text/plain"),
+                metadata=doc.get("metadata", {}),
+            )
+            doc_sources.append(doc_source)
+
+        ingestion_request = DocumentIngestionRequest(
+            vector_db_id=request.store_id,
+            documents=doc_sources,
+        )
+
+        result = await rag_service.ingest_documents_with_llamaindex(ingestion_request)
+        return {
+            "store_id": request.store_id,
+            "documents_processed": len(result.ingested_documents),
+            "chunks_created": result.total_chunks_created,
+            "message": "Documents ingested successfully using LlamaIndex",
+            "processing_method": "llamaindex",
+        }
+    except Exception as e:
+        logger.error(f"Error ingesting documents with LlamaIndex: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/rag/query", response_model=RAGQueryResponse)
 async def query_rag_stores(
     request: RAGQueryRequest,
@@ -594,6 +700,12 @@ async def list_prompts():
 # Helper Functions
 def _session_to_response(session: SimpleSession) -> SessionResponse:
     """Convert session model to response."""
+    # Handle jira_structure - convert list to dict if needed
+    jira_structure = session.jira_structure
+    if isinstance(jira_structure, list):
+        # Convert list of epics to dict format
+        jira_structure = {"epics": jira_structure}
+
     return SessionResponse(
         id=session.id,
         jira_key=session.jira_key,
@@ -602,7 +714,7 @@ def _session_to_response(session: SimpleSession) -> SessionResponse:
         created_at=session.created_at,
         updated_at=session.updated_at,
         refinement_content=session.refinement_content,
-        jira_structure=session.jira_structure,
+        jira_structure=jira_structure,
         progress_message=session.progress_message,
         error_message=session.error_message,
     )
@@ -613,7 +725,7 @@ async def _process_session_background(
     request: CreateSessionRequest,
     agent: UnifiedFeatureSizingAgent,
 ):
-    """Background task to process a session."""
+    """Background task to process a session with real-time updates."""
     try:
         # Update status to processing
         session_service.update_session(
@@ -622,13 +734,37 @@ async def _process_session_background(
             progress_message="Processing feature with AI agent...",
         )
 
+        # Add initial system messages
+        session_service.add_chat_message(
+            session_id,
+            ChatRole.SYSTEM,
+            f"🚀 Starting feature processing for {request.jira_key}",
+        )
+
+        if request.rag_store_ids:
+            session_service.add_chat_message(
+                session_id,
+                ChatRole.SYSTEM,
+                f"📊 Using RAG stores: {', '.join(request.rag_store_ids)}",
+            )
+
+        session_service.add_chat_message(
+            session_id, ChatRole.SYSTEM, "🤖 Initializing AI agent..."
+        )
+
         # Process with unified agent
-        results = await agent.process_feature(
+        session_service.add_chat_message(
+            session_id,
+            ChatRole.SYSTEM,
+            "🔍 Analyzing JIRA issue and gathering context...",
+        )
+
+        results = await agent.run_planning_loop(
             session_id=session_id,
             jira_key=request.jira_key,
             rag_store_ids=request.rag_store_ids,
-            existing_refinement=request.existing_refinement,
-            custom_prompts=request.custom_prompts,
+            max_turns=12,
+            enable_validation=True,
         )
 
         # Update session with results
@@ -639,9 +775,15 @@ async def _process_session_background(
 
         if results.get("refinement_content"):
             updates["refinement_content"] = results["refinement_content"]
+            session_service.add_chat_message(
+                session_id, ChatRole.SYSTEM, "📝 Refinement document generated"
+            )
 
         if results.get("jira_structure"):
             updates["jira_structure"] = results["jira_structure"]
+            session_service.add_chat_message(
+                session_id, ChatRole.SYSTEM, "🎯 JIRA structure created"
+            )
 
         session_service.update_session(session_id, **updates)
 
@@ -652,10 +794,18 @@ async def _process_session_background(
             session_id, ChatRole.SYSTEM, completion_message
         )
 
+        session_service.add_chat_message(
+            session_id, ChatRole.SYSTEM, "🎉 Session processing complete!"
+        )
+
         logger.info(f"Session {session_id} processed successfully")
 
     except Exception as e:
         logger.error(f"Error processing session {session_id}: {e}")
+
+        session_service.add_chat_message(
+            session_id, ChatRole.SYSTEM, f"❌ Processing failed: {str(e)}"
+        )
 
         # Update session with error
         session_service.update_session(
@@ -663,11 +813,6 @@ async def _process_session_background(
             status=SessionStatus.ERROR,
             error_message=str(e),
             progress_message=None,
-        )
-
-        # Add error message to chat
-        session_service.add_chat_message(
-            session_id, ChatRole.SYSTEM, f"❌ Processing failed: {str(e)}"
         )
 
 

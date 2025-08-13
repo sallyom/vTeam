@@ -22,7 +22,7 @@ from .api.schemas import VectorDBConfig, DocumentSource, DocumentIngestionReques
 
 # Predefined document sources for different use cases
 DOCUMENT_SOURCES = {
-    "patternfly_docs": [
+    "default": [
         {
             "name": "PatternFly Components Overview",
             "url": "https://raw.githubusercontent.com/patternfly/patternfly-react/main/packages/react-core/README.md",
@@ -52,66 +52,6 @@ DOCUMENT_SOURCES = {
             "url": "https://raw.githubusercontent.com/patternfly/patternfly-react/main/packages/react-core/src/components/Nav/Nav.tsx",
             "mime_type": "text/plain",
             "metadata": {"category": "component", "component": "Nav"},
-        },
-    ],
-    "rhoai_docs": [
-        {
-            "name": "OpenShift AI Overview",
-            "url": "https://raw.githubusercontent.com/red-hat-data-services/odh-manifests/master/README.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "overview", "product": "rhoai"},
-        },
-        {
-            "name": "Jupyter Notebook Configuration",
-            "url": "https://raw.githubusercontent.com/red-hat-data-services/notebooks/main/README.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "jupyter", "product": "rhoai"},
-        },
-        {
-            "name": "Model Serving Documentation",
-            "url": "https://raw.githubusercontent.com/kserve/kserve/master/README.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "model-serving", "product": "kserve"},
-        },
-    ],
-    "kubernetes_docs": [
-        {
-            "name": "Kubernetes API Reference",
-            "url": "https://raw.githubusercontent.com/kubernetes/kubernetes/master/README.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "api", "product": "kubernetes"},
-        },
-        {
-            "name": "OpenShift Container Platform",
-            "url": "https://raw.githubusercontent.com/openshift/origin/master/README.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "platform", "product": "openshift"},
-        },
-        {
-            "name": "Kubernetes Deployment Guide",
-            "url": "https://raw.githubusercontent.com/kubernetes/website/main/content/en/docs/concepts/workloads/controllers/deployment.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "deployment", "product": "kubernetes"},
-        },
-    ],
-    "github_repos": [
-        {
-            "name": "React Best Practices",
-            "url": "https://raw.githubusercontent.com/facebook/react/main/README.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "frontend", "framework": "react"},
-        },
-        {
-            "name": "FastAPI Documentation",
-            "url": "https://raw.githubusercontent.com/tiangolo/fastapi/master/README.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "backend", "framework": "fastapi"},
-        },
-        {
-            "name": "Docker Best Practices",
-            "url": "https://raw.githubusercontent.com/docker/docker.github.io/master/README.md",
-            "mime_type": "text/markdown",
-            "metadata": {"category": "containerization", "tool": "docker"},
         },
     ],
 }

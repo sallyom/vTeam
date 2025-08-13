@@ -1421,28 +1421,16 @@ class RAGService:
         """Get predefined vector database configurations for common use cases."""
         return [
             VectorDBConfig(
-                vector_db_id="patternfly_docs",
-                name="PatternFly Documentation",
-                description="PatternFly design system documentation and components",
-                use_case="patternfly",
+                vector_db_id="default",
+                name="Default",
+                description="Default vector database",
+                use_case="default",
             ),
             VectorDBConfig(
                 vector_db_id="github_repos",
                 name="GitHub Repositories",
                 description="Documentation from various GitHub repositories",
                 use_case="github_repos",
-            ),
-            VectorDBConfig(
-                vector_db_id="rhoai_docs",
-                name="RHOAI Documentation",
-                description="Red Hat OpenShift AI documentation",
-                use_case="documentation",
-            ),
-            VectorDBConfig(
-                vector_db_id="kubernetes_docs",
-                name="Kubernetes Documentation",
-                description="Kubernetes and OpenShift documentation",
-                use_case="documentation",
             ),
         ]
 

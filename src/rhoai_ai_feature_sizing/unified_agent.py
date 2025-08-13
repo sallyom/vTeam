@@ -206,6 +206,7 @@ class UnifiedFeatureSizingAgent:
         rag_store_ids: Optional[List[str]] = None,
         max_turns: int = 12,
         enable_validation: bool = True,
+        streaming_callback: Optional[callable] = None,
     ) -> Dict[str, Any]:
         """
         Run the autonomous planning loop with the agent.
@@ -235,29 +236,58 @@ class UnifiedFeatureSizingAgent:
         # First turn with user message
         try:
             self.logger.info(f"Creating agent turn...")
+            if streaming_callback:
+                await streaming_callback("system", f"🤖 Creating agent turn for {jira_key}")
+            
             turn = agent.create_turn(
                 session_id=agent_session_id,
                 messages=[{"role": "user", "content": init_msg}],
             )
-            # Monitor each step of execution
+            
+            # Monitor each step of execution with streaming
+            step_count = 0
             for log in AgentEventLogger().log(turn):
-                log.print()
+                log.print()  # Still print to console
+                
+                # Stream agent execution steps
+                if streaming_callback:
+                    step_count += 1
+                    log_content = str(log)
+                    
+                    # Determine step type based on log content
+                    if "tool_call" in log_content.lower() or "calling" in log_content.lower():
+                        step_type = "tool_execution"
+                        await streaming_callback("agent", f"🔧 Tool Execution: {log_content}", {"step_type": step_type, "step": step_count})
+                    elif "inference" in log_content.lower() or "generating" in log_content.lower():
+                        step_type = "inference"
+                        await streaming_callback("agent", f"🧠 AI Inference: {log_content}", {"step_type": step_type, "step": step_count})
+                    elif "completion" in log_content.lower() or "response" in log_content.lower():
+                        step_type = "completion"
+                        await streaming_callback("agent", f"✅ Step Complete: {log_content}", {"step_type": step_type, "step": step_count})
+                    else:
+                        step_type = "execution"
+                        await streaming_callback("agent", f"⚙️ Execution: {log_content}", {"step_type": step_type, "step": step_count})
 
             self.logger.debug(f"Turn object type: {type(turn)}")
-            self.logger.debug(f"Turn object attributes: {dir(turn)}")
+            if streaming_callback:
+                await streaming_callback("system", f"📊 Turn completed - type: {type(turn).__name__}")
 
             # Log turn details
             if hasattr(turn, "turn_id"):
                 self.logger.debug(f"Turn ID: {turn.turn_id}")
+                if streaming_callback:
+                    await streaming_callback("system", f"🆔 Turn ID: {turn.turn_id}")
+                    
             if hasattr(turn, "completed_at"):
                 self.logger.info(f"Turn completed at: {turn.completed_at}")
-            if hasattr(turn, "output_message"):
-                self.logger.debug(
-                    f"Turn has output_message: {bool(turn.output_message)}"
-                )
+                if streaming_callback:
+                    await streaming_callback("system", f"⏰ Turn completed at: {turn.completed_at}")
+                    
             if hasattr(turn, "steps"):
                 steps_count = len(turn.steps) if turn.steps else 0
                 self.logger.info(f"Agent executed {steps_count} steps")
+                if streaming_callback:
+                    await streaming_callback("system", f"📈 Agent executed {steps_count} steps total")
 
             # The Turn object itself contains the response, no need to await
             response = turn
@@ -306,24 +336,60 @@ class UnifiedFeatureSizingAgent:
 
         refinement_doc = None
         jira_plan = None
+        turn_count = 1
+        completed = False
 
-        # For now, just process the first response
-        # TODO: Implement proper multi-turn conversation once we understand the API better
-        text = self._extract_response_content(response)
+        # Multi-turn conversation loop
+        current_response = response
 
-        # Parse outputs from agent response
-        if doc := self._parse_refinement_markdown(text):
-            refinement_doc = doc
-        if plan := self._parse_jira_json_from_content(text):
-            jira_plan = plan
+        while turn_count <= max_turns and not completed:
+            text = self._extract_response_content(current_response)
 
-        # Check for completion signal
-        if self._has_final_plan_marker(text):
-            self.logger.info("Agent completed planning in 1 turn")
-        else:
-            self.logger.info(
-                "Agent provided initial response, may need more turns in the future"
-            )
+            # Parse outputs from agent response
+            if doc := self._parse_refinement_markdown(text):
+                refinement_doc = doc
+            if plan := self._parse_jira_json_from_content(text):
+                jira_plan = plan
+
+            # Check for completion signal
+            if self._has_final_plan_marker(text):
+                self.logger.info(f"Agent completed planning in {turn_count} turn(s)")
+                completed = True
+                break
+
+            # If not completed and we haven't hit max turns, continue the conversation
+            if turn_count < max_turns:
+                self.logger.info(
+                    f"Agent turn {turn_count} completed, continuing conversation..."
+                )
+
+                # Continue the conversation - the agent should continue from where it left off
+                try:
+                    turn_count += 1
+                    next_turn = agent.create_turn(
+                        session_id=agent_session_id,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": "Please continue with your work.",
+                            }
+                        ],
+                    )
+
+                    # Monitor each step of execution
+                    for log in AgentEventLogger().log(next_turn):
+                        log.print()
+
+                    current_response = next_turn
+
+                except Exception as e:
+                    self.logger.error(f"Error during turn {turn_count}: {e}")
+                    break
+            else:
+                self.logger.warning(
+                    f"Reached maximum turns ({max_turns}) without completion"
+                )
+                break
 
         # Get final state from database (agent should have saved via tools)
         try:
@@ -379,11 +445,17 @@ Please analyze and create a complete feature plan for JIRA issue {jira_key}.
 4. Save your work using the planning tools as you go (pass session_uuid="" initially, then use the returned session_uuid)
 5. When completely finished, print #FINAL_PLAN
 
-**Note:** You can optionally use RAG search to research components if needed, but focus primarily on the JIRA context provided.
+**IMPORTANT INSTRUCTIONS:**
+- This is a multi-turn conversation. Take your time and work step by step.
+- ACTUALLY USE THE TOOLS - don't just describe what you would do, DO IT.
+- Start by calling get_refinement_doc() and get_jira_plan() to see if any work already exists.
+- Use set_refinement_doc() and set_jira_plan() to save your work as you create it.
+- You can use RAG search to research components if needed.
+- Only print #FINAL_PLAN when you have actually completed and saved all your work.
 
 **Remember:** Use the planning tools to save your refinement document and JIRA plan. Pass session_uuid="" initially, then use the returned session_uuid for subsequent calls.
 
-Begin your analysis now.
+Begin your analysis now by first checking what work already exists.
         """.strip()
 
     def _derive_components_from_jira(self, jira_data: Dict[str, Any]) -> List[str]:

@@ -55,7 +55,7 @@ class SimpleAPITester:
         try:
             payload = {
                 "jira_key": jira_key,
-                "rag_store_ids": ["patternfly_docs", "rhoai_docs"],
+                "rag_store_ids": ["default"],
             }
 
             response = requests.post(f"{self.base_url}/sessions", json=payload)

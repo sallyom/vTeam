@@ -152,12 +152,6 @@ Stories
 - **Scoped queries**: Component-specific searches for targeted results
 - **Integration**: Seamless integration with Llama Stack tools
 
-**Supported RAG Stores**:
-- `rhoai_docs`: Red Hat OpenShift AI documentation
-- `patternfly_docs`: PatternFly UI component documentation
-- `kubernetes_docs`: Kubernetes API and operational documentation
-- Custom stores: Extensible for team-specific documentation
-
 ## 🔄 Process Flow
 
 ### Autonomous Planning Workflow

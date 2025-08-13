@@ -3,6 +3,7 @@ import { Route, Routes } from 'react-router-dom';
 import { NotFound } from '@app/NotFound/NotFound';
 import RAGManager from '../components/RAGManager';
 import SimpleFeatureSizing from '../components/SimpleFeatureSizing';
+import SessionManager from '../components/SessionManager';
 
 export interface IAppRoute {
   label?: string; // Excluding the label will exclude the route from the nav sidebar in AppLayout
@@ -29,6 +30,13 @@ const routes: AppRouteConfig[] = [
     label: 'Feature Sizing',
     path: '/',
     title: 'RHOAI Feature Sizing',
+  },
+  {
+    element: <SessionManager />,
+    exact: true,
+    label: 'Sessions',
+    path: '/sessions',
+    title: 'RHOAI Feature Sizing | Sessions',
   },
   {
     element: <RAGManager />,

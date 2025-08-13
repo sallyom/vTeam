@@ -19,6 +19,9 @@ class VectorDBConfig(BaseModel):
     embedding_model: str = Field(
         default="all-MiniLM-L6-v2", description="Embedding model to use"
     )
+    embedding_dimension: int = Field(
+        default=384, description="Dimension of the embedding vectors"
+    )
     use_case: str = Field(default="general", description="Use case category")
 
 
