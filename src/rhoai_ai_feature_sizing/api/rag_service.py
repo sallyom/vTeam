@@ -11,7 +11,13 @@ from contextlib import contextmanager
 from sqlalchemy.orm import Session as DBSession
 from llama_stack_client import LlamaStackClient, RAGDocument
 
-from .models import VectorDatabase, Document, RAGQuery, create_session_factory
+from .models import (
+    VectorDatabase,
+    Document,
+    RAGQuery,
+    ProjectStore,
+    create_session_factory,
+)
 from .schemas import (
     VectorDBConfig,
     DocumentSource,
@@ -47,6 +53,28 @@ class RAGService:
         self.session_factory = create_session_factory()
         self.logger = logging.getLogger("RAGService")
         self.client: Optional[LlamaStackClient] = None
+
+    def _get_project_info_from_vector_db_id(
+        self, db: DBSession, vector_db_id: str
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Get project_id and project_store_id from a vector_db_id.
+
+        Args:
+            db: Database session
+            vector_db_id: The vector database ID from Llama Stack
+
+        Returns:
+            Tuple of (project_id, project_store_id) or (None, None) if not found
+        """
+        project_store = (
+            db.query(ProjectStore).filter_by(vector_db_id=vector_db_id).first()
+        )
+
+        if project_store:
+            return str(project_store.project_id), str(project_store.id)
+
+        return None, None
 
     def _get_client(self) -> LlamaStackClient:
         """Get or create Llama Stack client."""
@@ -304,10 +332,19 @@ class RAGService:
                 for i, doc_source in enumerate(request.documents):
                     doc_id = document_ids[i]  # Use the same ID as in RAG documents
 
+                    # Get project information from vector_db_id
+                    project_id, project_store_id = (
+                        self._get_project_info_from_vector_db_id(
+                            db, request.vector_db_id
+                        )
+                    )
+
                     # Initially set chunk count to 0, will update after ingestion
                     document = Document(
                         document_id=doc_id,
                         vector_db_id=vdb.id,
+                        project_id=project_id,
+                        project_store_id=project_store_id,
                         name=doc_source.name,
                         source_url=doc_source.url,
                         mime_type=doc_source.mime_type,
@@ -524,7 +561,8 @@ class RAGService:
                 f"Starting LlamaIndex bulk ingestion for {len(request.documents)} sources"
             )
 
-            # Load documents using LlamaIndex loaders
+            # Load documents using LlamaIndex loaders with progress callback
+            # Note: This is the async version, but LlamaIndex load_documents is sync
             processed_docs = llamaindex_service.load_documents(request.documents)
 
             if not processed_docs:
@@ -607,9 +645,18 @@ class RAGService:
                 for file_key, file_info in document_info_map.items():
                     doc_id = f"{request.vector_db_id}-{file_key.replace('/', '_')}-{timestamp}"
 
+                    # Get project information from vector_db_id
+                    project_id, project_store_id = (
+                        self._get_project_info_from_vector_db_id(
+                            db, request.vector_db_id
+                        )
+                    )
+
                     document = Document(
                         document_id=doc_id,
                         vector_db_id=vdb.id,
+                        project_id=project_id,
+                        project_store_id=project_store_id,
                         name=file_info["name"],
                         source_url=file_info["source_url"],
                         mime_type=file_info["mime_type"],
@@ -656,7 +703,7 @@ class RAGService:
             raise
 
     def ingest_documents_with_llamaindex_sync(
-        self, request, progress_callback=None
+        self, request, progress_callback=None, task_id=None, **kwargs
     ) -> Dict[str, Any]:
         """Synchronous version of LlamaIndex ingestion for background tasks."""
         start_time = time.time()
@@ -706,13 +753,60 @@ class RAGService:
 
             if not processed_docs:
                 ingestion_time_ms = (time.time() - start_time) * 1000
-                return {
-                    "vector_db_id": request.vector_db_id,
-                    "ingested_documents": [],
-                    "total_chunks_created": 0,
-                    "ingestion_time_ms": ingestion_time_ms,
-                    "errors": ["No documents were successfully processed"],
-                }
+                error_msg = "No documents were successfully processed - check authentication and permissions"
+
+                # Report failure through progress callback with more detail
+                if progress_callback:
+                    progress_callback(
+                        progress=0.0,
+                        step=f"❌ {error_msg}. Check logs for details on individual source failures.",
+                        processed=0,
+                        total=len(request.documents),
+                    )
+
+                # This should be treated as an error, not success
+                self.logger.error(
+                    f"Ingestion failed: {error_msg}. Requested sources: {[doc.url for doc in request.documents]}"
+                )
+                raise ValueError(error_msg)
+
+            # Ensure the vector database is registered with Llama Stack
+            with self.get_db_session() as db:
+                vdb = (
+                    db.query(VectorDatabase)
+                    .filter_by(vector_db_id=request.vector_db_id, is_active=True)
+                    .first()
+                )
+
+                if vdb:
+                    # Try to register this vector database with Llama Stack if not already registered
+                    try:
+                        client = self._get_client()
+
+                        # Test if vector database is already registered by trying to list it
+                        try:
+                            client.vector_dbs.get(vector_db_id=request.vector_db_id)
+                            self.logger.debug(
+                                f"Vector database {request.vector_db_id} already registered"
+                            )
+                        except Exception:
+                            # Not registered, so register it now
+                            self.logger.info(
+                                f"Auto-registering vector database {request.vector_db_id} with Llama Stack"
+                            )
+                            client.vector_dbs.register(
+                                vector_db_id=request.vector_db_id,
+                                embedding_model=vdb.embedding_model,
+                                embedding_dimension=vdb.embedding_dimension,
+                                provider_id="faiss",
+                            )
+                            self.logger.info(
+                                f"Successfully registered {request.vector_db_id} with FAISS provider"
+                            )
+                    except Exception as reg_error:
+                        self.logger.warning(
+                            f"Failed to auto-register vector database {request.vector_db_id}: {reg_error}"
+                        )
 
             # Convert to RAG documents for Llama Stack
             client = self._get_client()
@@ -792,9 +886,18 @@ class RAGService:
                 for file_key, file_info in document_info_map.items():
                     doc_id = f"{request.vector_db_id}-{file_key.replace('/', '_')}-{timestamp}"
 
+                    # Get project information from vector_db_id
+                    project_id, project_store_id = (
+                        self._get_project_info_from_vector_db_id(
+                            db, request.vector_db_id
+                        )
+                    )
+
                     document = Document(
                         document_id=doc_id,
                         vector_db_id=vdb.id,
+                        project_id=project_id,
+                        project_store_id=project_store_id,
                         name=file_info["name"],
                         source_url=file_info["source_url"],
                         mime_type=file_info["mime_type"],
@@ -822,6 +925,15 @@ class RAGService:
             total_chunks = len(processed_docs)
             ingestion_time_ms = (time.time() - start_time) * 1000
 
+            # Final progress update
+            if progress_callback:
+                progress_callback(
+                    progress=1.0,
+                    step=f"Successfully ingested {len(ingested_docs)} documents ({total_chunks} chunks)",
+                    processed=len(ingested_docs),
+                    total=len(request.documents),
+                )
+
             self.logger.info(
                 f"Successfully ingested {len(ingested_docs)} documents "
                 f"({total_chunks} chunks) using LlamaIndex loaders in {ingestion_time_ms:.2f}ms"
@@ -837,6 +949,14 @@ class RAGService:
 
         except Exception as e:
             self.logger.error(f"LlamaIndex bulk ingestion failed: {e}")
+            # Report the error through progress callback before raising
+            if progress_callback:
+                progress_callback(
+                    progress=0.0,
+                    step=f"Ingestion failed: {str(e)}",
+                    processed=0,
+                    total=len(request.documents),
+                )
             raise
 
     def ingest_documents_sync(self, request, progress_callback=None) -> Dict[str, Any]:
@@ -1421,7 +1541,7 @@ class RAGService:
             VectorDBConfig(
                 vector_db_id="default",
                 name="Default",
-                description="Default vector database",
+                description="Default vector database for miscellaneous content",
                 use_case="default",
             ),
             VectorDBConfig(
@@ -1429,6 +1549,24 @@ class RAGService:
                 name="GitHub Repositories",
                 description="Documentation from various GitHub repositories",
                 use_case="github_repos",
+            ),
+            VectorDBConfig(
+                vector_db_id="web_content",
+                name="Web Content",
+                description="Content scraped from web pages and documentation sites",
+                use_case="web_content",
+            ),
+            VectorDBConfig(
+                vector_db_id="api_docs",
+                name="API Documentation",
+                description="API reference documentation and technical guides",
+                use_case="api_docs",
+            ),
+            VectorDBConfig(
+                vector_db_id="code_files",
+                name="Code Files",
+                description="Individual code files and snippets",
+                use_case="code_files",
             ),
         ]
 

@@ -15,7 +15,7 @@ import {
   ToolbarContent,
   ToolbarItem,
 } from '@patternfly/react-core';
-import { DatabaseIcon, ListIcon, HomeIcon } from '@patternfly/react-icons';
+import { CogIcon, FileIcon, HomeIcon, FolderIcon, ClipboardListIcon } from '@patternfly/react-icons';
 
 interface IAppLayout {
   children: React.ReactNode;
@@ -31,7 +31,7 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
         <MastheadBrand data-codemods>
           <MastheadLogo data-codemods>
             <svg height="40px" viewBox="0 0 679 158">
-              <title>JIRA RFE Sessions</title>
+              <title>RHOAI Feature Sizing</title>
               <defs>
                 <linearGradient x1="68%" y1="2.25860997e-13%" x2="32%" y2="100%" id="linearGradient-basic-masthead">
                   <stop stopColor="#2B9AF3" offset="0%"></stop>
@@ -89,20 +89,20 @@ const AppLayout: React.FunctionComponent<IAppLayout> = ({ children }) => {
             </ToolbarItem>
             <ToolbarItem>
               <Button
-                variant={location.pathname.includes('sessions') ? 'control' : 'plain'}
-                icon={<ListIcon />}
-                onClick={() => navigate('/sessions')}
+                variant={location.pathname.includes('projects') ? 'control' : 'plain'}
+                icon={<CogIcon />}
+                onClick={() => navigate('/projects')}
               >
-                Sessions
+                Knowledge Base
               </Button>
             </ToolbarItem>
             <ToolbarItem>
               <Button
-                variant={location.pathname.includes('rag') ? 'control' : 'plain'}
-                icon={<DatabaseIcon />}
-                onClick={() => navigate('/rag')}
+                variant={location.pathname.includes('sessions') ? 'control' : 'plain'}
+                icon={<ClipboardListIcon />}
+                onClick={() => navigate('/sessions')}
               >
-                RAG Manager
+                Sessions
               </Button>
             </ToolbarItem>
           </ToolbarContent>

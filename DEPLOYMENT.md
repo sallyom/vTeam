@@ -1,6 +1,8 @@
-# Deployment Guide
+# Kubernetes/OpenShift Deployment Guide
 
-This guide shows you how to deploy the complete RHOAI AI Feature Sizing application to OpenShift, including both the React frontend and Python backend with external model providers.
+This guide shows you how to deploy the complete RHOAI AI Feature Sizing application to **any Kubernetes cluster** (including OpenShift), with both the React frontend and Python backend with external model providers.
+
+> **✨ Works on both Kubernetes and OpenShift!** The deployment automatically detects and uses either `kubectl` or `oc` CLI.
 
 ## 🎯 Overview
 
@@ -54,9 +56,9 @@ The deployment creates a complete web application with the following architectur
 
 ### Prerequisites
 
-1. **OpenShift cluster access** with `oc` CLI configured
+1. **Kubernetes or OpenShift cluster access** with `kubectl` or `oc` CLI configured
 2. **Docker** and access to a **container registry** (e.g., Quay.io, Docker Hub, OpenShift internal registry)
-3. **Appropriate permissions** to create namespaces, deployments, secrets, and routes
+3. **Appropriate permissions** to create namespaces, deployments, secrets, and services
 4. **API credentials** for your chosen provider:
    - **OpenAI**: API key from https://platform.openai.com/api-keys
    - **Azure OpenAI**: API key, endpoint, and deployment names
@@ -69,7 +71,7 @@ git clone <your-repo>
 cd rhoai-ai-feature-sizing
 
 # Make deployment script executable
-chmod +x deploy-to-openshift.sh
+chmod +x deploy-to-k8s.sh
 ```
 
 ### 2. Build and Push Custom Docker Image
@@ -86,18 +88,18 @@ docker push quay.io/yourusername/rhoai-ai-feature-sizing:latest
 - **Stage 1**: Builds the React frontend using Node.js and webpack
 - **Stage 2**: Sets up Python backend, nginx, and combines everything
 
-**Important**: Update `openshift-deployment.yaml` with your actual image URL:
+**Important**: Update `k8s-deployment.yaml` with your actual image URL:
 ```yaml
 # Replace this line in the rhoai-ai-feature-sizing deployment:
 image: quay.io/yourusername/rhoai-ai-feature-sizing:latest
 ```
 
-### 3. Deploy to OpenShift
+### 3. Deploy to Kubernetes/OpenShift
 
-Run the deployment script:
+Run the deployment script (works with both `kubectl` and `oc`):
 
 ```bash
-./deploy-to-openshift.sh
+./deploy-to-k8s.sh
 ```
 
 The script will prompt you for:
@@ -113,7 +115,7 @@ The script will:
 - Deploy LLAMA Stack configured for your API
 - Deploy the Jira MCP service
 - **Deploy PostgreSQL database** for scalable data storage
-- Create routes for external access
+- **No external routes** - access via port forwarding for development
 
 ### 3. Update Your Environment
 
@@ -124,17 +126,28 @@ cp env.openshift.example .env
 # Edit .env with the URL provided by the deployment script
 ```
 
-### 4. Test Your Deployment
+### 4. Access Your Deployment
+
+**Port forward the services** (recommended for development):
 
 ```bash
-# Open the web interface in your browser
-open http://your-app-route-url
+# Main application (React frontend + Python API)
+kubectl port-forward svc/rhoai-ai-feature-sizing-service 8080:80 -n llama-stack
+# Or use 'oc' if on OpenShift
 
+# Then open in browser:
+open http://localhost:8080
+```
+
+**Test the deployment:**
+
+```bash
 # Test the API health endpoint
-curl http://your-app-route-url/health
+curl http://localhost:8080/health
 
-# Test the LLAMA Stack endpoint  
-curl http://your-llama-stack-route-url/v1/health
+# Port forward LLAMA Stack directly (optional)
+kubectl port-forward svc/llama-stack-service 8321:8321 -n llama-stack
+curl http://localhost:8321/v1/health
 
 # Test with your existing CLI (update API URL in .env)
 uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
@@ -155,38 +168,47 @@ docker build -t quay.io/yourusername/rhoai-ai-feature-sizing:latest .
 # Push to registry
 docker push quay.io/yourusername/rhoai-ai-feature-sizing:latest
 
-# Update openshift-deployment.yaml with your image URL
-sed -i 's|quay.io/yourusername/rhoai-ai-feature-sizing:latest|your-registry/your-image:tag|g' openshift-deployment.yaml
+# Update k8s-deployment.yaml with your image URL
+sed -i 's|quay.io/yourusername/rhoai-ai-feature-sizing:latest|your-registry/your-image:tag|g' k8s-deployment.yaml
 ```
 
 ### 2. Create Namespace
 ```bash
-oc create namespace llama-stack
+# Use kubectl or oc depending on your cluster
+kubectl create namespace llama-stack
+# OR: oc create namespace llama-stack
 ```
 
 ### 3. Create Secrets
 
 ```bash
-# Create API secrets
-oc create secret generic llama-stack-secrets \
-  --from-literal=CUSTOM_API_BASE_URL="https://your-api.com/v1" \
-  --from-literal=CUSTOM_API_KEY="your-api-key" \
-  --from-literal=CUSTOM_MODEL_NAME="your-model" \
-  --from-literal=CUSTOM_MODEL_ID="actual-model-id" \
+# Create API secrets (use kubectl or oc)
+kubectl create secret generic llama-stack-secrets \
+  --from-literal=VLLM_URL="https://your-api.com/v1" \
+  --from-literal=VLLM_API_TOKEN="your-api-key" \
+  --from-literal=VLLM_INFERENCE_MODEL="your-model" \
   -n llama-stack
 
 # Create Jira secrets
-oc create secret generic jira-secrets \
+kubectl create secret generic jira-secrets \
   --from-literal=JIRA_URL="https://your-company.atlassian.net" \
-  --from-literal=JIRA_API_TOKEN="your-token" \
-  --from-literal=JIRA_USERNAME="your-username" \
+  --from-literal=JIRA_PERSONAL_TOKEN="your-token" \
+  -n llama-stack
+
+# Create database secrets
+kubectl create secret generic database-secrets \
+  --from-literal=POSTGRES_DB="rhoai_sessions" \
+  --from-literal=POSTGRES_USER="rhoai_user" \
+  --from-literal=POSTGRES_PASSWORD="your-secure-password" \
+  --from-literal=DATABASE_URL="postgresql://rhoai_user:your-secure-password@postgresql-service.llama-stack.svc.cluster.local:5432/rhoai_sessions" \
   -n llama-stack
 ```
 
 ### 4. Deploy Configuration
 
 ```bash
-oc apply -f openshift-deployment.yaml
+kubectl apply -f k8s-deployment.yaml
+# OR: oc apply -f k8s-deployment.yaml
 ```
 
 ## 🗄️ Database Architecture
@@ -258,34 +280,42 @@ The deployment uses these environment variables for any API:
 ### Check Deployment Status
 
 ```bash
-# Check pod status
-oc get pods -n llama-stack
+# Check pod status (use kubectl or oc)
+kubectl get pods -n llama-stack
 
 # Check logs
-oc logs deployment/llama-stack -n llama-stack
-oc logs deployment/jira-mcp -n llama-stack
+kubectl logs deployment/llama-stack -n llama-stack
+kubectl logs deployment/jira-mcp -n llama-stack
+kubectl logs deployment/rhoai-ai-feature-sizing -n llama-stack
 
-# Check routes
-oc get routes -n llama-stack
+# Check services
+kubectl get services -n llama-stack
 ```
 
 ### Common Issues
 
 1. **Pods not starting**: Check logs for credential or configuration issues
-2. **Route not accessible**: Verify route creation and DNS resolution
+2. **Port forwarding fails**: Verify services are running and accessible
 3. **Model not found**: Verify model names match your provider's available models
 4. **API errors**: Check API keys and network connectivity
+5. **Database connection issues**: Check PostgreSQL pod status and credentials
 
-### Port Forward for Local Testing
+### Port Forward for Development
 
-If routes aren't working, use port-forward:
+Access all services via port forwarding (no external routes needed):
 
 ```bash
-# LLAMA Stack
-oc port-forward svc/llama-stack-service 8321:8321 -n llama-stack
+# Main Application (Frontend + API)
+kubectl port-forward svc/rhoai-ai-feature-sizing-service 8080:80 -n llama-stack
 
-# Jira MCP
-oc port-forward svc/jira-mcp-service 9000:9000 -n llama-stack
+# LLAMA Stack (Direct Access)
+kubectl port-forward svc/llama-stack-service 8321:8321 -n llama-stack
+
+# PostgreSQL Database (For DB Tools)
+kubectl port-forward svc/postgresql-service 5432:5432 -n llama-stack
+
+# Jira MCP (Debugging only - normally accessed internally)
+kubectl port-forward svc/jira-mcp-service 9000:9000 -n llama-stack
 ```
 
 ## 🔄 Switching Providers
@@ -294,13 +324,13 @@ To switch to a different provider:
 
 1. Delete the current deployment:
    ```bash
-   oc delete all -l app=llama-stack -n llama-stack
-   oc delete secrets llama-stack-secrets* -n llama-stack
+   kubectl delete all -l app=llama-stack -n llama-stack
+   kubectl delete secrets llama-stack-secrets* -n llama-stack
    ```
 
 2. Deploy with new provider:
    ```bash
-   ./deploy-to-openshift.sh <new-provider>
+   ./deploy-to-k8s.sh
    ```
 
 ## 📈 Scaling and Performance
@@ -409,13 +439,13 @@ Refer to external guides like:
 ### Database Issues
 ```bash
 # Check PostgreSQL pod status
-oc get pods -n llama-stack -l app=postgresql
+kubectl get pods -n llama-stack -l app=postgresql
 
 # View PostgreSQL logs
-oc logs -n llama-stack deployment/postgresql
+kubectl logs -n llama-stack deployment/postgresql
 
 # Test database connectivity from API pod
-oc exec -n llama-stack deployment/rhoai-ai-feature-sizing-api -- python -c "
+kubectl exec -n llama-stack deployment/rhoai-ai-feature-sizing -- python -c "
 import os
 from sqlalchemy import create_engine
 url = os.getenv('DATABASE_URL')
@@ -428,23 +458,40 @@ with engine.connect() as conn:
 
 ### API Health Check
 ```bash
-# Check API health (includes database status)
-ROUTE_URL=$(oc get route rhoai-ai-feature-sizing-api-route -n llama-stack -o jsonpath='{.spec.host}')
-curl http://$ROUTE_URL/health
+# Check API health via port forwarding
+kubectl port-forward svc/rhoai-ai-feature-sizing-service 8080:80 -n llama-stack &
+sleep 2
+curl http://localhost:8080/health
+kill %1  # Stop port forwarding
 ```
 
 ### Scaling Issues
 ```bash
 # Scale API pods (PostgreSQL supports multiple connections)
-oc scale deployment/rhoai-ai-feature-sizing-api --replicas=3 -n llama-stack
+kubectl scale deployment/rhoai-ai-feature-sizing --replicas=3 -n llama-stack
 
 # Check all pods are ready
-oc get pods -n llama-stack -l app=rhoai-ai-feature-sizing-api
+kubectl get pods -n llama-stack -l app=rhoai-ai-feature-sizing
 ```
 
 ## 🐛 Getting Help
 
 - Check the [LLAMA Stack documentation](https://llama-stack.readthedocs.io/)
-- Review OpenShift logs and events
+- Review Kubernetes/OpenShift logs and events
 - Open issues in the project repository
-- Consult OpenShift documentation for cluster-specific issues 
+- Consult Kubernetes or OpenShift documentation for cluster-specific issues
+
+## 🎯 Port Forwarding Development Workflow
+
+**This deployment is optimized for development access via port forwarding:**
+
+1. **Deploy once**: `./deploy-to-k8s.sh` 
+2. **Port forward main app**: `kubectl port-forward svc/rhoai-ai-feature-sizing-service 8080:80 -n llama-stack`
+3. **Access locally**: `http://localhost:8080`
+4. **No external routes needed** - perfect for development and testing!
+
+**Benefits:**
+- ✅ Works on any Kubernetes cluster (no Ingress Controller required)
+- ✅ No DNS or TLS certificate setup needed
+- ✅ Easy to switch between environments
+- ✅ Secure (no external exposure by default) 

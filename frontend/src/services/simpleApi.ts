@@ -102,6 +102,44 @@ export interface HealthResponse {
 	services: Record<string, string>;
 }
 
+export type LlamaIndexProcessingType =
+	| 'web_scraping'
+	| 'github_repo'
+	| 'github_file'
+	| 'pdf_document'
+	| 'text_document'
+	| 'api_documentation'
+	| 'markdown';
+
+export interface IngestDocumentsRequest {
+	store_id: string;
+	documents: any[];
+	processing_type: LlamaIndexProcessingType;
+	enable_progress_tracking?: boolean;
+}
+
+export interface IngestionSessionResponse {
+	session_id: string;
+	store_id: string;
+	processing_type: LlamaIndexProcessingType;
+	document_count: number;
+	message: string;
+}
+
+export interface IngestionProgressResponse {
+	session_id: string;
+	status: string;
+	progress: number;
+	current_step?: string;
+	processed_items?: number;
+	total_items?: number;
+	error_message?: string;
+	result?: Record<string, unknown>;
+	created_at: string;
+	started_at?: string;
+	completed_at?: string;
+}
+
 class SimpleApiService {
 	private api: AxiosInstance;
 
@@ -223,33 +261,67 @@ class SimpleApiService {
 		await this.api.delete(`/rag/stores/${storeId}`);
 	}
 
-	async ingestDocuments(storeId: string, documents: any[]): Promise<any> {
-		const response = await this.api.post('/rag/ingest', {
+	async startIngestionSession(
+		storeId: string,
+		documents: any[],
+		processingType: LlamaIndexProcessingType,
+		enableProgressTracking = true
+	): Promise<IngestionSessionResponse> {
+		const response = await this.api.post<IngestionSessionResponse>('/rag/ingest', {
 			store_id: storeId,
-			documents
+			documents,
+			processing_type: processingType,
+			enable_progress_tracking: enableProgressTracking
 		});
 		return response.data;
 	}
 
-	async ingestDocumentsWithLlamaIndex(storeId: string, documents: any[]): Promise<any> {
-		const response = await this.api.post('/rag/ingest/llamaindex', {
-			store_id: storeId,
-			documents
+	async getIngestionProgress(sessionId: string): Promise<IngestionProgressResponse> {
+		const response = await this.api.get<IngestionProgressResponse>(`/rag/ingest/${sessionId}/progress`);
+		return response.data;
+	}
+
+	async listIngestionSessions(status?: string, limit = 20): Promise<IngestionProgressResponse[]> {
+		const response = await this.api.get<IngestionProgressResponse[]>('/rag/ingest/sessions', {
+			params: { status, limit }
 		});
 		return response.data;
 	}
 
-	async queryRAG(query: string, ragStoreIds: string[], maxResults = 5): Promise<any> {
-		const response = await this.api.post('/rag/query', {
-			query,
-			rag_store_ids: ragStoreIds,
-			max_results: maxResults
-		});
-		return response.data;
-	}
+
 
 	async setupPredefinedRAGStores(): Promise<{ message: string; details: any }> {
 		const response = await this.api.post<{ message: string; details: any }>('/rag/setup-predefined');
+		return response.data;
+	}
+
+	// Project Management
+	async getProject(projectId: string): Promise<any> {
+		const response = await this.api.get(`/projects/${projectId}`);
+		return response.data;
+	}
+
+	async getProjectDocuments(projectId: string): Promise<any> {
+		const response = await this.api.get(`/projects/${projectId}/documents`);
+		return response.data;
+	}
+
+	async listProjects(): Promise<any> {
+		const response = await this.api.get('/projects');
+		return response.data;
+	}
+
+	async createProject(projectData: any): Promise<any> {
+		const response = await this.api.post('/projects', projectData);
+		return response.data;
+	}
+
+	async deleteProject(projectId: string): Promise<void> {
+		await this.api.delete(`/projects/${projectId}`);
+	}
+
+	async ingestProjectDocuments(projectId: string, requestData: any): Promise<any> {
+		const response = await this.api.post(`/projects/${projectId}/ingest`, requestData);
 		return response.data;
 	}
 

@@ -1,7 +1,10 @@
 import * as React from 'react';
 import { Route, Routes } from 'react-router-dom';
 import { NotFound } from '@app/NotFound/NotFound';
-import RAGManager from '../components/RAGManager';
+
+import ProjectManager from '../components/ProjectManager';
+import ProjectDetails from '../components/ProjectDetails';
+
 import SimpleFeatureSizing from '../components/SimpleFeatureSizing';
 import SessionManager from '../components/SessionManager';
 
@@ -32,18 +35,24 @@ const routes: AppRouteConfig[] = [
     title: 'RHOAI Feature Sizing',
   },
   {
+    element: <ProjectManager />,
+    exact: true,
+    label: 'Knowledge Base',
+    path: '/projects',
+    title: 'RHOAI Feature Sizing | Knowledge Base',
+  },
+  {
+    element: <ProjectDetails />,
+    exact: true,
+    path: '/projects/:projectId',
+    title: 'RHOAI Feature Sizing | Project Details',
+  },
+  {
     element: <SessionManager />,
     exact: true,
     label: 'Sessions',
     path: '/sessions',
     title: 'RHOAI Feature Sizing | Sessions',
-  },
-  {
-    element: <RAGManager />,
-    exact: true,
-    label: 'RAG Manager',
-    path: '/rag',
-    title: 'RHOAI Feature Sizing | RAG Manager',
   },
 ];
 

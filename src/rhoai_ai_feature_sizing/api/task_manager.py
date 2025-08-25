@@ -32,20 +32,21 @@ class TaskManager:
 
     def _convert_to_schema(self, db_task: BackgroundTask) -> BackgroundTaskInfo:
         """Convert database model to schema."""
+        # Use the latest timestamp as updated_at
+        updated_at = db_task.completed_at or db_task.started_at or db_task.created_at
+
         return BackgroundTaskInfo(
             task_id=db_task.task_id,
+            task_type=db_task.task_type,
             status=db_task.status.value,
-            created_at=db_task.created_at.isoformat(),
-            started_at=db_task.started_at.isoformat() if db_task.started_at else None,
-            completed_at=(
-                db_task.completed_at.isoformat() if db_task.completed_at else None
-            ),
             progress=db_task.progress,
             current_step=db_task.current_step,
-            total_items=db_task.total_items,
             processed_items=db_task.processed_items,
-            error_message=db_task.error_message,
+            total_items=db_task.total_items,
             result=db_task.result,
+            error=db_task.error_message,
+            created_at=db_task.created_at,
+            updated_at=updated_at,
         )
 
     def _serialize_result_for_json(self, result: Any) -> Any:

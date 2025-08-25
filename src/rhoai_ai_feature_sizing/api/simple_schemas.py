@@ -63,11 +63,61 @@ class CreateRAGStoreRequest(BaseModel):
     description: Optional[str] = Field(None, description="Description")
 
 
+class LlamaIndexProcessingType(str, Enum):
+    """LlamaIndex processing types."""
+
+    WEB_SCRAPING = "web_scraping"
+    GITHUB_REPO = "github_repo"
+    GITHUB_FILE = "github_file"
+    PDF_DOCUMENT = "pdf_document"
+    TEXT_DOCUMENT = "text_document"
+    API_DOCUMENTATION = "api_documentation"
+    MARKDOWN = "markdown"
+
+
 class IngestDocumentsRequest(BaseModel):
     """Request to ingest documents into a RAG store."""
 
     store_id: str = Field(..., description="RAG store ID")
     documents: List[Dict[str, Any]] = Field(..., description="Documents to ingest")
+    processing_type: LlamaIndexProcessingType = Field(
+        ..., description="Type of LlamaIndex processing to use"
+    )
+    enable_progress_tracking: bool = Field(
+        default=True, description="Enable progress tracking and session creation"
+    )
+
+
+class IngestionSessionResponse(BaseModel):
+    """Response for starting an ingestion session."""
+
+    session_id: str = Field(..., description="Background task session ID")
+    store_id: str = Field(..., description="RAG store ID")
+    processing_type: LlamaIndexProcessingType = Field(
+        ..., description="Processing type being used"
+    )
+    document_count: int = Field(..., description="Number of documents being processed")
+    message: str = Field(..., description="Status message")
+
+
+class IngestionProgressResponse(BaseModel):
+    """Response for ingestion progress updates."""
+
+    session_id: str = Field(..., description="Session ID")
+    status: str = Field(
+        ..., description="Task status (pending, running, completed, failed)"
+    )
+    progress: float = Field(..., description="Progress as a decimal (0.0 to 1.0)")
+    current_step: Optional[str] = Field(None, description="Current processing step")
+    processed_items: Optional[int] = Field(None, description="Items processed so far")
+    total_items: Optional[int] = Field(None, description="Total items to process")
+    error_message: Optional[str] = Field(None, description="Error message if failed")
+    result: Optional[Dict[str, Any]] = Field(
+        None, description="Result data if completed"
+    )
+    created_at: str = Field(..., description="Session creation time")
+    started_at: Optional[str] = Field(None, description="Processing start time")
+    completed_at: Optional[str] = Field(None, description="Processing completion time")
 
 
 # Response Schemas
@@ -269,3 +319,98 @@ def create_chat_message(
         timestamp=datetime.utcnow(),
         actions=actions or [],
     )
+
+
+# Project Management Schemas
+class ProjectStoreType(str, Enum):
+    """Types of stores available within a project."""
+
+    GITHUB_REPOS = "github_repos"
+    WEB_CONTENT = "web_content"
+    API_DOCS = "api_docs"
+    CODE_FILES = "code_files"
+    DOCUMENTS = "documents"
+    DEFAULT = "default"
+
+
+class CreateProjectRequest(BaseModel):
+    """Request to create a new project."""
+
+    project_id: str = Field(..., description="Unique project identifier")
+    name: str = Field(..., description="Human-readable project name")
+    description: Optional[str] = Field(None, description="Project description")
+    project_type: str = Field(default="feature_sizing", description="Type of project")
+    created_by: Optional[str] = Field(None, description="User who created the project")
+
+
+class ProjectResponse(BaseModel):
+    """Response for project information."""
+
+    project_id: str = Field(..., description="Project ID")
+    name: str = Field(..., description="Project name")
+    description: Optional[str] = Field(None, description="Project description")
+    project_type: str = Field(..., description="Project type")
+    created_by: Optional[str] = Field(None, description="Creator")
+    auto_routing_enabled: bool = Field(..., description="Auto-routing enabled")
+    is_active: bool = Field(..., description="Active status")
+    created_at: str = Field(..., description="Creation timestamp")
+    last_updated: Optional[str] = Field(None, description="Last update timestamp")
+
+    # Store information
+    stores: List[Dict[str, Any]] = Field(default=[], description="Project stores")
+    total_documents: int = Field(default=0, description="Total documents in project")
+
+
+class ProjectListResponse(BaseModel):
+    """Response for listing projects."""
+
+    projects: List[ProjectResponse] = Field(..., description="List of projects")
+    total: int = Field(..., description="Total project count")
+
+
+class ProjectIngestRequest(BaseModel):
+    """Request to ingest documents into a project with auto-routing."""
+
+    project_id: str = Field(..., description="Target project ID")
+    documents: List[Dict[str, Any]] = Field(..., description="Documents to ingest")
+    processing_type: LlamaIndexProcessingType = Field(
+        ..., description="Processing type"
+    )
+    enable_progress_tracking: bool = Field(
+        default=True, description="Enable progress tracking"
+    )
+    override_routing: Optional[Dict[str, str]] = Field(
+        None, description="Override auto-routing: {document_url: store_type}"
+    )
+
+
+class DocumentResponse(BaseModel):
+    """Response for document information."""
+
+    document_id: str = Field(..., description="Document ID")
+    name: str = Field(..., description="Document name")
+    source_url: str = Field(..., description="Source URL")
+    mime_type: str = Field(..., description="MIME type")
+    source_type: Optional[str] = Field(
+        None, description="Source type (github_repo, web_page, etc.)"
+    )
+    rag_store_name: Optional[str] = Field(None, description="RAG store name")
+    rag_store_type: Optional[str] = Field(None, description="RAG store type")
+    ingestion_date: str = Field(..., description="Ingestion timestamp")
+    last_updated: Optional[str] = Field(None, description="Last update timestamp")
+    chunk_count: int = Field(default=0, description="Number of chunks")
+    ingestion_method: str = Field(default="manual", description="Ingestion method")
+    document_metadata: Optional[Dict[str, Any]] = Field(
+        None, description="Additional metadata"
+    )
+    is_active: bool = Field(default=True, description="Active status")
+
+
+class ProjectDocumentsResponse(BaseModel):
+    """Response for project documents."""
+
+    project_id: str = Field(..., description="Project ID")
+    documents: List[DocumentResponse] = Field(
+        default=[], description="List of documents"
+    )
+    total: int = Field(default=0, description="Total number of documents")

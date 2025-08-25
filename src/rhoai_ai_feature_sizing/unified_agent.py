@@ -237,57 +237,90 @@ class UnifiedFeatureSizingAgent:
         try:
             self.logger.info(f"Creating agent turn...")
             if streaming_callback:
-                await streaming_callback("system", f"🤖 Creating agent turn for {jira_key}")
-            
+                await streaming_callback(
+                    "system", f"🤖 Creating agent turn for {jira_key}"
+                )
+
             turn = agent.create_turn(
                 session_id=agent_session_id,
                 messages=[{"role": "user", "content": init_msg}],
             )
-            
+
             # Monitor each step of execution with streaming
             step_count = 0
             for log in AgentEventLogger().log(turn):
                 log.print()  # Still print to console
-                
+
                 # Stream agent execution steps
                 if streaming_callback:
                     step_count += 1
                     log_content = str(log)
-                    
+
                     # Determine step type based on log content
-                    if "tool_call" in log_content.lower() or "calling" in log_content.lower():
+                    if (
+                        "tool_call" in log_content.lower()
+                        or "calling" in log_content.lower()
+                    ):
                         step_type = "tool_execution"
-                        await streaming_callback("agent", f"🔧 Tool Execution: {log_content}", {"step_type": step_type, "step": step_count})
-                    elif "inference" in log_content.lower() or "generating" in log_content.lower():
+                        await streaming_callback(
+                            "agent",
+                            f"🔧 Tool Execution: {log_content}",
+                            {"step_type": step_type, "step": step_count},
+                        )
+                    elif (
+                        "inference" in log_content.lower()
+                        or "generating" in log_content.lower()
+                    ):
                         step_type = "inference"
-                        await streaming_callback("agent", f"🧠 AI Inference: {log_content}", {"step_type": step_type, "step": step_count})
-                    elif "completion" in log_content.lower() or "response" in log_content.lower():
+                        await streaming_callback(
+                            "agent",
+                            f"🧠 AI Inference: {log_content}",
+                            {"step_type": step_type, "step": step_count},
+                        )
+                    elif (
+                        "completion" in log_content.lower()
+                        or "response" in log_content.lower()
+                    ):
                         step_type = "completion"
-                        await streaming_callback("agent", f"✅ Step Complete: {log_content}", {"step_type": step_type, "step": step_count})
+                        await streaming_callback(
+                            "agent",
+                            f"✅ Step Complete: {log_content}",
+                            {"step_type": step_type, "step": step_count},
+                        )
                     else:
                         step_type = "execution"
-                        await streaming_callback("agent", f"⚙️ Execution: {log_content}", {"step_type": step_type, "step": step_count})
+                        await streaming_callback(
+                            "agent",
+                            f"⚙️ Execution: {log_content}",
+                            {"step_type": step_type, "step": step_count},
+                        )
 
             self.logger.debug(f"Turn object type: {type(turn)}")
             if streaming_callback:
-                await streaming_callback("system", f"📊 Turn completed - type: {type(turn).__name__}")
+                await streaming_callback(
+                    "system", f"📊 Turn completed - type: {type(turn).__name__}"
+                )
 
             # Log turn details
             if hasattr(turn, "turn_id"):
                 self.logger.debug(f"Turn ID: {turn.turn_id}")
                 if streaming_callback:
                     await streaming_callback("system", f"🆔 Turn ID: {turn.turn_id}")
-                    
+
             if hasattr(turn, "completed_at"):
                 self.logger.info(f"Turn completed at: {turn.completed_at}")
                 if streaming_callback:
-                    await streaming_callback("system", f"⏰ Turn completed at: {turn.completed_at}")
-                    
+                    await streaming_callback(
+                        "system", f"⏰ Turn completed at: {turn.completed_at}"
+                    )
+
             if hasattr(turn, "steps"):
                 steps_count = len(turn.steps) if turn.steps else 0
                 self.logger.info(f"Agent executed {steps_count} steps")
                 if streaming_callback:
-                    await streaming_callback("system", f"📈 Agent executed {steps_count} steps total")
+                    await streaming_callback(
+                        "system", f"📈 Agent executed {steps_count} steps total"
+                    )
 
             # The Turn object itself contains the response, no need to await
             response = turn

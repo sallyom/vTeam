@@ -233,9 +233,84 @@ class MCPUsage(Base):
         return f"<MCPUsage(id={self.id}, tool_name={self.tool_name}, success={self.success})>"
 
 
+# Project-based RAG models
+class Project(Base):
+    """Project container for organizing related RAG stores and documents."""
+
+    __tablename__ = "projects"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    project_id = Column(String(255), unique=True, nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    # Project metadata
+    created_by = Column(String(255), nullable=True)  # User who created project
+    project_type = Column(
+        String(100), nullable=False, default="feature_sizing"
+    )  # feature_sizing, research, etc.
+    is_active = Column(Boolean, default=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, nullable=True)
+
+    # Settings
+    auto_routing_enabled = Column(Boolean, default=True)
+    project_settings = Column(JSON, nullable=True)  # Additional project configuration
+
+    # Relationships
+    stores = relationship(
+        "ProjectStore", back_populates="project", cascade="all, delete-orphan"
+    )
+    documents = relationship(
+        "Document", back_populates="project", cascade="all, delete-orphan"
+    )
+
+
+class ProjectStore(Base):
+    """Individual RAG store within a project (e.g., github_repos, web_content, etc.)."""
+
+    __tablename__ = "project_stores"
+
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    project_id = Column(GUID(), ForeignKey("projects.id"), nullable=False)
+
+    # Store identification
+    store_type = Column(
+        String(50), nullable=False
+    )  # github_repos, web_content, api_docs, code_files, documents
+    vector_db_id = Column(
+        String(255), unique=True, nullable=False, index=True
+    )  # Used by Llama Stack
+
+    # Store metadata
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    embedding_model = Column(String(255), nullable=False, default="all-MiniLM-L6-v2")
+    embedding_dimension = Column(Integer, nullable=False, default=384)
+
+    # Status and settings
+    is_active = Column(Boolean, default=True)
+    auto_ingestion_rules = Column(
+        JSON, nullable=True
+    )  # Rules for auto-routing documents
+    store_settings = Column(JSON, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_updated = Column(DateTime, nullable=True)
+
+    # Relationships
+    project = relationship("Project", back_populates="stores")
+    documents = relationship(
+        "Document", back_populates="project_store", cascade="all, delete-orphan"
+    )
+
+
 # RAG-related models
 class VectorDatabase(Base):
-    """Vector database configuration and metadata."""
+    """Vector database model - for project stores."""
 
     __tablename__ = "vector_databases"
 
@@ -267,17 +342,41 @@ class Document(Base):
 
     id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     document_id = Column(String(255), nullable=False, index=True)  # Used by Llama Stack
-    vector_db_id = Column(GUID(), ForeignKey("vector_databases.id"), nullable=False)
+
+    # Project-based document storage
+    project_id = Column(
+        GUID(), ForeignKey("projects.id"), nullable=True
+    )  # New project-based system
+    project_store_id = Column(
+        GUID(), ForeignKey("project_stores.id"), nullable=True
+    )  # Specific store within project
+    vector_db_id = Column(
+        GUID(), ForeignKey("vector_databases.id"), nullable=True
+    )  # Reference to vector DB
+
+    # Document metadata
     name = Column(String(255), nullable=False)
     source_url = Column(Text, nullable=False)
     mime_type = Column(String(100), nullable=False, default="text/plain")
+    source_type = Column(
+        String(50), nullable=True
+    )  # github_repo, web_page, api_doc, etc.
+
+    # Ingestion tracking
     ingestion_date = Column(DateTime, default=datetime.utcnow)
     last_updated = Column(DateTime, nullable=True)
     chunk_count = Column(Integer, default=0)
+    ingestion_method = Column(
+        String(50), nullable=False, default="manual"
+    )  # manual, auto_routed, bulk_import
+
+    # Storage
     document_metadata = Column(JSON, nullable=True)  # Store additional metadata as JSON
     is_active = Column(Boolean, default=True)
 
     # Relationships
+    project = relationship("Project", back_populates="documents")
+    project_store = relationship("ProjectStore", back_populates="documents")
     vector_db = relationship("VectorDatabase", back_populates="documents")
 
 

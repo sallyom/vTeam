@@ -17,6 +17,9 @@ from .simple_schemas import (
     RAGQueryRequest,
     CreateRAGStoreRequest,
     IngestDocumentsRequest,
+    LlamaIndexProcessingType,
+    IngestionSessionResponse,
+    IngestionProgressResponse,
     SessionResponse,
     SessionDetailResponse,
     SessionListResponse,
@@ -32,9 +35,20 @@ from .simple_schemas import (
     ChatRole,
     create_session_id,
     create_chat_message,
+    # Project management schemas
+    ProjectStoreType,
+    CreateProjectRequest,
+    ProjectResponse,
+    ProjectListResponse,
+    ProjectIngestRequest,
+    DocumentResponse,
+    ProjectDocumentsResponse,
 )
 from ..unified_agent import UnifiedFeatureSizingAgent
 from .rag_service import RAGService
+from .task_manager import task_manager
+from .project_service import project_service
+from .schemas import VectorDBConfig
 
 # Global services
 unified_agent = None
@@ -179,6 +193,12 @@ async def lifespan(app: FastAPI):
     global unified_agent, rag_service
 
     try:
+        # Initialize database tables
+        from .models import init_database
+
+        init_database()
+        logger.info("Database tables initialized")
+
         # Initialize services
         rag_service = RAGService()
         unified_agent = UnifiedFeatureSizingAgent()
@@ -480,6 +500,251 @@ async def get_estimates(session_id: str):
     )
 
 
+# Project Management (5 endpoints)
+@app.get("/projects", response_model=ProjectListResponse)
+async def list_projects():
+    """List all active projects."""
+    try:
+        projects = project_service.list_projects()
+        return ProjectListResponse(projects=projects, total=len(projects))
+    except Exception as e:
+        logger.error(f"Error listing projects: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects", response_model=ProjectResponse)
+async def create_project(
+    request: CreateProjectRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Create a new project with one RAG store."""
+    try:
+        # Create project with single store
+        project_response = project_service.create_project(request)
+
+        # Register ALL RAG stores with Llama Stack
+        registration_results = []
+        for store_info in project_response.stores:
+            try:
+                vector_db_config = VectorDBConfig(
+                    vector_db_id=store_info["vector_db_id"],
+                    name=store_info["name"],
+                    description=store_info["description"],
+                    use_case=store_info.get("store_type", "knowledge_base"),
+                )
+                await rag_service.create_vector_database(vector_db_config)
+                logger.info(
+                    f"Registered RAG store {store_info['vector_db_id']} for project {request.project_id}"
+                )
+                registration_results.append(f"✅ {store_info['vector_db_id']}")
+            except Exception as store_error:
+                logger.warning(
+                    f"Failed to register RAG store {store_info['vector_db_id']}: {store_error}"
+                )
+                registration_results.append(
+                    f"❌ {store_info['vector_db_id']}: {store_error}"
+                )
+
+        logger.info(
+            f"Store registration results for project {request.project_id}: {registration_results}"
+        )
+
+        return project_response
+
+    except Exception as e:
+        logger.error(f"Error creating project: {e}")
+        # Don't fail the entire project creation if only Llama Stack registration fails
+        if "Connection error" in str(e) or "Failed to connect" in str(e):
+            logger.warning(
+                "Llama Stack connection failed, but project created successfully"
+            )
+            try:
+                # Try to get the project that was created
+                project_response = project_service.get_project(request.project_id)
+                if project_response:
+                    return project_response
+            except:
+                pass
+
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_id}", response_model=ProjectResponse)
+async def get_project(project_id: str):
+    """Get project details by ID."""
+    try:
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(
+                status_code=404, detail=f"Project {project_id} not found"
+            )
+        return project
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_id}/documents", response_model=ProjectDocumentsResponse)
+async def get_project_documents(project_id: str):
+    """Get documents for a specific project."""
+    try:
+        documents = project_service.get_project_documents(project_id)
+        if documents is None:
+            raise HTTPException(
+                status_code=404, detail=f"Project {project_id} not found"
+            )
+        return documents
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting documents for project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/projects/{project_id}")
+async def delete_project(project_id: str):
+    """Delete a project and its stores."""
+    try:
+        success = project_service.delete_project(project_id)
+        if not success:
+            raise HTTPException(
+                status_code=404, detail=f"Project {project_id} not found"
+            )
+        return {"message": f"Project {project_id} deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_id}/ingest", response_model=IngestionSessionResponse)
+async def ingest_into_project(
+    project_id: str,
+    request: ProjectIngestRequest,
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Ingest documents into a project with automatic routing to appropriate stores."""
+    try:
+        # Verify project exists
+        project = project_service.get_project(project_id)
+        if not project:
+            raise HTTPException(
+                status_code=404, detail=f"Project {project_id} not found"
+            )
+
+        # Route documents to appropriate stores
+        routed_documents = {}  # store_type -> documents
+
+        for doc in request.documents:
+            doc_url = doc.get("url", "")
+
+            # Determine target store
+            if request.override_routing and doc_url in request.override_routing:
+                store_type = request.override_routing[doc_url]
+            else:
+                store_type = project_service._detect_store_type(
+                    doc_url, doc.get("metadata", {})
+                )
+
+            # Get vector_db_id for this store type
+            vector_db_id = project_service._get_store_vector_db_id(
+                project_id, store_type
+            )
+            if not vector_db_id:
+                # Create store if it doesn't exist
+                logger.warning(
+                    f"Store type {store_type} not found in project {project_id}, using default"
+                )
+                vector_db_id = project_service._get_store_vector_db_id(
+                    project_id, ProjectStoreType.DEFAULT
+                )
+
+            if vector_db_id not in routed_documents:
+                routed_documents[vector_db_id] = []
+
+            # Add routing metadata
+            doc_with_routing = {
+                **doc,
+                "metadata": {
+                    **doc.get("metadata", {}),
+                    "project_id": project_id,
+                    "target_store_type": store_type,
+                    "routing_method": (
+                        "override"
+                        if (
+                            request.override_routing
+                            and doc_url in request.override_routing
+                        )
+                        else "auto"
+                    ),
+                },
+            }
+            routed_documents[vector_db_id].append(doc_with_routing)
+
+        # If all documents go to one store, use single ingestion
+        if len(routed_documents) == 1:
+            vector_db_id, documents = next(iter(routed_documents.items()))
+
+            from .schemas import DocumentIngestionRequest, DocumentSource
+
+            doc_sources = [
+                DocumentSource(
+                    name=doc.get("name", "Unknown"),
+                    url=doc.get("url", ""),
+                    mime_type=doc.get("mime_type", "text/plain"),
+                    metadata=doc.get("metadata", {}),
+                )
+                for doc in documents
+            ]
+
+            ingestion_request = DocumentIngestionRequest(
+                vector_db_id=vector_db_id,
+                documents=doc_sources,
+            )
+
+            # Create background task
+            task_id = task_manager.create_task(
+                rag_service.ingest_documents_with_llamaindex_sync,
+                ingestion_request,
+                task_type=f"project_ingestion_{request.processing_type.value}",
+                total_items=len(documents),
+                task_metadata={
+                    "project_id": project_id,
+                    "processing_type": request.processing_type.value,
+                    "document_count": len(documents),
+                    "routed_stores": 1,
+                },
+            )
+
+            return IngestionSessionResponse(
+                session_id=task_id,
+                store_id=vector_db_id,
+                processing_type=request.processing_type,
+                document_count=len(documents),
+                message=f"Started project ingestion with auto-routing to {len(routed_documents)} store(s)",
+            )
+
+        else:
+            # Multiple stores - need to handle batch ingestion
+            # For now, return an error but we can implement batch later
+            store_counts = {
+                store_id: len(docs) for store_id, docs in routed_documents.items()
+            }
+            raise HTTPException(
+                status_code=400,
+                detail=f"Documents would be routed to {len(routed_documents)} stores: {store_counts}. Batch routing not yet implemented.",
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ingesting into project {project_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # RAG Management (5 endpoints)
 @app.get("/rag/stores", response_model=RAGStoreListResponse)
 async def list_rag_stores(rag_service: RAGService = Depends(get_rag_service)):
@@ -530,12 +795,12 @@ async def create_rag_store(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/rag/ingest")
-async def ingest_documents(
+@app.post("/rag/ingest", response_model=IngestionSessionResponse)
+async def start_document_ingestion(
     request: IngestDocumentsRequest,
     rag_service: RAGService = Depends(get_rag_service),
 ):
-    """Ingest documents into a RAG store."""
+    """Start document ingestion with progress tracking."""
     try:
         from .schemas import DocumentIngestionRequest, DocumentSource
 
@@ -555,53 +820,112 @@ async def ingest_documents(
             documents=doc_sources,
         )
 
-        result = await rag_service.ingest_documents(ingestion_request)
-        return {
-            "store_id": request.store_id,
-            "documents_processed": len(result.ingested_documents),
-            "chunks_created": result.total_chunks_created,
-            "message": "Documents ingested successfully",
-        }
+        if request.enable_progress_tracking:
+            # Create background task for ingestion with progress tracking
+            task_id = task_manager.create_task(
+                rag_service.ingest_documents_with_llamaindex_sync,
+                ingestion_request,
+                task_type=f"ingestion_{request.processing_type.value}",
+                total_items=len(request.documents),
+                task_metadata={
+                    "store_id": request.store_id,
+                    "processing_type": request.processing_type.value,
+                    "document_count": len(request.documents),
+                },
+            )
+
+            return IngestionSessionResponse(
+                session_id=task_id,
+                store_id=request.store_id,
+                processing_type=request.processing_type,
+                document_count=len(request.documents),
+                message=f"Started {request.processing_type.value} ingestion with progress tracking",
+            )
+        else:
+            # Direct ingestion without progress tracking
+            result = await rag_service.ingest_documents_with_llamaindex(
+                ingestion_request
+            )
+            return {
+                "session_id": "direct",
+                "store_id": request.store_id,
+                "processing_type": request.processing_type,
+                "document_count": len(result.ingested_documents),
+                "message": "Documents ingested successfully",
+            }
     except Exception as e:
-        logger.error(f"Error ingesting documents: {e}")
+        logger.error(f"Error starting document ingestion: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/rag/ingest/llamaindex")
-async def ingest_documents_with_llamaindex(
-    request: IngestDocumentsRequest,
-    rag_service: RAGService = Depends(get_rag_service),
-):
-    """Ingest documents using LlamaIndex for advanced processing (GitHub repos, web scraping, etc.)."""
+def _convert_task_to_ingestion_response(
+    task_id: str, task_info
+) -> IngestionProgressResponse:
+    """Convert BackgroundTaskInfo to IngestionProgressResponse."""
+
+    # Handle datetime conversion
+    def format_datetime(dt):
+        if dt is None:
+            return None
+        if hasattr(dt, "isoformat"):
+            return dt.isoformat()
+        return str(dt)
+
+    return IngestionProgressResponse(
+        session_id=task_id,
+        status=task_info.status,
+        progress=task_info.progress,
+        current_step=task_info.current_step,
+        processed_items=task_info.processed_items,
+        total_items=task_info.total_items,
+        error_message=getattr(
+            task_info, "error_message", getattr(task_info, "error", None)
+        ),
+        result=getattr(task_info, "result", None),
+        created_at=format_datetime(getattr(task_info, "created_at", None)),
+        started_at=format_datetime(getattr(task_info, "started_at", None)),
+        completed_at=format_datetime(getattr(task_info, "completed_at", None)),
+    )
+
+
+@app.get("/rag/ingest/{session_id}/progress", response_model=IngestionProgressResponse)
+async def get_ingestion_progress(session_id: str):
+    """Get progress of an ongoing ingestion session."""
     try:
-        from .schemas import DocumentIngestionRequest, DocumentSource
+        task_info = task_manager.get_task(session_id)
+        if not task_info:
+            raise HTTPException(status_code=404, detail="Ingestion session not found")
 
-        # Convert documents to proper format
-        doc_sources = []
-        for doc in request.documents:
-            doc_source = DocumentSource(
-                name=doc.get("name", "Unknown"),
-                url=doc.get("url", ""),
-                mime_type=doc.get("mime_type", "text/plain"),
-                metadata=doc.get("metadata", {}),
-            )
-            doc_sources.append(doc_source)
+        return _convert_task_to_ingestion_response(session_id, task_info)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting ingestion progress: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-        ingestion_request = DocumentIngestionRequest(
-            vector_db_id=request.store_id,
-            documents=doc_sources,
+
+@app.get("/rag/ingest/sessions", response_model=List[IngestionProgressResponse])
+async def list_ingestion_sessions(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    limit: int = Query(20, description="Maximum number of sessions to return"),
+):
+    """List active and recent ingestion sessions."""
+    try:
+        tasks = task_manager.search_tasks(
+            status=status,
+            task_type=None,  # Get all tasks for now since task type filtering might not work as expected
+            limit=limit,
         )
 
-        result = await rag_service.ingest_documents_with_llamaindex(ingestion_request)
-        return {
-            "store_id": request.store_id,
-            "documents_processed": len(result.ingested_documents),
-            "chunks_created": result.total_chunks_created,
-            "message": "Documents ingested successfully using LlamaIndex",
-            "processing_method": "llamaindex",
-        }
+        sessions = []
+        for task_info in tasks:
+            sessions.append(
+                _convert_task_to_ingestion_response(task_info.task_id, task_info)
+            )
+
+        return sessions
     except Exception as e:
-        logger.error(f"Error ingesting documents with LlamaIndex: {e}")
+        logger.error(f"Error listing ingestion sessions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -680,6 +1004,24 @@ async def setup_predefined_rag_stores(
     except Exception as e:
         logger.error(f"Error setting up predefined RAG stores: {e}")
         raise HTTPException(status_code=500, detail=f"Setup failed: {str(e)}")
+
+
+@app.post("/rag/ensure-registration")
+async def ensure_vector_db_registration(
+    rag_service: RAGService = Depends(get_rag_service),
+):
+    """Ensure all local vector databases are registered with Llama Stack."""
+    try:
+        result = await rag_service.ensure_vector_dbs_registered()
+        return {
+            "message": "Vector database registration check completed",
+            "registered_dbs": result,
+        }
+    except Exception as e:
+        logger.error(f"Error checking vector database registration: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Registration check failed: {str(e)}"
+        )
 
 
 @app.get("/prompts")

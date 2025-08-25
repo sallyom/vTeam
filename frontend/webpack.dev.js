@@ -21,6 +21,17 @@ module.exports = merge(common('development'), {
     client: {
       overlay: true,
     },
+    proxy: [
+      {
+        context: ['/api'],
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+        pathRewrite: {
+          '^/api': '', // Remove /api prefix when forwarding to backend
+        },
+        logLevel: 'debug',
+      },
+    ],
   },
   module: {
     rules: [
