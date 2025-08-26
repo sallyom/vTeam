@@ -1,0 +1,53 @@
+flowchart TB
+    %% Product Managers lane
+    subgraph PM[Product Managers]
+    style PM fill:#f2f0fc,stroke:#333,stroke-width:1px
+        PM1([Start])
+        PM2([Prioritize RFEs])
+        PM3([Add missing information])
+        PM4{{Can the RFE be changed to remedy concerns?}}
+    end
+
+    %% RFE Council lane
+    subgraph RFC[RFE Council]
+    style RFC fill:#f7f7f7,stroke:#333,stroke-width:1px
+        RFC1([Review RFE])
+        RFC2{{RFE is Complete?}}
+        RFC3{{RFE meets acceptance criteria?}}
+        RFC4["Rejects RFE\nupdates the ticket with assessment info"]
+        RFC5["Accepts RFE\nupdates the ticket with assessment info"]
+    end
+
+    %% Component Teams lane
+    subgraph CT[Component Teams]
+    style CT fill:#eef7fa,stroke:#333,stroke-width:1px
+        CT1([Assess Impact])
+    end
+
+    %% Flow connections
+    PM1 --> PM2 --> PM3
+    PM3 -->|update RFE| PM4
+    PM3 -->|missing details| RFC1
+    RFC1 --> RFC2
+    RFC2 -->|No| PM3
+    RFC2 -->|Yes| RFC3
+    RFC3 -->|No| RFC4
+    RFC3 -->|Yes| RFC5
+
+    %% Dashed connector
+    RFC1 -.-> CT1
+
+    %% Post decision flows
+    PM4 -->|No| L([Communicate assessment to the requester])
+    PM4 -->|Yes| M([Communicate assessment to the requester]) --> N([Create the Feature ticket and assign to the owner])
+    RFC4 --> L
+    RFC5 --> N
+
+    %% Styles
+    classDef start fill:#d9e8fb,stroke:#333,stroke-width:1px;
+    classDef process fill:#ffffff,stroke:#333,stroke-width:1px;
+    classDef decision fill:#fff2cc,stroke:#333,stroke-width:1px;
+
+    class PM1 start;
+    class PM2,PM3,PM4,RFC1,RFC4,RFC5,L,M,N,CT1 process;
+    class RFC2,RFC3 decision;
