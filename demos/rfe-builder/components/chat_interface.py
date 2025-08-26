@@ -49,7 +49,8 @@ class ChatInterface:
                     self.anthropic_client = Anthropic(api_key=api_key)
                 else:
                     st.warning(
-                        "⚠️ Anthropic API key not found. Please set ANTHROPIC_API_KEY in secrets.toml or environment variables."
+                        "⚠️ Anthropic API key not found. Please set "
+                        "ANTHROPIC_API_KEY in secrets.toml or environment variables."
                     )
         except Exception as e:
             st.error(f"Failed to initialize Anthropic client: {e}")
@@ -58,8 +59,12 @@ class ChatInterface:
         """Render the main conversational RFE creation interface"""
         st.header("💬 Create RFE - Conversational Assistant")
         st.markdown(
-            "*Describe your enhancement idea naturally - I'll help you create a complete RFE*"
+            "*Describe your enhancement idea naturally - "
+            "I'll help you create a complete RFE*"
         )
+
+        # Display API provider and model information
+        self._render_model_info()
 
         # Check if we have API access
         if not self.anthropic_client:
@@ -83,6 +88,40 @@ class ChatInterface:
         if st.session_state.current_rfe_draft:
             self._render_rfe_draft_status()
 
+    def _render_model_info(self):
+        """Display API provider and model information"""
+        # Get current model configuration
+        model = getattr(st.secrets, "ANTHROPIC_MODEL", "claude-4-sonnet-20250514")
+
+        # Connection status
+        status_icon = "🟢" if self.anthropic_client else "🔴"
+        status_text = "Connected" if self.anthropic_client else "Disconnected"
+
+        # Format model name for display
+        model_display = model.replace("-", " ").title()
+
+        # Render info bar
+        # Build the info bar HTML in parts to avoid line length issues
+        div_style = (
+            "background-color: #f0f2f6; padding: 8px 12px; border-radius: 6px; "
+            "font-size: 0.85em; color: #666; margin-bottom: 16px;"
+        )
+        status_span = (
+            f"<span style='margin-right: 12px;'>{status_icon} "
+            f"<strong>API Status:</strong> {status_text}</span>"
+        )
+        provider_span = (
+            "<span style='margin-right: 12px;'>🤖 "
+            "<strong>Provider:</strong> Anthropic Claude</span>"
+        )
+        model_span = f"<span>📋 <strong>Model:</strong> {model_display}</span>"
+
+        info_html = (
+            f"<div style='{div_style}'>{status_span}{provider_span}{model_span}</div>"
+        )
+
+        st.markdown(info_html, unsafe_allow_html=True)
+
     def _render_chat_history(self):
         """Render the conversation history"""
         for i, message in enumerate(st.session_state.chat_history):
@@ -94,9 +133,13 @@ class ChatInterface:
                     st.write(message["content"])
 
                     # Show any structured data if available
-                    if "structured_data" in message:
+                    if "structured_data" in message and message["structured_data"]:
                         with st.expander("📋 Extracted Information"):
-                            st.json(message["structured_data"])
+                            try:
+                                st.json(message["structured_data"])
+                            except Exception as e:
+                                st.error(f"Could not display extracted data: {e}")
+                                st.text(f"Raw data: {message['structured_data']}")
 
     def _render_chat_input(self):
         """Render chat input and handle user messages"""
@@ -139,7 +182,10 @@ class ChatInterface:
             st.session_state.chat_history.append(
                 {
                     "role": "assistant",
-                    "content": f"I apologize, but I encountered an error: {e}. Please try again.",
+                    "content": (
+                        f"I apologize, but I encountered an error: {e}. "
+                        "Please try again."
+                    ),
                     "timestamp": datetime.now(),
                     "error": True,
                 }
@@ -181,8 +227,11 @@ class ChatInterface:
         start_time = time.time()
 
         try:
+            # Get model from secrets or use default
+            model = getattr(st.secrets, "ANTHROPIC_MODEL", "claude-4-sonnet-20250514")
+
             response = self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",  # Use cost-effective model
+                model=model,
                 max_tokens=1000,
                 system=formatted_prompt["system"],
                 messages=[{"role": "user", "content": formatted_prompt["user"]}],
@@ -232,7 +281,10 @@ class ChatInterface:
             st.error(f"API call failed: {e}")
             # Return fallback response
             return {
-                "content": "I'm having trouble connecting to the AI service. Could you please rephrase your request?",
+                "content": (
+                    "I'm having trouble connecting to the AI service. "
+                    "Could you please rephrase your request?"
+                ),
                 "error": True,
             }
 
@@ -247,7 +299,10 @@ class ChatInterface:
         except Exception:
             # Fallback template
             return {
-                "system": "You are an AI assistant helping create RFE submissions. Guide users through the process naturally.",
+                "system": (
+                    "You are an AI assistant helping create RFE submissions. "
+                    "Guide users through the process naturally."
+                ),
                 "user": "Help me create an RFE based on this input: {user_input}",
                 "metadata": {"fallback": True},
             }
@@ -281,7 +336,11 @@ class ChatInterface:
             json_matches = re.findall(json_pattern, response_content, re.DOTALL)
 
             if json_matches:
-                return json.loads(json_matches[0])
+                try:
+                    return json.loads(json_matches[0])
+                except json.JSONDecodeError as e:
+                    print(f"JSON parsing error: {e}")
+                    return None
 
             # Look for structured sections
             structured_data = {}

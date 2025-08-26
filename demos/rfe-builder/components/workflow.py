@@ -20,30 +20,30 @@ def render_workflow_diagram(current_step: int = 1):
             return "fill:#6c757d,stroke:#545b62,color:#fff"  # Pending - gray
 
     # Build the mermaid diagram with dynamic styling
-    mermaid_code = f"""
+    mermaid_code = f"""  # noqa: E501
     flowchart TD
         Start([Start]) --> PrioritizeRFE["1️⃣ 📊 Parker (PM)<br/>Prioritize RFEs"]
 
-        PrioritizeRFE --> ReviewRFE["2️⃣ RFE Council<br/>🏛️ Archie (Architect)<br/>Review RFE"]
-        ReviewRFE -.->|2a if necessary| AssessImpact["2a 👥 Lee (Team Lead) +<br/>💻 Taylor (Team Member)<br/>Assess Impact"]
+        PrioritizeRFE --> ReviewRFE["2️⃣ RFE Council<br/>🏛️ Archie (Architect)<br/>Review RFE"]  # noqa: E501
+        ReviewRFE -.->|2a if necessary| AssessImpact["2a 👥 Lee (Team Lead) +<br/>💻 Taylor (Team Member)<br/>Assess Impact"]  # noqa: E501
         AssessImpact -.->|return to 2️⃣| ReviewRFE
 
-        ReviewRFE --> RFEComplete{{"3️⃣ ⭐ Stella (Staff Engineer)<br/>RFE is Complete?"}}
-        RFEComplete -->|3a missing details| AddInfo["3a 📋 Olivia (PO)<br/>Add missing information"]
+        ReviewRFE --> RFEComplete{{"3️⃣ ⭐ Stella (Staff Engineer)<br/>RFE is Complete?"}}  # noqa: E501
+        RFEComplete -->|3a missing details| AddInfo["3a 📋 Olivia (PO)<br/>Add missing information"]  # noqa: E501
         AddInfo -->|return to 1️⃣| PrioritizeRFE
 
-        RFEComplete -->|3b Yes| RFEMeets{{"4️⃣ RFE Council<br/>🏛️ Archie (Architect)<br/>RFE meets acceptance<br/>criteria?"}}
+        RFEComplete -->|3b Yes| RFEMeets{{"4️⃣ RFE Council<br/>🏛️ Archie (Architect)<br/>RFE meets acceptance<br/>criteria?"}}  # noqa: E501
 
-        RFEMeets -->|4a Yes| AcceptRFE["5️⃣ ⭐ Stella (Staff Engineer)<br/>Accept RFE<br/><i>(update ticket with<br/>assessment info)</i>"]
-        RFEMeets -->|4b No| RejectRFE["4b RFE Council<br/>🏛️ Archie (Architect)<br/>Reject RFE<br/><i>(update ticket with<br/>assessment info)</i>"]
+        RFEMeets -->|4a Yes| AcceptRFE["5️⃣ ⭐ Stella (Staff Engineer)<br/>Accept RFE<br/><i>(update ticket with<br/>assessment info)</i>"]  # noqa: E501
+        RFEMeets -->|4b No| RejectRFE["4b RFE Council<br/>🏛️ Archie (Architect)<br/>Reject RFE<br/><i>(update ticket with<br/>assessment info)</i>"]  # noqa: E501
 
-        RejectRFE --> CanChange{{"4c 📋 Olivia (PO)<br/>Can RFE be changed<br/>to remedy concerns?"}}
+        RejectRFE --> CanChange{{"4c 📋 Olivia (PO)<br/>Can RFE be changed<br/>to remedy concerns?"}}  # noqa: E501
         CanChange -->|4d Yes - return to 3a| AddInfo
-        CanChange -->|4e No| CommReject["6️⃣ 📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]
+        CanChange -->|4e No| CommReject["6️⃣ 📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]  # noqa: E501
 
-        AcceptRFE --> CommAccept["6️⃣ 📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]
+        AcceptRFE --> CommAccept["6️⃣ 📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]  # noqa: E501
 
-        CommReject --> CreateTicket["7️⃣ 🚀 Derek (Delivery Owner)<br/>Create Feature ticket<br/>and assign to owner"]
+        CommReject --> CreateTicket["7️⃣ 🚀 Derek (Delivery Owner)<br/>Create Feature ticket<br/>and assign to owner"]  # noqa: E501
         CommAccept --> CreateTicket
 
         CreateTicket --> End([End])

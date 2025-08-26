@@ -38,8 +38,8 @@ class CostTracker:
 
     def __init__(self, model_name: str = "claude-3-haiku"):
         self.model_name = model_name
-        self.usage_log = []
-        self.cache = {}  # Simple response cache
+        self.usage_log: list[APIUsage] = []
+        self.cache: Dict[str, Any] = {}  # Simple response cache
         self.tokenizer = tiktoken.get_encoding("cl100k_base")  # Approximate
 
     def count_tokens(self, text: str) -> int:
@@ -131,7 +131,7 @@ class CostTracker:
         if not recent_usage:
             return {"total_calls": 0, "total_cost": 0.0, "total_tokens": 0}
 
-        summary = {
+        summary: Dict[str, Any] = {
             "total_calls": len(recent_usage),
             "total_cost": sum(usage.cost_estimate for usage in recent_usage),
             "total_tokens": sum(usage.total_tokens for usage in recent_usage),

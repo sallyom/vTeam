@@ -7,8 +7,7 @@ from datetime import datetime
 
 import streamlit as st
 from components.ai_assistants import AIAssistantFactory
-from components.workflow import render_step_progress
-from data.rfe_models import AgentRole, RFEStatus, WorkflowState
+from data.rfe_models import AgentRole, RFEStatus
 
 
 def show_parker_dashboard():
@@ -160,7 +159,10 @@ def show_prioritization_interface(parker_rfes, workflow_state):
                     rfe.priority = f"{priority} (Impact: {business_impact})"
 
                     # Add notes about prioritization decision
-                    notes = f"Prioritized as {priority} with {business_impact} business impact by Parker (PM)"
+                    notes = (
+                        f"Prioritized as {priority} with {business_impact} "
+                        "business impact by Parker (PM)"
+                    )
 
                     # Advance to next step
                     workflow_state.advance_workflow_step(rfe.id, notes)
@@ -169,7 +171,8 @@ def show_prioritization_interface(parker_rfes, workflow_state):
                     )
 
                     st.success(
-                        "✅ RFE prioritized and forwarded to Archie (Architect) for review"
+                        "✅ RFE prioritized and forwarded to Archie (Architect) "
+                        "for review"
                     )
                     st.rerun()
 
@@ -202,9 +205,8 @@ def show_communication_interface(parker_rfes, workflow_state):
                     st.markdown("**Decision History:**")
                     for entry in rfe.history[-3:]:  # Show last 3 entries
                         timestamp = entry["timestamp"].strftime("%Y-%m-%d %H:%M")
-                        st.markdown(
-                            f"- {timestamp}: {entry.get('notes', entry.get('action', 'No details'))}"
-                        )
+                        detail = entry.get("notes", entry.get("action", "No details"))
+                        st.markdown(f"- {timestamp}: {detail}")
 
             with col2:
                 st.markdown("**Communication Actions**")
@@ -236,14 +238,19 @@ def show_communication_interface(parker_rfes, workflow_state):
                     key=f"message_{rfe.id}",
                 )
 
-                if st.button(f"Send Communication", key=f"communicate_{rfe.id}"):
-                    notes = f"Communicated to {stakeholder} via {comm_method}. Message: {message_template[:100]}..."
+                if st.button("Send Communication", key=f"communicate_{rfe.id}"):
+                    msg_preview = message_template[:100] + "..."
+                    notes = (
+                        f"Communicated to {stakeholder} via {comm_method}. "
+                        f"Message: {msg_preview}"
+                    )
 
                     # Advance to final step
                     workflow_state.advance_workflow_step(rfe.id, notes)
 
                     st.success(
-                        "✅ Communication sent! RFE forwarded to Derek (Delivery Owner) for ticket creation"
+                        "✅ Communication sent! RFE forwarded to Derek (Delivery Owner) "
+                        "for ticket creation"
                     )
                     st.rerun()
 
@@ -303,7 +310,8 @@ def generate_communication_template(rfe):
 
 Dear Stakeholder,
 
-Your Request for Enhancement "{rfe.title}" has been reviewed by the RFE Council and has been ACCEPTED for implementation.
+Your Request for Enhancement "{rfe.title}" has been reviewed by the RFE Council
+and has been ACCEPTED for implementation.
 
 RFE ID: {rfe.id}
 Priority: {rfe.priority or 'TBD'}

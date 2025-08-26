@@ -20,7 +20,7 @@ class PromptManager:
         else:
             self.prompts_dir = Path(prompts_dir)
 
-        self.templates = {}
+        self.templates: Dict[AgentRole, Dict[str, Any]] = {}
         self._load_all_templates()
 
         # Workflow step to agent/task mapping

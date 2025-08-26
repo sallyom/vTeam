@@ -127,7 +127,10 @@ class WorkflowState(BaseModel):
             WorkflowStep(
                 step_number=7,
                 name="Create Feature Ticket",
-                description="🚀 Derek (Delivery Owner) - Create Feature ticket and assign to owner",
+                description=(
+                    "🚀 Derek (Delivery Owner) - "
+                    "Create Feature ticket and assign to owner"
+                ),
                 responsible_agent=AgentRole.DEREK_DELIVERY_OWNER,
             ),
         ]

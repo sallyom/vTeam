@@ -38,7 +38,9 @@ class AgentAIAssistant:
             pass
         return None
 
-    def render_assistance_panel(self, rfe: RFE, context: Dict[str, Any] = None):
+    def render_assistance_panel(
+        self, rfe: RFE, context: Optional[Dict[str, Any]] = None
+    ):
         """Render the AI assistance panel for this agent"""
         if not self.anthropic_client:
             st.warning("🤖 AI assistant requires Anthropic API key configuration")
@@ -47,7 +49,9 @@ class AgentAIAssistant:
         with st.expander("🤖 AI Assistant", expanded=False):
             self._render_assistant_interface(rfe, context)
 
-    def _render_assistant_interface(self, rfe: RFE, context: Dict[str, Any] = None):
+    def _render_assistant_interface(
+        self, rfe: RFE, context: Optional[Dict[str, Any]] = None
+    ):
         """Render the specific assistant interface (to be overridden)"""
         st.info("AI assistant available for this agent")
 
@@ -57,7 +61,9 @@ class AgentAIAssistant:
                 st.markdown("### 💡 AI Guidance")
                 st.write(guidance)
 
-    def get_agent_guidance(self, rfe: RFE, context: Dict[str, Any] = None) -> str:
+    def get_agent_guidance(
+        self, rfe: RFE, context: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Get AI guidance for this agent and RFE"""
         if not self.anthropic_client:
             return "AI guidance unavailable - missing API configuration"
@@ -92,7 +98,7 @@ class AgentAIAssistant:
         return "general_assistance"
 
     def _build_prompt_context(
-        self, rfe: RFE, additional_context: Dict[str, Any] = None
+        self, rfe: RFE, additional_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Build context dictionary for prompt formatting"""
         context = {
@@ -141,7 +147,9 @@ class ParkerAIAssistant(AgentAIAssistant):
         else:
             return "general_pm_guidance"
 
-    def _render_assistant_interface(self, rfe: RFE, context: Dict[str, Any] = None):
+    def _render_assistant_interface(
+        self, rfe: RFE, context: Optional[Dict[str, Any]] = None
+    ):
         """Parker-specific assistant interface"""
         if rfe.current_step == 1:
             st.markdown("**🎯 Prioritization Assistant**")
@@ -203,7 +211,9 @@ class ArchieAIAssistant(AgentAIAssistant):
         else:
             return "general_architecture_guidance"
 
-    def _render_assistant_interface(self, rfe: RFE, context: Dict[str, Any] = None):
+    def _render_assistant_interface(
+        self, rfe: RFE, context: Optional[Dict[str, Any]] = None
+    ):
         """Archie-specific assistant interface"""
         if rfe.current_step == 2:
             st.markdown("**🏛️ Technical Review Assistant**")
@@ -257,7 +267,9 @@ class StellaAIAssistant(AgentAIAssistant):
         else:
             return "general_engineering_guidance"
 
-    def _render_assistant_interface(self, rfe: RFE, context: Dict[str, Any] = None):
+    def _render_assistant_interface(
+        self, rfe: RFE, context: Optional[Dict[str, Any]] = None
+    ):
         """Stella-specific assistant interface"""
         if rfe.current_step == 3:
             st.markdown("**📋 Completeness Check Assistant**")
@@ -296,7 +308,9 @@ class DerekAIAssistant(AgentAIAssistant):
         else:
             return "general_delivery_guidance"
 
-    def _render_assistant_interface(self, rfe: RFE, context: Dict[str, Any] = None):
+    def _render_assistant_interface(
+        self, rfe: RFE, context: Optional[Dict[str, Any]] = None
+    ):
         """Derek-specific assistant interface"""
         if rfe.current_step == 7:
             st.markdown("**🎫 Ticket Creation Assistant**")
@@ -344,7 +358,7 @@ class AIAssistantFactory:
         if assistant_class == AgentAIAssistant:
             return AgentAIAssistant(agent_role)  # Fallback for other agents
         else:
-            return assistant_class()
+            return assistant_class()  # Specialized classes call super().__init__()
 
     @classmethod
     def get_available_agents(cls) -> List[AgentRole]:

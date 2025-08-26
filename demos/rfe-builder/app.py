@@ -47,18 +47,38 @@ def main():
 
     st.sidebar.markdown("---")
 
+    # Initialize current page if not set
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "🏠 Home"
+
+    # Check if navigation was triggered by button
+    if "nav_target" in st.session_state:
+        target_page = st.session_state.nav_target
+        st.session_state.current_page = target_page  # Update current page
+        del st.session_state.nav_target  # Clear after use
+    else:
+        target_page = st.session_state.current_page  # Use current page as fallback
+
+    page_options = [
+        "🏠 Home",
+        "📝 Create RFE",
+        "💬 AI Chat RFE",
+        "📊 Workflow Overview",
+        "👥 Agent Dashboard",
+        "📈 RFE List",
+    ]
+
     # Page selection
     page = st.sidebar.selectbox(
         "Select View",
-        [
-            "🏠 Home",
-            "📝 Create RFE",
-            "💬 AI Chat RFE",
-            "📊 Workflow Overview",
-            "👥 Agent Dashboard",
-            "📈 RFE List",
-        ],
+        page_options,
+        index=page_options.index(target_page),
+        key="page_selector",
     )
+
+    # Update current page if user changed selection via sidebar
+    if page != st.session_state.current_page:
+        st.session_state.current_page = page
 
     # Route to appropriate page
     if page == "🏠 Home":
@@ -87,7 +107,7 @@ def show_home_page():
         ### 🎯 What is RFE Builder?
 
         RFE Builder is an AI-powered workflow platform that guides Request for
-        Enhancement (RFE) submissions through a structured 7-step council review 
+        Enhancement (RFE) submissions through a structured 7-step council review
         process.
 
         **Key Features:**
@@ -102,11 +122,11 @@ def show_home_page():
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🚀 Create New RFE", type="primary"):
-                st.session_state.page = "create_rfe"
+                st.session_state.nav_target = "📝 Create RFE"
                 st.rerun()
         with col2:
             if st.button("💬 Try AI Chat RFE", type="secondary"):
-                st.session_state.page = "ai_chat_rfe"
+                st.session_state.nav_target = "💬 AI Chat RFE"
                 st.rerun()
 
     with col2:
