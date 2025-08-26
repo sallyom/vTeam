@@ -6,6 +6,8 @@ Handles RFE prioritization and communication
 from datetime import datetime
 
 import streamlit as st
+
+from components.ai_assistants import AIAssistantFactory
 from components.workflow import render_step_progress
 from data.rfe_models import AgentRole, RFEStatus, WorkflowState
 
@@ -101,6 +103,10 @@ def show_active_tasks(parker_rfes, workflow_state):
                     st.markdown("**Current Task:**")
                     st.info(current_step.description)
 
+            # AI Assistant integration
+            parker_assistant = AIAssistantFactory.create_assistant(AgentRole.PARKER_PM)
+            parker_assistant.render_assistance_panel(rfe)
+
             # Action buttons based on current step
             if rfe.current_step == 1:  # Prioritization step
                 show_prioritization_actions(rfe, workflow_state)
@@ -150,7 +156,7 @@ def show_prioritization_interface(parker_rfes, workflow_state):
                     key=f"impact_{rfe.id}",
                 )
 
-                if st.button(f"Complete Prioritization", key=f"prioritize_{rfe.id}"):
+                if st.button("Complete Prioritization", key=f"prioritize_{rfe.id}"):
                     # Update RFE with priority information
                     rfe.priority = f"{priority} (Impact: {business_impact})"
 

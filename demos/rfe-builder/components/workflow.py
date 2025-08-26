@@ -3,8 +3,9 @@ Workflow visualization and management components
 """
 
 import streamlit as st
-from data.rfe_models import RFE, WorkflowStep
 from streamlit_mermaid import st_mermaid
+
+from data.rfe_models import RFE, WorkflowStep
 
 
 def render_workflow_diagram(current_step: int = 1):
