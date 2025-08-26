@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Any, Dict, Optional
 
 import tiktoken
-
 from data.rfe_models import AgentRole
 
 

@@ -6,7 +6,6 @@ Phase 1: Foundation & Core Workflow
 from datetime import datetime
 
 import streamlit as st
-
 from components.chat_interface import ChatInterface
 from data.rfe_models import RFEStatus, WorkflowState
 
@@ -87,8 +86,9 @@ def show_home_page():
             """
         ### 🎯 What is RFE Builder?
 
-        RFE Builder is an AI-powered workflow platform that guides Request for 
-        Enhancement (RFE) submissions through a structured 7-step council review process.
+        RFE Builder is an AI-powered workflow platform that guides Request for
+        Enhancement (RFE) submissions through a structured 7-step council review 
+        process.
 
         **Key Features:**
         - 👥 Multi-agent workflow with 7 specialized roles
@@ -458,7 +458,7 @@ def show_rfe_list():
 
             with col3:
                 if rfe.assigned_agent:
-                    st.markdown(f"**Agent:**")
+                    st.markdown("**Agent:**")
                     st.markdown(f"{rfe.assigned_agent.value}")
 
             with col4:

@@ -3,15 +3,13 @@ AI-powered assistants for each RFE workflow agent
 Provides role-specific guidance and decision support
 """
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
-from anthropic import Anthropic
-
 from ai_models.cost_tracker import CostTracker
 from ai_models.prompt_manager import PromptManager
-from data.rfe_models import RFE, AgentRole, RFEStatus
+from anthropic import Anthropic
+from data.rfe_models import RFE, AgentRole
 
 
 class AgentAIAssistant:

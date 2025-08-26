@@ -5,7 +5,6 @@ Test suite for RFE data models and workflow state management
 from datetime import datetime, timedelta
 
 import pytest
-
 from data.rfe_models import RFE, AgentRole, RFEStatus, WorkflowState, WorkflowStep
 
 

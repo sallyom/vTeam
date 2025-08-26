@@ -6,7 +6,6 @@ Handles RFE prioritization and communication
 from datetime import datetime
 
 import streamlit as st
-
 from components.ai_assistants import AIAssistantFactory
 from components.workflow import render_step_progress
 from data.rfe_models import AgentRole, RFEStatus, WorkflowState
@@ -170,7 +169,7 @@ def show_prioritization_interface(parker_rfes, workflow_state):
                     )
 
                     st.success(
-                        f"✅ RFE prioritized and forwarded to Archie (Architect) for review"
+                        "✅ RFE prioritized and forwarded to Archie (Architect) for review"
                     )
                     st.rerun()
 
@@ -244,7 +243,7 @@ def show_communication_interface(parker_rfes, workflow_state):
                     workflow_state.advance_workflow_step(rfe.id, notes)
 
                     st.success(
-                        f"✅ Communication sent! RFE forwarded to Derek (Delivery Owner) for ticket creation"
+                        "✅ Communication sent! RFE forwarded to Derek (Delivery Owner) for ticket creation"
                     )
                     st.rerun()
 
@@ -256,7 +255,7 @@ def show_prioritization_actions(rfe, workflow_state):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button(f"High Priority", key=f"high_pri_{rfe.id}"):
+        if st.button("High Priority", key=f"high_pri_{rfe.id}"):
             rfe.priority = "High"
             notes = "Marked as High Priority by Parker (PM)"
             workflow_state.advance_workflow_step(rfe.id, notes)
@@ -265,7 +264,7 @@ def show_prioritization_actions(rfe, workflow_state):
             st.rerun()
 
     with col2:
-        if st.button(f"Normal Priority", key=f"norm_pri_{rfe.id}"):
+        if st.button("Normal Priority", key=f"norm_pri_{rfe.id}"):
             rfe.priority = "Medium"
             notes = "Marked as Normal Priority by Parker (PM)"
             workflow_state.advance_workflow_step(rfe.id, notes)
@@ -281,7 +280,7 @@ def show_communication_actions(rfe, workflow_state):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button(f"Send Acceptance", key=f"accept_comm_{rfe.id}"):
+        if st.button("Send Acceptance", key=f"accept_comm_{rfe.id}"):
             notes = "Acceptance communication sent to stakeholders by Parker (PM)"
             workflow_state.advance_workflow_step(rfe.id, notes)
             st.success(
@@ -290,7 +289,7 @@ def show_communication_actions(rfe, workflow_state):
             st.rerun()
 
     with col2:
-        if st.button(f"Send Rejection", key=f"reject_comm_{rfe.id}"):
+        if st.button("Send Rejection", key=f"reject_comm_{rfe.id}"):
             notes = "Rejection communication sent to stakeholders by Parker (PM)"
             workflow_state.advance_workflow_step(rfe.id, notes)
             st.success("Rejection communicated! Process complete.")

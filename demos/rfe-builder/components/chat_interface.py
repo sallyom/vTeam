@@ -6,15 +6,14 @@ Uses Anthropic Claude API for natural language RFE creation and agent assistance
 import json
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import streamlit as st
 import yaml
-from anthropic import Anthropic
-
 from ai_models.cost_tracker import CostTracker
 from ai_models.prompt_manager import PromptManager
-from data.rfe_models import RFE, AgentRole, WorkflowState
+from anthropic import Anthropic
+from data.rfe_models import RFE, AgentRole
 
 
 class ChatInterface:
@@ -245,7 +244,7 @@ class ChatInterface:
             )
             with open(template_path, "r") as f:
                 return yaml.safe_load(f)
-        except Exception as e:
+        except Exception:
             # Fallback template
             return {
                 "system": "You are an AI assistant helping create RFE submissions. Guide users through the process naturally.",

@@ -79,7 +79,7 @@ The RFE Builder implements a 7-agent workflow system:
    ```bash
    # Copy secrets template
    cp .streamlit/secrets.toml.template .streamlit/secrets.toml
-   
+
    # Edit .streamlit/secrets.toml and add your Anthropic API key
    # Get your key from: https://console.anthropic.com/
    ```
@@ -102,7 +102,7 @@ The RFE Builder implements a 7-agent workflow system:
 3. The AI assistant will guide you through gathering all necessary information
 4. Review the generated RFE draft and create when ready
 
-#### Option 2: Traditional Form-Based Creation  
+#### Option 2: Traditional Form-Based Creation
 1. Navigate to **"📝 Create RFE"** in the sidebar
 2. Fill in the required fields:
    - **Title**: Brief descriptive title
@@ -122,16 +122,16 @@ The RFE Builder implements a 7-agent workflow system:
 
 Each agent role has specific capabilities with AI-powered assistance:
 
-- **Parker (PM)**: 
+- **Parker (PM)**:
   - Prioritize new RFEs with AI business impact analysis
   - Draft stakeholder communications with AI assistance
-- **Archie (Architect)**: 
+- **Archie (Architect)**:
   - Review technical feasibility with AI architectural guidance
   - Validate acceptance criteria with AI recommendations
-- **Stella (Staff Engineer)**: 
+- **Stella (Staff Engineer)**:
   - Assess RFE completeness with AI gap analysis
   - Make final accept/reject decisions with AI decision support
-- **Derek (Delivery Owner)**: 
+- **Derek (Delivery Owner)**:
   - Generate JIRA tickets and development tasks with AI assistance
 - **Other Agents**: Specialized assessment functions with role-specific AI guidance
 

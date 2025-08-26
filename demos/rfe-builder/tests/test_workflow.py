@@ -5,7 +5,6 @@ Test suite for workflow components and functionality
 from unittest.mock import Mock, patch
 
 import pytest
-
 from components.workflow import (
     render_step_progress,
     render_workflow_diagram,
