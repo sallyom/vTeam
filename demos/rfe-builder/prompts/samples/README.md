@@ -8,7 +8,9 @@ This directory contains sample prompt templates and real-world examples for the 
 prompts/samples/
 ├── README.md                    # This file
 ├── rfe-examples/               # Real-world RFE examples
-│   └── RHOAIRFE-159.md        # Node targeting feature for OpenShift AI
+│   ├── RHOAIRFE-159.md        # Node targeting feature for OpenShift AI
+│   ├── RHOAIRFE-302.md        # Project-level resource discovery
+│   └── RHOAIRFE-390.md        # KServe model stop/restart capability
 └── templates/                  # Template examples (future)
 ```
 
@@ -36,6 +38,12 @@ Real-world Request for Enhancement examples from Red Hat OpenShift AI and other 
    - **Complexity**: Medium
    - **Timeline**: 8-12 weeks
    - **Focus**: Multi-tenancy, self-service capabilities, resource customization
+
+3. **RHOAIRFE-390.md** - Manual Model Stop/Restart Capability for KServe
+   - **Category**: Model Serving
+   - **Complexity**: Medium
+   - **Timeline**: 10-14 weeks
+   - **Focus**: Model lifecycle management, resource optimization, operational control
 
 ## Usage Guidelines
 
