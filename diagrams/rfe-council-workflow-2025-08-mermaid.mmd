@@ -1,26 +1,26 @@
 flowchart TD
-    Start([Start]) --> PrioritizeRFE["📊 Parker (PM)<br/>Prioritize RFEs"]
+    Start([Start]) --> PrioritizeRFE["1️⃣ 📊 Parker (PM)<br/>Prioritize RFEs"]
     
-    PrioritizeRFE --> ReviewRFE["RFE Council<br/>🏛️ Archie (Architect)<br/>Review RFE"]
-    ReviewRFE -.->|if necessary| AssessImpact["👥 Lee (Team Lead) +<br/>💻 Taylor (Team Member)<br/>Assess Impact"]
-    AssessImpact -.-> ReviewRFE
+    PrioritizeRFE --> ReviewRFE["2️⃣ RFE Council<br/>🏛️ Archie (Architect)<br/>Review RFE"]
+    ReviewRFE -.->|2a if necessary| AssessImpact["2a 👥 Lee (Team Lead) +<br/>💻 Taylor (Team Member)<br/>Assess Impact"]
+    AssessImpact -.->|return to 2️⃣| ReviewRFE
     
-    ReviewRFE --> RFEComplete{"⭐ Stella (Staff Engineer)<br/>RFE is Complete?"}
-    RFEComplete -->|missing details| AddInfo["📋 Olivia (PO)<br/>Add missing information"]
-    AddInfo --> PrioritizeRFE
+    ReviewRFE --> RFEComplete{"3️⃣ ⭐ Stella (Staff Engineer)<br/>RFE is Complete?"}
+    RFEComplete -->|3a missing details| AddInfo["3a 📋 Olivia (PO)<br/>Add missing information"]
+    AddInfo -->|return to 1️⃣| PrioritizeRFE
     
-    RFEComplete -->|Yes| RFEMeets{"RFE Council<br/>🏛️ Archie (Architect)<br/>RFE meets acceptance<br/>criteria?"}
+    RFEComplete -->|3b Yes| RFEMeets{"4️⃣ RFE Council<br/>🏛️ Archie (Architect)<br/>RFE meets acceptance<br/>criteria?"}
     
-    RFEMeets -->|Yes| AcceptRFE["⭐ Stella (Staff Engineer)<br/>Accept RFE<br/><i>(update ticket with<br/>assessment info)</i>"]
-    RFEMeets -->|No| RejectRFE["RFE Council<br/>🏛️ Archie (Architect)<br/>Reject RFE<br/><i>(update ticket with<br/>assessment info)</i>"]
+    RFEMeets -->|4a Yes| AcceptRFE["5️⃣ ⭐ Stella (Staff Engineer)<br/>Accept RFE<br/><i>(update ticket with<br/>assessment info)</i>"]
+    RFEMeets -->|4b No| RejectRFE["4b RFE Council<br/>🏛️ Archie (Architect)<br/>Reject RFE<br/><i>(update ticket with<br/>assessment info)</i>"]
     
-    RejectRFE --> CanChange{"📋 Olivia (PO)<br/>Can RFE be changed<br/>to remedy concerns?"}
-    CanChange -->|Yes| AddInfo
-    CanChange -->|No| CommReject["📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]
+    RejectRFE --> CanChange{"4c 📋 Olivia (PO)<br/>Can RFE be changed<br/>to remedy concerns?"}
+    CanChange -->|4d Yes - return to 3a| AddInfo
+    CanChange -->|4e No| CommReject["6️⃣ 📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]
     
-    AcceptRFE --> CommAccept["📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]
+    AcceptRFE --> CommAccept["6️⃣ 📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]
     
-    CommReject --> CreateTicket["🚀 Derek (Delivery Owner)<br/>Create Feature ticket<br/>and assign to owner"]
+    CommReject --> CreateTicket["7️⃣ 🚀 Derek (Delivery Owner)<br/>Create Feature ticket<br/>and assign to owner"]
     CommAccept --> CreateTicket
     
     CreateTicket --> End([End])
