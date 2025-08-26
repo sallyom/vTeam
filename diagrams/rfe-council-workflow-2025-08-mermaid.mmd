@@ -1,0 +1,43 @@
+flowchart TD
+    Start([Start]) --> PrioritizeRFE["📊 Parker (PM)<br/>Prioritize RFEs"]
+    
+    PrioritizeRFE --> ReviewRFE["RFE Council<br/>🏛️ Archie (Architect)<br/>Review RFE"]
+    ReviewRFE -.->|if necessary| AssessImpact["👥 Lee (Team Lead) +<br/>💻 Taylor (Team Member)<br/>Assess Impact"]
+    AssessImpact -.-> ReviewRFE
+    
+    ReviewRFE --> RFEComplete{"⭐ Stella (Staff Engineer)<br/>RFE is Complete?"}
+    RFEComplete -->|missing details| AddInfo["📋 Olivia (PO)<br/>Add missing information"]
+    AddInfo --> PrioritizeRFE
+    
+    RFEComplete -->|Yes| RFEMeets{"RFE Council<br/>🏛️ Archie (Architect)<br/>RFE meets acceptance<br/>criteria?"}
+    
+    RFEMeets -->|Yes| AcceptRFE["⭐ Stella (Staff Engineer)<br/>Accept RFE<br/><i>(update ticket with<br/>assessment info)</i>"]
+    RFEMeets -->|No| RejectRFE["RFE Council<br/>🏛️ Archie (Architect)<br/>Reject RFE<br/><i>(update ticket with<br/>assessment info)</i>"]
+    
+    RejectRFE --> CanChange{"📋 Olivia (PO)<br/>Can RFE be changed<br/>to remedy concerns?"}
+    CanChange -->|Yes| AddInfo
+    CanChange -->|No| CommReject["📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]
+    
+    AcceptRFE --> CommAccept["📊 Parker (PM)<br/>Communicate assessment<br/>to requester"]
+    
+    CommReject --> CreateTicket["🚀 Derek (Delivery Owner)<br/>Create Feature ticket<br/>and assign to owner"]
+    CommAccept --> CreateTicket
+    
+    CreateTicket --> End([End])
+    
+    %% Agent role-based styling
+    classDef startEnd fill:#28a745,stroke:#1e7e34,color:#fff
+    classDef productManager fill:#6f42c1,stroke:#5a32a3,color:#fff
+    classDef productOwner fill:#17a2b8,stroke:#138496,color:#fff
+    classDef architect fill:#dc3545,stroke:#c82333,color:#fff
+    classDef staffEngineer fill:#fd7e14,stroke:#e8610e,color:#fff
+    classDef teamLead fill:#20c997,stroke:#1aa179,color:#fff
+    classDef deliveryOwner fill:#ffc107,stroke:#e0a800,color:#212529
+    
+    class Start,End startEnd
+    class PrioritizeRFE,CommReject,CommAccept productManager
+    class AddInfo,CanChange productOwner
+    class ReviewRFE,RFEMeets,RejectRFE architect
+    class RFEComplete,AcceptRFE staffEngineer
+    class AssessImpact teamLead
+    class CreateTicket deliveryOwner
