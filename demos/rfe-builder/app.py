@@ -6,6 +6,7 @@ Phase 1: Foundation & Core Workflow
 from datetime import datetime
 
 import streamlit as st
+from components.chat_interface import ChatInterface
 from data.rfe_models import RFEStatus, WorkflowState
 
 # Page configuration
@@ -46,23 +47,46 @@ def main():
 
     st.sidebar.markdown("---")
 
+    # Initialize current page if not set
+    if "current_page" not in st.session_state:
+        st.session_state.current_page = "🏠 Home"
+
+    # Check if navigation was triggered by button
+    if "nav_target" in st.session_state:
+        target_page = st.session_state.nav_target
+        st.session_state.current_page = target_page  # Update current page
+        del st.session_state.nav_target  # Clear after use
+    else:
+        target_page = st.session_state.current_page  # Use current page as fallback
+
+    page_options = [
+        "🏠 Home",
+        "📝 Create RFE",
+        "💬 AI Chat RFE",
+        "📊 Workflow Overview",
+        "👥 Agent Dashboard",
+        "📈 RFE List",
+    ]
+
     # Page selection
     page = st.sidebar.selectbox(
         "Select View",
-        [
-            "🏠 Home",
-            "📝 Create RFE",
-            "📊 Workflow Overview",
-            "👥 Agent Dashboard",
-            "📈 RFE List",
-        ],
+        page_options,
+        index=page_options.index(target_page),
+        key="page_selector",
     )
+
+    # Update current page if user changed selection via sidebar
+    if page != st.session_state.current_page:
+        st.session_state.current_page = page
 
     # Route to appropriate page
     if page == "🏠 Home":
         show_home_page()
     elif page == "📝 Create RFE":
         show_create_rfe_page()
+    elif page == "💬 AI Chat RFE":
+        show_ai_chat_rfe_page()
     elif page == "📊 Workflow Overview":
         show_workflow_overview()
     elif page == "👥 Agent Dashboard":
@@ -82,20 +106,28 @@ def show_home_page():
             """
         ### 🎯 What is RFE Builder?
 
-        RFE Builder is an AI-powered workflow platform that guides Request for Enhancement (RFE)
-        submissions through a structured 7-step council review process.
+        RFE Builder is an AI-powered workflow platform that guides Request for
+        Enhancement (RFE) submissions through a structured 7-step council review
+        process.
 
         **Key Features:**
         - 👥 Multi-agent workflow with 7 specialized roles
         - 📊 Visual workflow tracking and status updates
-        - 🤖 AI-powered guidance and recommendations
+        - 🤖 AI-powered conversational RFE creation
+        - 💬 Intelligent agent assistants with Claude AI
         - 🔄 Automated step progression and validation
         """
         )
 
-        if st.button("🚀 Create New RFE", type="primary"):
-            st.session_state.page = "create_rfe"
-            st.rerun()
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🚀 Create New RFE", type="primary"):
+                st.session_state.nav_target = "📝 Create RFE"
+                st.rerun()
+        with col2:
+            if st.button("💬 Try AI Chat RFE", type="secondary"):
+                st.session_state.nav_target = "💬 AI Chat RFE"
+                st.rerun()
 
     with col2:
         st.markdown("### 📋 Quick Stats")
@@ -139,7 +171,10 @@ def show_create_rfe_page():
         with col1:
             business_justification = st.text_area(
                 "Business Justification",
-                placeholder="Why is this enhancement needed? What business value does it provide?",
+                placeholder=(
+                    "Why is this enhancement needed? "
+                    "What business value does it provide?"
+                ),
                 height=100,
             )
 
@@ -175,7 +210,7 @@ def show_create_rfe_page():
                     rfe.success_criteria = success_criteria
 
                 st.success(f"✅ RFE Created: {rfe.id}")
-                st.info(f"Assigned to: 📊 Parker (PM) - Step 1: Prioritize RFE")
+                st.info("Assigned to: 📊 Parker (PM) - Step 1: Prioritize RFE")
 
                 # Show next steps
                 st.markdown("### Next Steps")
@@ -187,6 +222,12 @@ def show_create_rfe_page():
                 st.markdown("- Monitor updates in the **RFE List**")
 
 
+def show_ai_chat_rfe_page():
+    """AI-powered conversational RFE creation page"""
+    chat_interface = ChatInterface()
+    chat_interface.render_conversational_rfe_creator()
+
+
 def show_workflow_overview():
     """Visual workflow overview with mermaid diagram"""
     st.header("📊 RFE Council Workflow Overview")
@@ -196,7 +237,8 @@ def show_workflow_overview():
 
         st.markdown(f"### Current RFE: {current_rfe.title}")
         st.markdown(
-            f"**Status:** `{current_rfe.current_status.value}` | **Step:** {current_rfe.current_step}/7"
+            f"**Status:** `{current_rfe.current_status.value}` | "
+            f"**Step:** {current_rfe.current_step}/7"
         )
 
         # Progress bar
@@ -339,7 +381,7 @@ def show_agent_dashboard():
                 col1, col2 = st.columns(2)
 
                 with col1:
-                    if st.button(f"Complete Step", key=f"complete_{rfe.id}"):
+                    if st.button("Complete Step", key=f"complete_{rfe.id}"):
                         workflow_state.advance_workflow_step(
                             rfe.id, f"Completed by {selected_agent}"
                         )
@@ -347,7 +389,7 @@ def show_agent_dashboard():
                         st.rerun()
 
                 with col2:
-                    if st.button(f"View Details", key=f"details_{rfe.id}"):
+                    if st.button("View Details", key=f"details_{rfe.id}"):
                         st.session_state.selected_rfe = rfe.id
                         st.rerun()
     else:
@@ -436,7 +478,7 @@ def show_rfe_list():
 
             with col3:
                 if rfe.assigned_agent:
-                    st.markdown(f"**Agent:**")
+                    st.markdown("**Agent:**")
                     st.markdown(f"{rfe.assigned_agent.value}")
 
             with col4:

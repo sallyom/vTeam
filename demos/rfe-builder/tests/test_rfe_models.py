@@ -2,9 +2,8 @@
 Test suite for RFE data models and workflow state management
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
-import pytest
 from data.rfe_models import RFE, AgentRole, RFEStatus, WorkflowState, WorkflowStep
 
 
@@ -146,7 +145,6 @@ class TestWorkflowState:
         rfe = state.create_rfe("Test RFE", "Test description")
 
         initial_step = rfe.current_step
-        initial_agent = rfe.assigned_agent
 
         # Advance to next step
         state.advance_workflow_step(rfe.id, "Step completed")

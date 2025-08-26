@@ -6,8 +6,8 @@ Handles RFE prioritization and communication
 from datetime import datetime
 
 import streamlit as st
-from components.workflow import render_step_progress
-from data.rfe_models import AgentRole, RFEStatus, WorkflowState
+from components.ai_assistants import AIAssistantFactory
+from data.rfe_models import AgentRole, RFEStatus
 
 
 def show_parker_dashboard():
@@ -101,6 +101,10 @@ def show_active_tasks(parker_rfes, workflow_state):
                     st.markdown("**Current Task:**")
                     st.info(current_step.description)
 
+            # AI Assistant integration
+            parker_assistant = AIAssistantFactory.create_assistant(AgentRole.PARKER_PM)
+            parker_assistant.render_assistance_panel(rfe)
+
             # Action buttons based on current step
             if rfe.current_step == 1:  # Prioritization step
                 show_prioritization_actions(rfe, workflow_state)
@@ -150,12 +154,15 @@ def show_prioritization_interface(parker_rfes, workflow_state):
                     key=f"impact_{rfe.id}",
                 )
 
-                if st.button(f"Complete Prioritization", key=f"prioritize_{rfe.id}"):
+                if st.button("Complete Prioritization", key=f"prioritize_{rfe.id}"):
                     # Update RFE with priority information
                     rfe.priority = f"{priority} (Impact: {business_impact})"
 
                     # Add notes about prioritization decision
-                    notes = f"Prioritized as {priority} with {business_impact} business impact by Parker (PM)"
+                    notes = (
+                        f"Prioritized as {priority} with {business_impact} "
+                        "business impact by Parker (PM)"
+                    )
 
                     # Advance to next step
                     workflow_state.advance_workflow_step(rfe.id, notes)
@@ -164,7 +171,8 @@ def show_prioritization_interface(parker_rfes, workflow_state):
                     )
 
                     st.success(
-                        f"✅ RFE prioritized and forwarded to Archie (Architect) for review"
+                        "✅ RFE prioritized and forwarded to Archie (Architect) "
+                        "for review"
                     )
                     st.rerun()
 
@@ -197,9 +205,8 @@ def show_communication_interface(parker_rfes, workflow_state):
                     st.markdown("**Decision History:**")
                     for entry in rfe.history[-3:]:  # Show last 3 entries
                         timestamp = entry["timestamp"].strftime("%Y-%m-%d %H:%M")
-                        st.markdown(
-                            f"- {timestamp}: {entry.get('notes', entry.get('action', 'No details'))}"
-                        )
+                        detail = entry.get("notes", entry.get("action", "No details"))
+                        st.markdown(f"- {timestamp}: {detail}")
 
             with col2:
                 st.markdown("**Communication Actions**")
@@ -231,14 +238,19 @@ def show_communication_interface(parker_rfes, workflow_state):
                     key=f"message_{rfe.id}",
                 )
 
-                if st.button(f"Send Communication", key=f"communicate_{rfe.id}"):
-                    notes = f"Communicated to {stakeholder} via {comm_method}. Message: {message_template[:100]}..."
+                if st.button("Send Communication", key=f"communicate_{rfe.id}"):
+                    msg_preview = message_template[:100] + "..."
+                    notes = (
+                        f"Communicated to {stakeholder} via {comm_method}. "
+                        f"Message: {msg_preview}"
+                    )
 
                     # Advance to final step
                     workflow_state.advance_workflow_step(rfe.id, notes)
 
                     st.success(
-                        f"✅ Communication sent! RFE forwarded to Derek (Delivery Owner) for ticket creation"
+                        "✅ Communication sent! RFE forwarded to Derek (Delivery Owner) "
+                        "for ticket creation"
                     )
                     st.rerun()
 
@@ -250,7 +262,7 @@ def show_prioritization_actions(rfe, workflow_state):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button(f"High Priority", key=f"high_pri_{rfe.id}"):
+        if st.button("High Priority", key=f"high_pri_{rfe.id}"):
             rfe.priority = "High"
             notes = "Marked as High Priority by Parker (PM)"
             workflow_state.advance_workflow_step(rfe.id, notes)
@@ -259,7 +271,7 @@ def show_prioritization_actions(rfe, workflow_state):
             st.rerun()
 
     with col2:
-        if st.button(f"Normal Priority", key=f"norm_pri_{rfe.id}"):
+        if st.button("Normal Priority", key=f"norm_pri_{rfe.id}"):
             rfe.priority = "Medium"
             notes = "Marked as Normal Priority by Parker (PM)"
             workflow_state.advance_workflow_step(rfe.id, notes)
@@ -275,7 +287,7 @@ def show_communication_actions(rfe, workflow_state):
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button(f"Send Acceptance", key=f"accept_comm_{rfe.id}"):
+        if st.button("Send Acceptance", key=f"accept_comm_{rfe.id}"):
             notes = "Acceptance communication sent to stakeholders by Parker (PM)"
             workflow_state.advance_workflow_step(rfe.id, notes)
             st.success(
@@ -284,7 +296,7 @@ def show_communication_actions(rfe, workflow_state):
             st.rerun()
 
     with col2:
-        if st.button(f"Send Rejection", key=f"reject_comm_{rfe.id}"):
+        if st.button("Send Rejection", key=f"reject_comm_{rfe.id}"):
             notes = "Rejection communication sent to stakeholders by Parker (PM)"
             workflow_state.advance_workflow_step(rfe.id, notes)
             st.success("Rejection communicated! Process complete.")
@@ -298,7 +310,8 @@ def generate_communication_template(rfe):
 
 Dear Stakeholder,
 
-Your Request for Enhancement "{rfe.title}" has been reviewed by the RFE Council and has been ACCEPTED for implementation.
+Your Request for Enhancement "{rfe.title}" has been reviewed by the RFE Council
+and has been ACCEPTED for implementation.
 
 RFE ID: {rfe.id}
 Priority: {rfe.priority or 'TBD'}

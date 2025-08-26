@@ -6,14 +6,22 @@
 
 RFE Builder is an interactive Streamlit web application that guides Request for Enhancement (RFE) submissions through a structured 7-step council review process with AI-powered assistance and enterprise integration.
 
-## 🚀 Features (Phase 1)
+## 🚀 Features
 
+### Phase 1 (Foundation)
 - **📊 Visual Workflow Management**: Interactive Mermaid diagram showing the complete RFE Council process
 - **👥 Multi-Agent System**: 7 specialized agent roles with dedicated dashboards
 - **📈 Progress Tracking**: Real-time status updates and step-by-step progression
 - **🔄 State Management**: Persistent RFE data with comprehensive history tracking
 - **📋 Role-Based Interfaces**: Customized dashboards for each workflow participant
 - **✅ Comprehensive Testing**: Full test coverage with CI/CD pipeline
+
+### Phase 2 (Conversational AI) ✨ **NEW**
+- **💬 AI-Powered RFE Creation**: Natural language RFE creation using Anthropic Claude
+- **🤖 Intelligent Agent Assistants**: Role-specific AI guidance for all 7 workflow agents
+- **🎯 Smart Recommendations**: Context-aware suggestions based on RFE content
+- **💰 Cost Optimization**: Token usage tracking and intelligent prompt management
+- **📊 Dynamic Prompting**: Workflow-aware AI assistance that adapts to current step
 
 ## 🏗️ Architecture
 
@@ -62,21 +70,39 @@ The RFE Builder implements a 7-agent workflow system:
 
 3. **Install dependencies**
    ```bash
-   pip install -r requirements.txt
+   # Using uv (recommended for speed)
+   uv pip install -r requirements.txt
+   # OR: pip install -r requirements.txt
    ```
 
-4. **Run the application**
+4. **Configure AI features (Phase 2 - Optional)**
+   ```bash
+   # Copy secrets template
+   cp .streamlit/secrets.toml.template .streamlit/secrets.toml
+
+   # Edit .streamlit/secrets.toml and add your Anthropic API key
+   # Get your key from: https://console.anthropic.com/
+   ```
+
+5. **Run the application**
    ```bash
    streamlit run app.py
    ```
 
-5. **Open in browser**
+6. **Open in browser**
    - The app will automatically open at `http://localhost:8501`
 
 ## 📖 Usage
 
 ### Creating an RFE
 
+#### Option 1: AI-Powered Conversational Creation (Phase 2) ⭐ **Recommended**
+1. Navigate to **"💬 AI Chat RFE"** in the sidebar
+2. Describe your enhancement idea in natural language
+3. The AI assistant will guide you through gathering all necessary information
+4. Review the generated RFE draft and create when ready
+
+#### Option 2: Traditional Form-Based Creation
 1. Navigate to **"📝 Create RFE"** in the sidebar
 2. Fill in the required fields:
    - **Title**: Brief descriptive title
@@ -94,12 +120,20 @@ The RFE Builder implements a 7-agent workflow system:
 
 ### Agent-Specific Actions
 
-Each agent role has specific capabilities:
+Each agent role has specific capabilities with AI-powered assistance:
 
-- **Parker (PM)**: Prioritize new RFEs, communicate decisions to stakeholders
-- **Archie (Architect)**: Review technical feasibility, validate acceptance criteria
-- **Stella (Staff Engineer)**: Assess completeness, make final accept/reject decisions
-- **Other Agents**: Specialized assessment and support functions
+- **Parker (PM)**:
+  - Prioritize new RFEs with AI business impact analysis
+  - Draft stakeholder communications with AI assistance
+- **Archie (Architect)**:
+  - Review technical feasibility with AI architectural guidance
+  - Validate acceptance criteria with AI recommendations
+- **Stella (Staff Engineer)**:
+  - Assess RFE completeness with AI gap analysis
+  - Make final accept/reject decisions with AI decision support
+- **Derek (Delivery Owner)**:
+  - Generate JIRA tickets and development tasks with AI assistance
+- **Other Agents**: Specialized assessment functions with role-specific AI guidance
 
 ## 🧪 Testing
 
