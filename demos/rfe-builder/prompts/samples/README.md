@@ -31,6 +31,12 @@ Real-world Request for Enhancement examples from Red Hat OpenShift AI and other 
    - **Timeline**: 12-16 weeks
    - **Focus**: Kubernetes node selection, hardware targeting, enterprise resource management
 
+2. **RHOAIRFE-302.md** - Project-Level Resource Discovery in OpenShift AI Dashboard
+   - **Category**: User Experience
+   - **Complexity**: Medium
+   - **Timeline**: 8-12 weeks
+   - **Focus**: Multi-tenancy, self-service capabilities, resource customization
+
 ## Usage Guidelines
 
 ### For Agent Training
