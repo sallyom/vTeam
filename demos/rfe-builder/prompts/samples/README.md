@@ -27,23 +27,34 @@ Real-world Request for Enhancement examples from Red Hat OpenShift AI and other 
 
 #### Available Examples:
 
+| RFE ID | Title | Category | Complexity | Timeline | Story Points |
+|--------|-------|----------|------------|----------|--------------|
+| **RHOAIRFE-159** | Enable Node Targeting for Workbench Creation | Infrastructure | High | 12-16 weeks | 34 |
+| **RHOAIRFE-302** | Project-Level Resource Discovery | User Experience | Medium | 8-12 weeks | 21 |
+| **RHOAIRFE-390** | Manual Model Stop/Restart for KServe | Model Serving | Medium | 10-14 weeks | 28 |
+
+##### Detailed Sample Descriptions:
+
 1. **RHOAIRFE-159.md** - Enable Node Targeting for Workbench Creation
    - **Category**: Infrastructure Enhancement
-   - **Complexity**: High
+   - **Complexity**: High (34 story points)
    - **Timeline**: 12-16 weeks
    - **Focus**: Kubernetes node selection, hardware targeting, enterprise resource management
+   - **Key Features**: GPU cluster management, business unit isolation, cost optimization
 
 2. **RHOAIRFE-302.md** - Project-Level Resource Discovery in OpenShift AI Dashboard
    - **Category**: User Experience
-   - **Complexity**: Medium
+   - **Complexity**: Medium (21 story points)
    - **Timeline**: 8-12 weeks
    - **Focus**: Multi-tenancy, self-service capabilities, resource customization
+   - **Key Features**: Project-specific resources, administrative flexibility, workflow integration
 
 3. **RHOAIRFE-390.md** - Manual Model Stop/Restart Capability for KServe
    - **Category**: Model Serving
-   - **Complexity**: Medium
+   - **Complexity**: Medium (28 story points)
    - **Timeline**: 10-14 weeks
    - **Focus**: Model lifecycle management, resource optimization, operational control
+   - **Key Features**: Emergency shutdown, GPU resource juggling, automated operations
 
 ## Usage Guidelines
 
@@ -75,14 +86,38 @@ When analyzing new RFEs, compare against these samples for:
 - **Feasibility**: Are the timelines and resource estimates realistic?
 - **Business Value**: Is the business justification compelling?
 
+## Template Patterns
+
+The sample collection demonstrates three key template patterns:
+
+### 1. Enterprise Infrastructure (`RHOAIRFE-159`)
+- **Pattern**: Large-scale infrastructure changes for enterprise customers
+- **Key Sections**: Administrative controls, multi-tenant considerations, scalability requirements
+- **Use Cases**: Heterogeneous hardware clusters, business unit isolation, resource targeting
+- **Complexity**: High - requires multiple teams and significant architectural changes
+
+### 2. User Experience Enhancement (`RHOAIRFE-302`)
+- **Pattern**: UI/UX improvements focused on user productivity and self-service
+- **Key Sections**: Use cases, user experience criteria, workflow integration
+- **Use Cases**: Custom image development, project-specific resources, administrative flexibility
+- **Complexity**: Medium - cross-team coordination with moderate technical complexity
+
+### 3. Model Lifecycle Management (`RHOAIRFE-390`)
+- **Pattern**: Model serving and operational control features
+- **Key Sections**: Resource management, API design, operational workflows
+- **Use Cases**: Emergency shutdown, resource optimization, automated operations
+- **Complexity**: Medium - requires deep integration with existing serving infrastructure
+
 ## Agent Integration
 
 These samples are designed to work with the RFE Builder's AI agent system:
 
-- **Parker (PM)**: Use business justification and stakeholder sections for prioritization analysis
-- **Archie (Architect)**: Reference technical requirements and implementation details for feasibility assessment
-- **Stella (Staff Engineer)**: Examine success criteria and testing requirements for completeness validation
-- **Derek (Delivery Owner)**: Review project details and deployment considerations for ticket creation
+| Agent | Focus Areas | Relevant Sections |
+|-------|-------------|------------------|
+| **Parker (PM)** | Prioritization & Business Impact | Business justification, stakeholder analysis, customer validation |
+| **Archie (Architect)** | Technical Feasibility | Technical requirements, dependencies, implementation details |
+| **Stella (Staff Engineer)** | Completeness & Quality | Success criteria, testing requirements, risk assessment |
+| **Derek (Delivery Owner)** | Project Planning | Effort estimation, team assignment, deployment planning |
 
 ## Contributing New Samples
 
@@ -132,5 +167,26 @@ Submit improvements via pull requests or issues in the main repository.
 
 ---
 
-*Last Updated: 2024-08-26*
-*Version: 1.0*
+## Sample Coverage
+
+The current collection provides comprehensive coverage across:
+
+### By Category
+- **Infrastructure**: 1 sample (High complexity)
+- **User Experience**: 1 sample (Medium complexity)
+- **Model Serving**: 1 sample (Medium complexity)
+
+### By Complexity
+- **High (12-16+ weeks)**: 1 sample (34 story points)
+- **Medium (8-14 weeks)**: 2 samples (21 + 28 = 49 story points)
+- **Low (<8 weeks)**: None (opportunity for future samples)
+
+### By Business Value
+- All samples demonstrate **High** business value and customer impact
+- Range from **Low** to **Medium** technical risk
+- Cover enterprise, multi-tenant, and operational use cases
+
+---
+
+*Last Updated: 2025-01-26*
+*Version: 1.1*
