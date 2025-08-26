@@ -1,0 +1,110 @@
+{
+  "version": "1.0",
+  "last_updated": "2024-08-26",
+  "description": "Index of sample RFE prompts and templates for the RFE Builder system",
+  "samples": [
+    {
+      "id": "RHOAIRFE-159",
+      "title": "Enable Node Targeting for Workbench Creation in OpenShift AI Dashboard",
+      "file_path": "rfe-examples/RHOAIRFE-159.md",
+      "category": "infrastructure",
+      "complexity": "high",
+      "priority": "P0",
+      "estimated_effort": "12-16 weeks",
+      "story_points": 34,
+      "tags": [
+        "kubernetes",
+        "node-selection",
+        "hardware-targeting",
+        "openshift-ai",
+        "workbench",
+        "gpu-management",
+        "enterprise"
+      ],
+      "stakeholders": [
+        "product-management",
+        "engineering",
+        "customer-success",
+        "sre"
+      ],
+      "components": [
+        "dashboard-frontend",
+        "workbench-service",
+        "node-management",
+        "scheduler-integration"
+      ],
+      "use_cases": [
+        "heterogeneous-hardware-clusters",
+        "business-unit-isolation",
+        "cost-optimization",
+        "resource-targeting"
+      ],
+      "created_date": "2024-08-26",
+      "business_value": "high",
+      "technical_risk": "medium",
+      "customer_impact": "high"
+    }
+  ],
+  "categories": {
+    "infrastructure": {
+      "description": "Infrastructure enhancements and platform capabilities",
+      "samples": ["RHOAIRFE-159"]
+    }
+  },
+  "complexity_levels": {
+    "high": {
+      "description": "Complex features requiring 12+ weeks, multiple teams, significant architectural changes",
+      "samples": ["RHOAIRFE-159"]
+    }
+  },
+  "agent_usage": {
+    "parker_pm": {
+      "relevant_sections": [
+        "business_justification",
+        "stakeholders",
+        "customer_validation",
+        "business_value"
+      ],
+      "analysis_focus": "prioritization and business impact assessment"
+    },
+    "archie_architect": {
+      "relevant_sections": [
+        "technical_requirements",
+        "components_affected",
+        "dependencies",
+        "implementation_details"
+      ],
+      "analysis_focus": "technical feasibility and architecture impact"
+    },
+    "stella_staff_engineer": {
+      "relevant_sections": [
+        "success_criteria",
+        "testing_requirements",
+        "risks_and_mitigations",
+        "deployment_considerations"
+      ],
+      "analysis_focus": "completeness validation and technical review"
+    },
+    "derek_delivery_owner": {
+      "relevant_sections": [
+        "project_details",
+        "team_assignment",
+        "deployment_considerations",
+        "estimated_effort"
+      ],
+      "analysis_focus": "delivery planning and ticket creation"
+    }
+  },
+  "template_patterns": {
+    "enterprise_infrastructure": {
+      "description": "Large-scale infrastructure changes for enterprise customers",
+      "key_sections": [
+        "administrative_controls",
+        "multi_tenant_considerations",
+        "scalability_requirements",
+        "backwards_compatibility"
+      ],
+      "examples": ["RHOAIRFE-159"]
+    }
+  }
+}
