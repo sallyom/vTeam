@@ -1,0 +1,47 @@
+# RFE Builder - Local gitignore
+# Streamlit secrets and configuration
+.streamlit/secrets.toml
+.streamlit/config.toml
+
+# Environment variables and sensitive data
+.env
+.env.local
+.env.production
+*.key
+*.pem
+
+# Local development files
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Temporary files
+*.tmp
+*.bak
+*.log
