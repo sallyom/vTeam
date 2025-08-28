@@ -1,0 +1,224 @@
+{
+  "version": "1.0",
+  "last_updated": "2025-01-26",
+  "description": "Index of sample RFE prompts and templates for the RFE Builder system",
+  "samples": [
+    {
+      "id": "RHOAIRFE-159",
+      "title": "Enable Node Targeting for Workbench Creation in OpenShift AI Dashboard",
+      "file_path": "rfe-examples/RHOAIRFE-159.md",
+      "category": "infrastructure",
+      "complexity": "high",
+      "priority": "P0",
+      "estimated_effort": "12-16 weeks",
+      "story_points": 34,
+      "tags": [
+        "kubernetes",
+        "node-selection",
+        "hardware-targeting",
+        "openshift-ai",
+        "workbench",
+        "gpu-management",
+        "enterprise"
+      ],
+      "stakeholders": [
+        "product-management",
+        "engineering",
+        "customer-success",
+        "sre"
+      ],
+      "components": [
+        "dashboard-frontend",
+        "workbench-service",
+        "node-management",
+        "scheduler-integration"
+      ],
+      "use_cases": [
+        "heterogeneous-hardware-clusters",
+        "business-unit-isolation",
+        "cost-optimization",
+        "resource-targeting"
+      ],
+      "created_date": "2024-08-26",
+      "business_value": "high",
+      "technical_risk": "medium",
+      "customer_impact": "high"
+    },
+    {
+      "id": "RHOAIRFE-302",
+      "title": "Project-Level Resource Discovery in OpenShift AI Dashboard",
+      "file_path": "rfe-examples/RHOAIRFE-302.md",
+      "category": "user-experience",
+      "complexity": "medium",
+      "priority": "Critical",
+      "estimated_effort": "8-12 weeks",
+      "story_points": 21,
+      "tags": [
+        "multi-tenancy",
+        "resource-discovery",
+        "project-isolation",
+        "self-service",
+        "openshift-ai",
+        "dashboard",
+        "customization"
+      ],
+      "stakeholders": [
+        "product-management",
+        "engineering",
+        "ux-team",
+        "end-users"
+      ],
+      "components": [
+        "dashboard-frontend",
+        "resource-discovery-service",
+        "workbench-api",
+        "model-serving-api"
+      ],
+      "use_cases": [
+        "custom-image-development",
+        "project-specific-resources",
+        "administrative-flexibility",
+        "self-service-capabilities"
+      ],
+      "created_date": "2024-08-26",
+      "business_value": "high",
+      "technical_risk": "low",
+      "customer_impact": "high"
+    },
+    {
+      "id": "RHOAIRFE-390",
+      "title": "Manual Model Stop/Restart Capability for KServe in OpenShift AI",
+      "file_path": "rfe-examples/RHOAIRFE-390.md",
+      "category": "model-serving",
+      "complexity": "medium",
+      "priority": "Critical",
+      "estimated_effort": "10-14 weeks",
+      "story_points": 28,
+      "tags": [
+        "kserve",
+        "model-lifecycle",
+        "resource-management",
+        "gpu-optimization",
+        "openshift-ai",
+        "model-serving",
+        "cost-optimization"
+      ],
+      "stakeholders": [
+        "product-management",
+        "engineering",
+        "model-serving-team",
+        "end-users"
+      ],
+      "components": [
+        "kserve-infrastructure",
+        "dashboard-frontend",
+        "model-lifecycle-api",
+        "resource-controller"
+      ],
+      "use_cases": [
+        "emergency-model-shutdown",
+        "gpu-resource-optimization",
+        "scheduled-operations",
+        "development-workflows"
+      ],
+      "created_date": "2025-01-26",
+      "business_value": "high",
+      "technical_risk": "medium",
+      "customer_impact": "high"
+    }
+  ],
+  "categories": {
+    "infrastructure": {
+      "description": "Infrastructure enhancements and platform capabilities",
+      "samples": ["RHOAIRFE-159"]
+    },
+    "user-experience": {
+      "description": "User interface and experience improvements",
+      "samples": ["RHOAIRFE-302"]
+    },
+    "model-serving": {
+      "description": "Model deployment and lifecycle management capabilities",
+      "samples": ["RHOAIRFE-390"]
+    }
+  },
+  "complexity_levels": {
+    "high": {
+      "description": "Complex features requiring 12+ weeks, multiple teams, significant architectural changes",
+      "samples": ["RHOAIRFE-159"]
+    },
+    "medium": {
+      "description": "Moderate features requiring 8-14 weeks, cross-team coordination, moderate complexity",
+      "samples": ["RHOAIRFE-302", "RHOAIRFE-390"]
+    }
+  },
+  "agent_usage": {
+    "parker_pm": {
+      "relevant_sections": [
+        "business_justification",
+        "stakeholders",
+        "customer_validation",
+        "business_value"
+      ],
+      "analysis_focus": "prioritization and business impact assessment"
+    },
+    "archie_architect": {
+      "relevant_sections": [
+        "technical_requirements",
+        "components_affected",
+        "dependencies",
+        "implementation_details"
+      ],
+      "analysis_focus": "technical feasibility and architecture impact"
+    },
+    "stella_staff_engineer": {
+      "relevant_sections": [
+        "success_criteria",
+        "testing_requirements",
+        "risks_and_mitigations",
+        "deployment_considerations"
+      ],
+      "analysis_focus": "completeness validation and technical review"
+    },
+    "derek_delivery_owner": {
+      "relevant_sections": [
+        "project_details",
+        "team_assignment",
+        "deployment_considerations",
+        "estimated_effort"
+      ],
+      "analysis_focus": "delivery planning and ticket creation"
+    }
+  },
+  "template_patterns": {
+    "enterprise_infrastructure": {
+      "description": "Large-scale infrastructure changes for enterprise customers",
+      "key_sections": [
+        "administrative_controls",
+        "multi_tenant_considerations",
+        "scalability_requirements",
+        "backwards_compatibility"
+      ],
+      "examples": ["RHOAIRFE-159"]
+    },
+    "user_experience_enhancement": {
+      "description": "UI/UX improvements focused on user productivity and self-service",
+      "key_sections": [
+        "use_cases",
+        "user_experience_criteria",
+        "workflow_integration",
+        "backwards_compatibility"
+      ],
+      "examples": ["RHOAIRFE-302"]
+    },
+    "model_lifecycle_management": {
+      "description": "Model serving and lifecycle control features",
+      "key_sections": [
+        "resource_management",
+        "api_design",
+        "operational_workflows",
+        "cost_optimization"
+      ],
+      "examples": ["RHOAIRFE-390"]
+    }
+  }
+}
