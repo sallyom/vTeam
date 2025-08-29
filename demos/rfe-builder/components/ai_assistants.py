@@ -8,8 +8,10 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 from ai_models.cost_tracker import CostTracker
 from ai_models.prompt_manager import PromptManager
-from anthropic import Anthropic, AnthropicVertex
+from ai_models.anthropic_client import get_anthropic_client, get_model_name
 from data.rfe_models import RFE, AgentRole
+from typing import Optional, Union
+from anthropic import Anthropic, AnthropicVertex
 
 
 class AgentAIAssistant:
@@ -21,33 +23,11 @@ class AgentAIAssistant:
         self.cost_tracker = CostTracker()
 
         # Initialize Anthropic client
-        self.anthropic_client = self._get_anthropic_client()
+        self.anthropic_client: Optional[Union[Anthropic, AnthropicVertex]] = self._get_anthropic_client()
 
-    def _get_anthropic_client(self) -> Optional[Anthropic]:
+    def _get_anthropic_client(self) -> Optional[Union[Anthropic, AnthropicVertex]]:
         """Get Anthropic client with error handling"""
-        try:
-            import os
-
-            # Check for Vertex AI configuration first
-            if os.getenv("CLAUDE_CODE_USE_VERTEX") == "1":
-                project_id = os.getenv("ANTHROPIC_VERTEX_PROJECT_ID")
-                region = os.getenv("CLOUD_ML_REGION")
-                if project_id and region:
-                    return AnthropicVertex(
-                        project_id=project_id,
-                        region=region
-                    )
-            
-            # Fallback to direct API key
-            if hasattr(st, "secrets") and "ANTHROPIC_API_KEY" in st.secrets:
-                return Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-            else:
-                api_key = os.getenv("ANTHROPIC_API_KEY")
-                if api_key:
-                    return Anthropic(api_key=api_key)
-        except Exception:
-            pass
-        return None
+        return get_anthropic_client(show_errors=False)
 
     def render_assistance_panel(
         self, rfe: RFE, context: Optional[Dict[str, Any]] = None
@@ -91,9 +71,8 @@ class AgentAIAssistant:
                 prompt_template, **prompt_context
             )
 
-            # Get model from environment or use default
-            import os
-            model = os.getenv("ANTHROPIC_SMALL_FAST_MODEL", "claude-3-haiku-20240307")
+            # Get model from configuration
+            model = get_model_name("claude-3-haiku-20240307")
 
             # Make API call
             response = self.anthropic_client.messages.create(

@@ -95,6 +95,10 @@ The RFE Builder implements a 7-agent workflow system:
    export ANTHROPIC_MODEL='claude-sonnet-4@20250514'
    export ANTHROPIC_SMALL_FAST_MODEL='claude-3-5-haiku@20241022'
 
+   # Optional: Configure timeouts and retry behavior
+   export ANTHROPIC_TIMEOUT=30.0  # Connection timeout in seconds
+   export ANTHROPIC_MAX_RETRIES=3  # Maximum retry attempts
+
    # Install additional dependencies for Vertex AI
    uv pip install "anthropic[vertex]" google-cloud-aiplatform
 
@@ -179,6 +183,16 @@ If you see "I'm having trouble connecting to the AI service" with Vertex AI:
    - Wrong project ID: Verify your GCP project has Vertex AI API enabled
    - Missing dependencies: Ensure `anthropic[vertex]` and `google-cloud-aiplatform` are installed
    - Incorrect region: Use a region that supports Claude models (e.g., `us-east5`, `us-central1`)
+   - Unsupported model: Verify your model is supported (see supported models below)
+   - Connection timeouts: Increase `ANTHROPIC_TIMEOUT` for slow networks
+   - Intermittent failures: The system will retry up to `ANTHROPIC_MAX_RETRIES` times automatically
+
+#### Supported Vertex AI Models
+- `claude-3-5-sonnet@20241022` (recommended)
+- `claude-3-5-haiku@20241022` (fast, cost-effective)
+- `claude-sonnet-4@20250514` (latest, most capable)
+- `claude-3-sonnet@20240229`
+- `claude-3-haiku@20240307`
 
 #### Direct API Issues
 If using direct Anthropic API:
