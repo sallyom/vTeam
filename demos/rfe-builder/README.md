@@ -99,8 +99,8 @@ The RFE Builder implements a 7-agent workflow system:
    export ANTHROPIC_TIMEOUT=30.0  # Connection timeout in seconds
    export ANTHROPIC_MAX_RETRIES=3  # Maximum retry attempts
 
-   # Install additional dependencies for Vertex AI
-   uv pip install "anthropic[vertex]" google-cloud-aiplatform
+   # Dependencies are included in requirements.txt
+   # No additional installation needed if using requirements.txt
 
    # Ensure Google Cloud authentication is configured
    gcloud auth application-default login

@@ -36,7 +36,11 @@ def validate_model_name(model: str) -> Optional[str]:
         Error message if validation fails, None if valid
     """
     if not model:
-        return "Model name cannot be empty"
+        return "Model name cannot be empty or None"
+    
+    # Handle whitespace-only strings
+    if not model.strip():
+        return "Model name cannot be empty or whitespace"
     
     if model not in SUPPORTED_VERTEX_MODELS:
         return (
@@ -64,9 +68,9 @@ def validate_vertex_config(project_id: Optional[str], region: Optional[str]) -> 
     if not region:
         return "Missing CLOUD_ML_REGION environment variable"
     
-    # Validate project ID format (alphanumeric, hyphens, 6-30 chars)
-    if not re.match(r'^[a-z0-9][a-z0-9\-]{4,28}[a-z0-9]$', project_id):
-        return f"Invalid project ID format: '{project_id}'. Must be 6-30 characters, lowercase letters, numbers, and hyphens only."
+    # Validate project ID format (alphanumeric, hyphens, 6-30 chars, cannot start with number)
+    if not re.match(r'^[a-z][a-z0-9\-]{4,28}[a-z0-9]$', project_id):
+        return f"Invalid project ID format: '{project_id}'. Must be 6-30 characters, start with lowercase letter, contain only lowercase letters, numbers, and hyphens."
     
     # Validate region format (e.g., us-east5, europe-west1)
     if not re.match(r'^[a-z]+-[a-z]+\d+$', region):
