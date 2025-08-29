@@ -76,12 +76,34 @@ The RFE Builder implements a 7-agent workflow system:
    ```
 
 4. **Configure AI features (Phase 2 - Optional)**
+
+   **Option A: Direct Anthropic API (Standard)**
    ```bash
    # Copy secrets template
    cp .streamlit/secrets.toml.template .streamlit/secrets.toml
 
    # Edit .streamlit/secrets.toml and add your Anthropic API key
    # Get your key from: https://console.anthropic.com/
+   ```
+
+   **Option B: Google Cloud Vertex AI (Enterprise)**
+   ```bash
+   # Set environment variables for Vertex AI
+   export CLAUDE_CODE_USE_VERTEX=1
+   export CLOUD_ML_REGION=us-east5  # Your preferred region
+   export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id
+   export ANTHROPIC_MODEL='claude-sonnet-4@20250514'
+   export ANTHROPIC_SMALL_FAST_MODEL='claude-3-5-haiku@20241022'
+
+   # Optional: Configure timeouts and retry behavior
+   export ANTHROPIC_TIMEOUT=30.0  # Connection timeout in seconds
+   export ANTHROPIC_MAX_RETRIES=3  # Maximum retry attempts
+
+   # Dependencies are included in requirements.txt
+   # No additional installation needed if using requirements.txt
+
+   # Ensure Google Cloud authentication is configured
+   gcloud auth application-default login
    ```
 
 5. **Run the application**
@@ -135,6 +157,48 @@ Each agent role has specific capabilities with AI-powered assistance:
   - Generate JIRA tickets and development tasks with AI assistance
 - **Other Agents**: Specialized assessment functions with role-specific AI guidance
 
+## 🔧 Troubleshooting
+
+### AI Configuration Issues
+
+#### Vertex AI Connection Problems
+If you see "I'm having trouble connecting to the AI service" with Vertex AI:
+
+1. **Verify environment variables are set:**
+   ```bash
+   echo $CLAUDE_CODE_USE_VERTEX
+   echo $ANTHROPIC_VERTEX_PROJECT_ID
+   echo $CLOUD_ML_REGION
+   ```
+
+2. **Test your configuration:**
+   ```bash
+   # Verify Google Cloud authentication works
+   gcloud auth list
+   gcloud config get-value project
+   ```
+
+3. **Common issues:**
+   - Missing Google Cloud authentication: Run `gcloud auth application-default login`
+   - Wrong project ID: Verify your GCP project has Vertex AI API enabled
+   - Missing dependencies: Ensure `anthropic[vertex]` and `google-cloud-aiplatform` are installed
+   - Incorrect region: Use a region that supports Claude models (e.g., `us-east5`, `us-central1`)
+   - Unsupported model: Verify your model is supported (see supported models below)
+   - Connection timeouts: Increase `ANTHROPIC_TIMEOUT` for slow networks
+   - Intermittent failures: The system will retry up to `ANTHROPIC_MAX_RETRIES` times automatically
+
+#### Supported Vertex AI Models
+- `claude-3-5-sonnet@20241022` (recommended)
+- `claude-3-5-haiku@20241022` (fast, cost-effective)
+- `claude-sonnet-4@20250514` (latest, most capable)
+- `claude-3-sonnet@20240229`
+- `claude-3-haiku@20240307`
+
+#### Direct API Issues
+If using direct Anthropic API:
+- Verify your API key in `.streamlit/secrets.toml`
+- Check your account has sufficient credits at https://console.anthropic.com/
+
 ## 🧪 Testing
 
 ### Run Tests
@@ -177,13 +241,25 @@ rfe-builder/
 │   └── rfe_models.py          # Data models and state management
 ├── components/
 │   ├── __init__.py
-│   └── workflow.py            # Workflow visualization components
+│   ├── workflow.py            # Workflow visualization components
+│   ├── chat_interface.py      # AI-powered conversational interface
+│   └── ai_assistants.py       # Agent-specific AI assistants
+├── ai_models/
+│   ├── __init__.py
+│   ├── cost_tracker.py        # AI usage cost tracking
+│   └── prompt_manager.py      # AI prompt management
+├── prompts/
+│   ├── conversational_rfe_creation.yaml
+│   └── agents/                # Agent-specific prompt templates
 ├── pages/
 │   └── parker_pm.py           # Agent-specific page (example)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_rfe_models.py     # Model tests
 │   └── test_workflow.py       # Workflow tests
+├── .streamlit/
+│   ├── secrets.toml.template  # Configuration template
+│   └── secrets.toml           # API credentials (not in git)
 ├── .github/
 │   └── workflows/
 │       └── ci.yml             # CI/CD pipeline

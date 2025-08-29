@@ -12,7 +12,9 @@ import streamlit as st
 import yaml
 from ai_models.cost_tracker import CostTracker
 from ai_models.prompt_manager import PromptManager
-from anthropic import Anthropic
+from ai_models.anthropic_client import get_anthropic_client, get_model_name
+from typing import Optional, Union
+from anthropic import Anthropic, AnthropicVertex
 from data.rfe_models import RFE, AgentRole
 
 
@@ -24,7 +26,7 @@ class ChatInterface:
         self.cost_tracker = CostTracker()
 
         # Initialize Anthropic client if API key is available
-        self.anthropic_client = None
+        self.anthropic_client: Optional[Union[Anthropic, AnthropicVertex]] = None
         self._initialize_anthropic()
 
         # Session state keys for chat
@@ -33,27 +35,9 @@ class ChatInterface:
         if "current_rfe_draft" not in st.session_state:
             st.session_state.current_rfe_draft = {}
 
-    def _initialize_anthropic(self):
+    def _initialize_anthropic(self) -> None:
         """Initialize Anthropic client with API key from environment or secrets"""
-        try:
-            # Try to get API key from Streamlit secrets first
-            if hasattr(st, "secrets") and "ANTHROPIC_API_KEY" in st.secrets:
-                api_key = st.secrets["ANTHROPIC_API_KEY"]
-                self.anthropic_client = Anthropic(api_key=api_key)
-            else:
-                # Fallback to environment variable
-                import os
-
-                api_key = os.getenv("ANTHROPIC_API_KEY")
-                if api_key:
-                    self.anthropic_client = Anthropic(api_key=api_key)
-                else:
-                    st.warning(
-                        "⚠️ Anthropic API key not found. Please set "
-                        "ANTHROPIC_API_KEY in secrets.toml or environment variables."
-                    )
-        except Exception as e:
-            st.error(f"Failed to initialize Anthropic client: {e}")
+        self.anthropic_client = get_anthropic_client(show_errors=True)
 
     def render_conversational_rfe_creator(self):
         """Render the main conversational RFE creation interface"""
@@ -91,7 +75,7 @@ class ChatInterface:
     def _render_model_info(self):
         """Display API provider and model information"""
         # Get current model configuration
-        model = getattr(st.secrets, "ANTHROPIC_MODEL", "claude-4-sonnet-20250514")
+        model = get_model_name("claude-4-sonnet-20250514")
 
         # Connection status
         status_icon = "🟢" if self.anthropic_client else "🔴"
@@ -227,8 +211,8 @@ class ChatInterface:
         start_time = time.time()
 
         try:
-            # Get model from secrets or use default
-            model = getattr(st.secrets, "ANTHROPIC_MODEL", "claude-4-sonnet-20250514")
+            # Get model from configuration
+            model = get_model_name("claude-4-sonnet-20250514")
 
             response = self.anthropic_client.messages.create(
                 model=model,
@@ -556,6 +540,7 @@ class ChatInterface:
                 "success_criteria": rfe.success_criteria or "Not provided",
                 "current_step": rfe.current_step,
                 "rfe_id": rfe.id,
+                "agent_role": agent_role.value,
             }
 
             formatted_prompt = self.prompt_manager.format_prompt(

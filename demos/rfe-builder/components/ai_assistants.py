@@ -8,8 +8,10 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 from ai_models.cost_tracker import CostTracker
 from ai_models.prompt_manager import PromptManager
-from anthropic import Anthropic
+from ai_models.anthropic_client import get_anthropic_client, get_model_name
 from data.rfe_models import RFE, AgentRole
+from typing import Optional, Union
+from anthropic import Anthropic, AnthropicVertex
 
 
 class AgentAIAssistant:
@@ -21,22 +23,11 @@ class AgentAIAssistant:
         self.cost_tracker = CostTracker()
 
         # Initialize Anthropic client
-        self.anthropic_client = self._get_anthropic_client()
+        self.anthropic_client: Optional[Union[Anthropic, AnthropicVertex]] = self._get_anthropic_client()
 
-    def _get_anthropic_client(self) -> Optional[Anthropic]:
+    def _get_anthropic_client(self) -> Optional[Union[Anthropic, AnthropicVertex]]:
         """Get Anthropic client with error handling"""
-        try:
-            if hasattr(st, "secrets") and "ANTHROPIC_API_KEY" in st.secrets:
-                return Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
-            else:
-                import os
-
-                api_key = os.getenv("ANTHROPIC_API_KEY")
-                if api_key:
-                    return Anthropic(api_key=api_key)
-        except Exception:
-            pass
-        return None
+        return get_anthropic_client(show_errors=False)
 
     def render_assistance_panel(
         self, rfe: RFE, context: Optional[Dict[str, Any]] = None
@@ -80,9 +71,12 @@ class AgentAIAssistant:
                 prompt_template, **prompt_context
             )
 
+            # Get model from configuration
+            model = get_model_name("claude-3-haiku-20240307")
+
             # Make API call
             response = self.anthropic_client.messages.create(
-                model="claude-3-haiku-20240307",
+                model=model,
                 max_tokens=800,
                 system=formatted_prompt["system"],
                 messages=[{"role": "user", "content": formatted_prompt["user"]}],
