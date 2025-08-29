@@ -207,8 +207,6 @@ def get_anthropic_client(show_errors: bool = True) -> Optional[Union[Anthropic, 
     except Exception as e:
         if show_errors:
             st.error(f"Failed to initialize Anthropic client: {e}")
-            import traceback
-            st.error(f"Full traceback: {traceback.format_exc()}")
         return None
 
 
