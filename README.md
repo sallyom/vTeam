@@ -1,184 +1,150 @@
-# RHOAI AI Feature Sizing
+# RFE Refiner - Multi-Agent Feature Refinement System
 
-An autonomous AI agent that analyzes JIRA features and creates comprehensive implementation plans with detailed epics and stories.
+A multi-agent system built with LlamaIndex that analyzes Request for Enhancement (RFE) descriptions using specialized AI personas with domain expertise and RAG-powered knowledge bases.
 
-## 🚀 Quick Start
+## Overview
 
-### CLI Usage
+The RFE Refiner uses 7 specialized AI agents working together to analyze feature requirements:
+
+- **UX Designer (UXD)** - User experience, interface design, accessibility
+- **Product Manager (PM)** - Business requirements, prioritization, stakeholder alignment  
+- **Backend Engineer** - System architecture, APIs, database design
+- **Frontend Engineer** - React implementation, TypeScript, state management
+- **Architect** - Overall system design, integration patterns, scalability
+- **Product Owner** - Business value, acceptance criteria, stakeholder management
+- **SME/Researcher** - Domain expertise, industry best practices, research
+
+## Current Features
+
+- **Multi-Agent Analysis**: Each agent analyzes RFEs from their specialized perspective
+- **RAG Knowledge Bases**: Agents access domain-specific knowledge from configured data sources
+- **Hybrid Data Architecture**: Python pipeline for advanced data ingestion + TypeScript runtime
+- **GitHub Integration**: Direct repository indexing for real documentation
+- **Event-Driven Workflow**: Real-time progress tracking and state management
+- **Structured Output**: JSON analysis reports with complexity estimates and recommendations
+
+## Architecture
+
+### Hybrid System Design
+```
+┌─────────────────────────────┐    ┌─────────────────────────────┐
+│     Python Pipeline         │    │   TypeScript Application    │
+│                             │    │                             │
+│ • GitHub Repository Reader  │────│ • Agent Workflow Engine     │
+│ • Vector Store Creation     │    │ • RAG Retrieval System      │
+│ • Document Indexing         │    │ • Multi-Agent Coordination  │
+└─────────────────────────────┘    └─────────────────────────────┘
+```
+
+### Agent Workflow
+1. **RFE Input** - User submits feature description
+2. **Multi-Agent Analysis** - All 7 agents analyze simultaneously 
+3. **Knowledge Retrieval** - RAG system provides domain-specific context
+4. **Structured Output** - JSON reports with analysis and recommendations
+
+## Quick Start
+
+### 1. Install Dependencies
 ```bash
-# Autonomous feature planning 
-./plan-feature.sh RHOAIENG-12345
-
-# Interactive planning with custom RAG stores
-python cli_agent.py chat RHOAIENG-12345 --rag-stores rhoai_docs github_repos
-
-# List available RAG stores
-python cli_agent.py list-stores
+npm install
 ```
 
-### Web UI Usage
+### 2. Configure Environment
 ```bash
-# Start the API server with web interface
-python run_simple_api.py
-
-# Open web interface at http://localhost:8001
-# - Create and manage sessions
-# - Configure RAG stores and ingest documents  
-# - Chat with AI agent in real-time
-# - View refinement documents and JIRA plans
-```
-
-### API Integration
-```bash
-# Create session via API
-curl -X POST http://localhost:8001/sessions \
-  -H "Content-Type: application/json" \
-  -d '{"jira_key": "RHOAIENG-12345", "rag_store_ids": ["default"]}'
-
-# Interactive API documentation at http://localhost:8001/docs
-```
-
-## 📋 Overview
-
-**RHOAI AI Feature Sizing** is an intelligent system that transforms JIRA feature requests into actionable implementation plans. Using advanced AI agents powered by Llama Stack, it autonomously:
-
-- 📖 **Analyzes** JIRA issues and identifies affected components
-- 🔍 **Researches** relevant documentation via RAG (Retrieval-Augmented Generation)
-- 📝 **Creates** detailed refinement documents with technical specifications
-- 🎯 **Generates** structured JIRA epics and stories with acceptance criteria
-- ✅ **Validates** plan coverage and completeness
-- 💾 **Persists** all artifacts in a database for team collaboration
-
-## 🏗️ Architecture (High-Level)
-
-The system uses a **microservices architecture** with an **autonomous agent pattern**:
-
-```
-🤖 Autonomous Agent ──► 🧠 Llama Stack ──► 🔧 Custom Tools
-    │                      │                  │
-    ├─ Single-prompt loop  ├─ RAG queries     ├─ Database operations
-    ├─ Self-directed       ├─ JIRA fetching   ├─ Document generation
-    └─ Tool integration    └─ Model inference └─ Plan validation
-```
-
-**Key Patterns:**
-- **Agent-Driven**: Single autonomous loop with tool access
-- **RAG-Enhanced**: Context-aware planning using internal documentation
-- **Database-First**: All artifacts persisted for collaboration and iteration
-- **Tool-Extensible**: Custom Llama Stack tools for specialized operations
-
-*For detailed architecture information, see [ARCHITECTURE.md](docs/ARCHITECTURE.md)*
-
-## 🛠️ Getting Started
-
-### Prerequisites
-- **Python 3.12+** and **uv** package manager
-- **Llama Stack server** (local or remote)
-- **Database** (PostgreSQL recommended, SQLite for development)
-- **JIRA access** with API credentials
-
-### Quick Setup
-```bash
-# Clone and install
-git clone <repo-url> && cd rhoai-ai-feature-sizing
-uv sync
-
-# Configure environment
+# Copy environment template
 cp env.template .env
-# Edit .env with your actual configuration values
 
-# Start planning
-./plan-feature.sh RHOAIENG-12345
+# Edit .env with your API keys
+export OPENAI_API_KEY="sk-your-openai-api-key"
+export GITHUB_TOKEN="github_pat_your-token"  # optional
 ```
 
-*For comprehensive setup instructions, see [GETTING_STARTED.md](docs/GETTING_STARTED.md)*
+### 3. Start Application
+```bash
+npm start
+```
 
-## 🚀 Deployment
+The application will run with sample knowledge bases. For enhanced RAG with real data, see the Python ingestion setup below.
 
-### Local Development
-- **Docker Compose** with Ollama for local LLM inference
-- **SQLite** database for quick iteration
-- **Hot reload** for development
+## Enhanced RAG Setup (Optional)
 
-### OpenShift Production
-- **Kubernetes-native** deployment with PostgreSQL
-- **External LLM APIs** (OpenAI, Azure OpenAI, Mistral, etc.)
-- **Horizontal scaling** and persistent storage
-- **CI/CD ready** with custom Docker images
+### Python Pipeline for Real Data
+```bash
+# Set up Python environment
+cd python-rag-ingestion/
+./setup.sh
 
-*For deployment guides, see [DEPLOYMENT.md](docs/DEPLOYMENT.md)*
+# Run ingestion for enhanced knowledge bases
+python simple_ingest.py
+```
 
-## 📖 Documentation
+This creates vector indexes from GitHub repositories that the TypeScript application automatically loads.
 
-| Document | Purpose |
-|----------|---------|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Detailed system architecture, patterns, and design decisions |
-| [GETTING_STARTED.md](docs/GETTING_STARTED.md) | Comprehensive setup, installation, and configuration |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production deployment guides for various environments |
-| [CLI_GUIDE.md](docs/CLI_GUIDE.md) | Complete CLI reference and usage examples |
-| [API_REFERENCE.md](docs/API_REFERENCE.md) | Comprehensive REST API documentation and integration guides |
+## Agent Configuration
 
-## 🎯 Key Features
+Agents are configured in YAML files in `src/agents/`. Each agent specifies:
 
-### ✅ Autonomous Planning Agent
-- **Single-prompt loop** that self-directs through planning phases
-- **RAG integration** for context-aware feature analysis
-- **Custom tools** for database persistence and document generation
-- **Validation system** to ensure plan completeness
+- **Persona & Role** - Name and domain expertise
+- **Data Sources** - Knowledge base directories or GitHub repositories  
+- **Analysis Prompts** - Structured prompts for consistent output
+- **Sample Knowledge** - Fallback knowledge when no custom data available
 
-### ✅ Database-Backed Persistence
-- **Session management** with unique identifiers
-- **Structured storage** of refinement docs and JIRA plans
-- **Normalized data** for querying epics, stories, and relationships
-- **Multi-user support** with proper isolation
+Example agent configuration:
+```yaml
+name: "Frontend Engineer"
+persona: "FRONTEND_ENG"
+expertise: ["react", "typescript", "ui-components"]
 
-### ✅ Flexible CLI Interface
-- **Autonomous mode**: Complete hands-off planning
-- **Interactive mode**: Chat-based refinement and iteration
-- **Batch operations**: Process multiple features
-- **Output formats**: Markdown, JSON, and database storage
+dataSources:
+  - "frontend-patterns"
+  - name: "react-docs"
+    type: "github"
+    source: "facebook/react"
+    options:
+      path: "docs/"
+```
 
-### ✅ Current Features
-- **Web UI**: React-based interface with PatternFly components for comprehensive session management
-- **Real-time Updates**: Live session monitoring and chat interface for collaboration
-- **RAG Store Management**: Create, configure, and manage knowledge bases via web interface
-- **Advanced Document Ingestion**: GitHub repositories, web scraping, and LlamaIndex processing
-- **Session-Specific Context**: Configure RAG stores per planning session for targeted research
-- **API Integration**: Full REST API for external system integration
+## Data Sources
 
-### 🚧 Planned Features
-- **Team Collaboration**: Comments, reviews, and approval workflows
-- **Integration Hooks**: Webhook support for CI/CD pipelines  
-- **Advanced Analytics**: Feature complexity metrics and estimation accuracy
-- **Multi-tenancy**: Organization-level isolation and role-based access control
+### Local Directories
+Place documentation in `data/` subdirectories matching agent data source names.
 
-## 🔧 Technology Stack
+### GitHub Repositories  
+Configure in agent YAML files. Python pipeline handles cloning and indexing.
 
-- **Backend**: Python 3.12+, FastAPI, SQLAlchemy
-- **AI/ML**: Llama Stack, RAG with Faiss vector databases, LlamaIndex document processing
-- **Frontend**: React + TypeScript, PatternFly UI components  
-- **Database**: PostgreSQL (production), SQLite (development)
-- **RAG Systems**: Multiple vector databases, GitHub integration, web scraping
-- **Deployment**: Docker, Kubernetes, OpenShift
-- **Tools**: uv (package management), pytest (testing), webpack (frontend build)
+### Hybrid Loading
+1. **Python indexes** - Loaded first if available
+2. **Local directories** - TypeScript fallback for simple cases
+3. **Sample knowledge** - Built-in fallback for testing
 
-## 🤝 Contributing
+## Technical Stack
 
-We welcome contributions! Please see our development setup in [GETTING_STARTED.md](docs/GETTING_STARTED.md#development-setup).
+- **TypeScript** - Application runtime, agent coordination, workflow management
+- **Python** - Advanced data ingestion, GitHub readers, vector store creation
+- **LlamaIndex** - RAG system, vector stores, document processing
+- **OpenAI** - Language model and embeddings
+- **YAML** - Agent configuration with JSON schema validation
+
+## Development
 
 ```bash
-# Development workflow
-uv sync --dev
-uv run pytest
-uv run ruff format src/ tests/
+# Start with hot reload
+npm run dev
+
+# Test agent configurations
+node test-agents.js
 ```
 
-## 📞 Support
+## File Structure
 
-- **Documentation**: Check the docs/ directory for detailed guides
-- **Issues**: Report bugs and feature requests via GitHub Issues
-- **Discussions**: Join our community discussions for questions and ideas
+```
+/
+├── src/agents/          # Agent YAML configurations
+├── src/app/            # Core application logic
+├── python-rag-ingestion/  # Python data pipeline
+├── data/               # Local knowledge bases
+├── output/             # Generated indexes and storage
+└── components/         # UI components
+```
 
----
-
-**Ready to transform your feature planning process?** Start with our [Getting Started Guide](docs/GETTING_STARTED.md)! 🚀
+This system provides a foundation for multi-agent feature analysis with extensible agent configurations and flexible data source integration.
