@@ -5,33 +5,66 @@ Python-based data ingestion pipeline that processes GitHub repositories and crea
 ## Quick Setup
 
 ```bash
-# Run setup script
-./setup.sh
+# Install UV package manager (if not installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtual environment and install dependencies
+uv venv
+source .venv/bin/activate
+uv sync
+
+# Install package in editable mode
+uv pip install -e .
 
 # Set API keys
 export OPENAI_API_KEY="sk-your-openai-key" 
 export GITHUB_TOKEN="github_pat_your-token"
 
-# Run ingestion
-python simple_ingest.py
+# Run ingestion using the CLI
+rhoai-rag ingest --verbose
 ```
 
 ## Prerequisites
 
 - Python 3.9+
-- UV package manager (installed by setup.sh if not present)
+- UV package manager
 - OpenAI API key for embeddings
 - GitHub token for repository access (optional)
 
 ## Installation
 
-1. **Setup Environment**:
+1. **Install UV Package Manager** (if not already installed):
    ```bash
-   ./setup.sh
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   # or: pip install uv
    ```
-   Creates virtual environment and installs dependencies using UV.
 
-2. **Configure API Keys**:
+2. **Setup Environment**:
+   ```bash
+   # Create virtual environment
+   uv venv
+   source .venv/bin/activate
+   
+   # Install dependencies
+   uv sync
+   
+   # Install package in editable mode
+   uv pip install -e .
+   ```
+
+3. **Create Environment Configuration**:
+   ```bash
+   # Create .env file
+   cat > .env << EOL
+   # OpenAI API Key (Required)
+   OPENAI_API_KEY=your_openai_api_key_here
+
+   # GitHub Token (Required for GitHub sources)
+   GITHUB_TOKEN=github_pat_your_token_here
+   EOL
+   ```
+
+4. **Configure API Keys**:
    ```bash
    export OPENAI_API_KEY="sk-your-key"
    export GITHUB_TOKEN="github_pat_your-token"  # For GitHub sources
@@ -39,20 +72,31 @@ python simple_ingest.py
 
 ## Usage
 
-### Simple Ingestion (Recommended)
-```bash
-python simple_ingest.py
-```
-- Processes a single agent (Frontend Engineer by default)
-- Uses GitHub repository reader for real documentation
-- Tests with OpenDataHub Dashboard docs
+The `rhoai-rag` CLI tool is now available after installation.
 
-### Full Pipeline
+### List Available Agents
 ```bash
-python ingest.py  
+rhoai-rag list-agents
+```
+
+### Full Pipeline (All Agents)
+```bash
+rhoai-rag ingest --verbose
 ```
 - Processes all configured agents
 - Creates vector indexes for each agent's data sources
+
+### Test Specific Agent
+```bash
+rhoai-rag ingest --agents frontend_engineer --test
+```
+- Processes a single agent for testing
+- Includes validation and testing steps
+
+### Get Help
+```bash
+rhoai-rag --help
+```
 
 ## How It Works
 

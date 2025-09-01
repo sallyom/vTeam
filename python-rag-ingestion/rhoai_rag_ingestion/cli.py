@@ -288,19 +288,15 @@ class RAGIngestor:
         agent_output_dir = self.output_dir / agent_persona.lower()
         agent_output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create storage context
-        storage_context = StorageContext.from_defaults(persist_dir=str(agent_output_dir))
-        
-        # Create index
+        # Create index first with default storage context
         click.echo(f"🔮 Creating vector index for {agent_persona}...")
         index = VectorStoreIndex.from_documents(
             documents, 
-            storage_context=storage_context, 
             show_progress=True
         )
         
-        # Persist index
-        index.storage_context.persist()
+        # Persist index to the specified directory
+        index.storage_context.persist(persist_dir=str(agent_output_dir))
         
         # Save metadata
         metadata = {

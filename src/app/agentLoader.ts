@@ -12,7 +12,21 @@ const AgentConfigSchema = z.object({
 	isRootAgent: z.boolean().default(false),
 	expertise: z.array(z.string()),
 	systemMessage: z.string(),
-	dataSources: z.array(z.string()),
+	dataSources: z.array(z.union([
+		z.string(), // Simple directory names like "backend-patterns"
+		z.object({
+			name: z.string(),
+			type: z.enum(["directory", "github", "web", "confluence", "notion"]),
+			source: z.string(),
+			options: z.object({
+				branch: z.string().optional(),
+				path: z.string().optional(),
+				recursive: z.boolean().default(true).optional(),
+				fileTypes: z.array(z.string()).optional(),
+				chunkingStrategy: z.enum(["sentence", "semantic", "token", "paragraph"]).default("semantic").optional(),
+			}).optional(),
+		})
+	])),
 	analysisPrompt: z.object({
 		template: z.string(),
 		templateVars: z.array(z.string()),
@@ -23,6 +37,19 @@ const AgentConfigSchema = z.object({
 
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 
+export type DataSource = string | {
+	name: string;
+	type: "directory" | "github" | "web" | "confluence" | "notion";
+	source: string;
+	options?: {
+		branch?: string;
+		path?: string;
+		recursive?: boolean;
+		fileTypes?: string[];
+		chunkingStrategy?: "sentence" | "semantic" | "token" | "paragraph";
+	};
+};
+
 // Runtime agent persona configuration
 export type AgentPersonaConfig = {
 	name: string;
@@ -30,7 +57,7 @@ export type AgentPersonaConfig = {
 	expertise: string[];
 	analysisPrompt: PromptTemplate;
 	systemMessage: string;
-	dataSources: string[];
+	dataSources: DataSource[];
 	isRootAgent: boolean;
 	tools: any[];
 	sampleKnowledge: string;
@@ -159,9 +186,22 @@ export class AgentLoader {
 	/**
 	 * Get data sources for a specific agent
 	 */
-	getAgentDataSources(persona: string): string[] {
+	getAgentDataSources(persona: string): DataSource[] {
 		const config = this.agentPersonas[persona];
 		return config ? config.dataSources : [];
+	}
+
+	/**
+	 * Get simplified data source names for a specific agent (for backwards compatibility)
+	 */
+	getAgentDataSourceNames(persona: string): string[] {
+		const config = this.agentPersonas[persona];
+		if (!config) return [];
+
+		return config.dataSources.map(ds => {
+			if (typeof ds === 'string') return ds;
+			return ds.name;
+		});
 	}
 
 	/**
@@ -190,11 +230,18 @@ export class AgentLoader {
 
 		for (const [persona, config] of Object.entries(this.agentPersonas)) {
 			for (const dataSource of config.dataSources) {
-				const dataPath = path.join(dataDir, dataSource);
+				// For object data sources, we only validate directory types
+				if (typeof dataSource === 'object' && dataSource.type !== 'directory') {
+					continue; // Skip non-directory sources like github, web, etc.
+				}
+
+				const sourceName = typeof dataSource === 'string' ? dataSource : dataSource.name;
+				const dataPath = path.join(dataDir, sourceName);
+
 				if (fs.existsSync(dataPath)) {
-					existing.push(dataSource);
+					existing.push(sourceName);
 				} else {
-					missing.push(dataSource);
+					missing.push(sourceName);
 				}
 			}
 		}

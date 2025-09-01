@@ -72,10 +72,13 @@ The application will run with sample knowledge bases. For enhanced RAG with real
 ```bash
 # Set up Python environment
 cd python-rag-ingestion/
-./setup.sh
+
+# Follow setup instructions in python-rag-ingestion/README.md
+# Quick version:
+uv venv && source .venv/bin/activate && uv sync && uv pip install -e .
 
 # Run ingestion for enhanced knowledge bases
-python simple_ingest.py
+rhoai-rag ingest --verbose
 ```
 
 This creates vector indexes from GitHub repositories that the TypeScript application automatically loads.

@@ -7,7 +7,7 @@ import {
 import { SimpleDirectoryReader } from "@llamaindex/readers/directory";
 import fs from "node:fs";
 import path from "node:path";
-import { getAgentLoader, type AgentPersona } from "./agentLoader";
+import { getAgentLoader, type AgentPersona, type DataSource } from "./agentLoader";
 
 const STORAGE_DIR = "./output/llamacloud";
 const DATA_DIR = "./data";
@@ -60,12 +60,25 @@ async function createPersonaIndex(persona: AgentPersona): Promise<VectorStoreInd
 
 	// Load documents from all data sources for this agent
 	for (const dataSource of dataSources) {
-		const dataSourceDir = path.join(DATA_DIR, dataSource);
-		if (fs.existsSync(dataSourceDir)) {
-			const reader = new SimpleDirectoryReader();
-			const sourceDocuments = await reader.loadData({ directoryPath: dataSourceDir });
-			documents.push(...sourceDocuments);
+		// Handle both string and object data sources
+		if (typeof dataSource === 'string') {
+			// Simple string data source - use as directory name
+			const dataSourceDir = path.join(DATA_DIR, dataSource);
+			if (fs.existsSync(dataSourceDir)) {
+				const reader = new SimpleDirectoryReader();
+				const sourceDocuments = await reader.loadData({ directoryPath: dataSourceDir });
+				documents.push(...sourceDocuments);
+			}
+		} else if (dataSource.type === 'directory') {
+			// Object data source with type "directory"
+			const dataSourceDir = path.join(DATA_DIR, dataSource.source);
+			if (fs.existsSync(dataSourceDir)) {
+				const reader = new SimpleDirectoryReader();
+				const sourceDocuments = await reader.loadData({ directoryPath: dataSourceDir });
+				documents.push(...sourceDocuments);
+			}
 		}
+		// Skip other types like "github", "web", etc. as they're not local directories
 	}
 
 	// If no documents found, create sample data
