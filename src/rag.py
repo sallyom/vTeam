@@ -346,7 +346,7 @@ class RAGIngestor:
 def cli(ctx, version):
     """RHOAI RAG Ingestion Pipeline - Consolidated CLI Tool"""
     if version:
-        from . import __version__
+        from .rag.rhoai_rag_ingestion import __version__
         click.echo(f"rhoai-rag-ingestion {__version__}")
         return
     

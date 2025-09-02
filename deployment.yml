@@ -1,0 +1,25 @@
+name: rhoai-ai-feature-sizing
+
+control-plane:
+  port: 8000
+
+default-service: rfe-workflow
+
+services:
+  rfe-workflow:
+    name: RFE Analysis Workflow
+    source:
+      type: local
+      name: src
+    path: src/workflow:workflow
+    python-dependencies:
+      - llama-index-llms-openai>=0.3.2
+      - llama-index-core>=0.12.0
+      - pyyaml>=6.0
+
+ui:
+  name: Chat UI
+  port: 3000
+  source:
+    type: local
+    name: ui

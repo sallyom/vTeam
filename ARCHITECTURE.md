@@ -1,109 +1,179 @@
-# RFE Refiner - System Architecture
+# RHOAI AI Feature Sizing - System Architecture
 
 ## Overview
 
-The RFE Refiner implements a hybrid architecture combining Python-based data ingestion with TypeScript-based application runtime, designed for scalable multi-agent analysis workflows.
+RHOAI implements a production-ready architecture with **LlamaDeploy Python backend** and **@llamaindex/server TypeScript frontend**, designed for enterprise-grade multi-agent analysis workflows.
 
 ## Architecture Principles
 
-- **Separation of Concerns**: Data processing (Python) separate from application logic (TypeScript)
-- **Graceful Fallback**: Works with or without Python pipeline
-- **Event-Driven**: Asynchronous agent coordination
-- **Schema Validation**: Type-safe configurations and data flow
+- **Production First**: Built on LlamaDeploy for enterprise deployment and monitoring
+- **Native Python**: Full LlamaIndex capabilities with Python v0.12+ compatibility
+- **Modern Frontend**: Professional chat UI with @llamaindex/server
+- **API-Driven**: Complete REST API for programmatic access
+- **Workflow Orchestration**: Event-driven asynchronous agent coordination
+- **Observability**: Built-in monitoring, logging, and health checks
 
 ## System Components
 
-### Python Ingestion Pipeline
+### Python Backend (LlamaDeploy)
 
-**Purpose**: Batch processing of external data sources into vector indexes
+**Purpose**: Production workflow orchestration and multi-agent coordination
 
 ```
 ┌─────────────────────────────────────────┐
-│             PYTHON PIPELINE            │
+│          PYTHON BACKEND                 │
+│          (LlamaDeploy)                  │
 │                                         │
-│ 📥 Data Readers                        │  
-│   • GithubRepositoryReader             │
-│   • SimpleDirectoryReader              │
-│   • Built-in LlamaIndex readers        │
+│ 🔄 Workflow Engine                     │  
+│   • LlamaDeploy orchestration          │
+│   • Multi-agent coordination           │
+│   • Event-driven state management      │
+│                                         │
+│ 🤖 Agent System                       │
+│   • RFEAgentManager                    │
+│   • Persona-specific RAG retrieval     │
+│   • Analysis synthesis                 │
+│                                         │
+│ 📚 Knowledge Integration               │
+│   • Python RAG index loading           │
+│   • Vector similarity search           │
+│   • Context generation                 │
+│                                         │
+│ 🌐 API Services                       │
+│   • REST API endpoints                 │
+│   • Streaming responses                │
+│   • Health monitoring                  │
+└─────────────────────────────────────────┘
+```
+
+**Key Files**:
+- `backend/src/workflow.py` - LlamaDeploy workflow definition
+- `backend/src/agents.py` - Multi-agent management
+- `backend/llama_deploy.yml` - Deployment configuration
+
+**Services**: 
+- LlamaDeploy API Server (port 8000)
+- Multi-agent RFE workflow orchestration
+- Vector index management and RAG retrieval
+
+### TypeScript Frontend (@llamaindex/server)
+
+**Purpose**: Modern chat interface and user experience
+
+```
+┌─────────────────────────────────────────┐
+│       TYPESCRIPT FRONTEND              │
+│       (@llamaindex/server)             │
+│                                         │
+│ 💬 Chat Interface                      │
+│   • Professional chat UI               │
+│   • Streaming response handling        │
+│   • Starter questions                  │
+│                                         │
+│ 🔗 API Integration                     │
+│   • LlamaDeploy connection            │
+│   • Real-time workflow updates        │
+│   • Task management                   │
+│                                         │
+│ 🎨 User Experience                    │
+│   • Responsive design                 │
+│   • Progress indicators               │
+│   • Error handling                    │
+└─────────────────────────────────────────┘
+```
+
+**Key Files**:
+- `frontend/index.ts` - UI server configuration
+- `frontend/package.json` - Dependencies and scripts
+
+**Services**:
+- Frontend Server (port 3001)  
+- Chat UI with LlamaDeploy integration
+- Real-time workflow progress tracking
+
+### Python RAG Ingestion (Separate)
+
+**Purpose**: Knowledge base preparation and indexing
+
+```
+┌─────────────────────────────────────────┐
+│         RAG INGESTION PIPELINE         │
+│                                         │
+│ 📥 Data Sources                        │  
+│   • GitHub repositories                │
+│   • Local documentation                │
+│   • Web pages                          │
 │                                         │
 │ 🔄 Processing                          │
 │   • Document chunking                  │
-│   • Embedding generation               │
+│   • Embedding generation (OpenAI)      │
 │   • Metadata extraction                │
 │                                         │
-│ 💾 Storage Creation                    │
-│   • Vector stores (FAISS)              │
-│   • Document stores                    │
-│   • Index metadata                     │
+│ 💾 Index Creation                      │
+│   • FAISS vector stores                │
+│   • Persona-specific indices           │
+│   • Metadata and statistics            │
 └─────────────────────────────────────────┘
 ```
 
 **Key Files**:
-- `python-rag-ingestion/simple_ingest.py` - Main ingestion script
-- `python-rag-ingestion/setup.sh` - Environment setup
+- `python-rag-ingestion/rhoai_rag_ingestion/cli.py` - Ingestion pipeline
+- Agent configurations in `src/agents/*.yaml`
 
 **Output**: Vector indexes saved to `output/python-rag/{agent_name}/`
 
-### TypeScript Application
-
-**Purpose**: Real-time agent coordination and user interaction
-
-```
-┌─────────────────────────────────────────┐
-│           TYPESCRIPT APPLICATION        │
-│                                         │
-│ 📖 Storage Loading                     │
-│   • Python index detection             │
-│   • Fallback to local data             │
-│   • Agent configuration parsing        │
-│                                         │
-│ 🤖 Agent System                       │
-│   • Multi-agent coordination           │
-│   • RAG retrieval                      │
-│   • Workflow orchestration             │
-│                                         │
-│ 🔍 Runtime Services                    │
-│   • Vector similarity search           │
-│   • Context generation                 │
-│   • Event management                   │
-└─────────────────────────────────────────┘
-```
-
-**Key Files**:
-- `src/app/agents.ts` - Agent coordination
-- `src/app/hybrid-data.ts` - Data source management
-- `src/app/workflow.ts` - Workflow orchestration
-
 ## Data Flow
 
-### Ingestion Phase (Python)
+### Preparation Phase (Python Ingestion)
 
 1. **Agent Config Reading**: Parse YAML configurations from `src/agents/`
 2. **Source Processing**: Clone GitHub repositories, read local directories
 3. **Document Processing**: Chunk text, generate embeddings via OpenAI
-4. **Index Creation**: Build FAISS vector stores with metadata
-5. **Persistence**: Save indexes to shared filesystem location
+4. **Index Creation**: Build FAISS vector stores with persona-specific metadata
+5. **Persistence**: Save indexes to `output/python-rag/{agent_name}/`
 
-### Runtime Phase (TypeScript)
+### Runtime Phase (LlamaDeploy Workflow)
 
-1. **Index Loading**: Check for Python indexes, fall back to TypeScript generation
-2. **Agent Initialization**: Load configurations and RAG contexts
-3. **Query Processing**: User RFE input → multi-agent analysis
-4. **Context Retrieval**: Similarity search across agent knowledge bases
-5. **Response Generation**: Structured JSON output with analysis
+1. **User Input**: RFE submission via chat interface (port 3001)
+2. **Workflow Trigger**: LlamaDeploy receives task via API (port 8000)
+3. **Agent Initialization**: Load agent configs and RAG indices
+4. **Multi-Agent Analysis**: Parallel analysis by all 7 agent personas
+5. **Context Retrieval**: Vector similarity search for each agent's knowledge base
+6. **Synthesis**: Combine all agent analyses into comprehensive output
+7. **Deliverable Generation**: Create component teams, architecture, timeline
+8. **Streaming Response**: Real-time updates back to chat interface
+
+### API Access (Programmatic)
+
+1. **Task Creation**: POST to `/deployments/rhoai/tasks/create`
+2. **Event Streaming**: GET `/deployments/rhoai/tasks/{task_id}/events`
+3. **Result Retrieval**: Complete analysis results in structured JSON
 
 ## Component Communication
 
+### LlamaDeploy API
+
+Frontend and backend communicate via LlamaDeploy API:
+
+```
+Frontend (port 3001)  ←──HTTP API──→  LlamaDeploy (port 8000)
+│                                            │
+├── Chat interface                           ├── Workflow orchestration
+├── Real-time updates                        ├── Task management  
+└── Progress tracking                        └── Agent coordination
+```
+
 ### Shared Storage Schema
 
-Python and TypeScript communicate via filesystem:
+Python ingestion and backend share filesystem storage:
 
 ```
 output/python-rag/{agent_persona}/
-├── docstore.json       # Document content and metadata
-├── vector_store.json   # FAISS vector embeddings
-├── index_store.json    # Index configuration
-└── metadata.json       # Debug info and statistics
+├── docstore.json         # Document content and metadata
+├── default__vector_store.json  # FAISS vector embeddings  
+├── index_store.json      # LlamaIndex configuration
+├── graph_store.json      # Relationship data
+└── metadata.json         # Agent info and statistics
 ```
 
 ### Agent Configuration Schema
@@ -130,106 +200,176 @@ analysisPrompt:
   templateVars: ["rfe_description", "context"]
 ```
 
-## Agent System Architecture
+## LlamaDeploy Workflow Architecture
 
-### Agent Personas
+### Workflow Steps
 
-Each agent represents a specialized role with:
-- **Domain Expertise**: Configured areas of knowledge
-- **RAG Context**: Dedicated vector stores for domain-specific retrieval
-- **Analysis Prompt**: Structured template for consistent output
-- **Sample Knowledge**: Fallback knowledge base
+```mermaid
+graph TD
+    A[RFE Input] --> B[Start Analysis]
+    B --> C[Multi-Agent Analysis]
+    C --> D[Collect Results]
+    D --> E[Synthesize Analysis]
+    E --> F[Generate Deliverables]
+    F --> G[Complete Workflow]
+```
+
+### Agent Orchestration
+
+The `RFEWorkflow` coordinates all agent personas:
+
+```python
+class RFEWorkflow(Workflow):
+    @step
+    async def analyze_with_agents(self, ev: RFEAnalysisEvent):
+        # Parallel execution of all 7 agents
+        events = []
+        for persona, config in agent_personas.items():
+            analysis = await self.agent_manager.analyze_rfe(
+                persona, ev.rfe_description, config
+            )
+            events.append(AgentAnalysisCompleteEvent(...))
+        return events
+```
 
 ### Multi-Agent Coordination
 
 ```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│     PM      │    │    UXD       │    │ BACKEND_ENG │
-│   (Root)    │────│              │    │             │
-└─────────────┘    └──────────────┘    └─────────────┘
-       │                   │                   │
-       └───────────────────┼───────────────────┘
-                           │
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐
-│FRONTEND_ENG │    │  ARCHITECT   │    │PRODUCT_OWNER│
-│             │    │              │    │             │
-└─────────────┘    └──────────────┘    └─────────────┘
-       │                   │                   │
-       └───────────────────┼───────────────────┘
-                           │
-                  ┌──────────────┐
-                  │SME_RESEARCHER│
-                  │              │
-                  └──────────────┘
+┌─────────────────────────────────────────┐
+│           LlamaDeploy Workflow          │
+│                                         │
+│  ┌───────┐  ┌───────┐  ┌───────────┐   │
+│  │  PM   │  │ UXD   │  │BACKEND_ENG│   │
+│  └───────┘  └───────┘  └───────────┘   │
+│      │          │           │          │
+│      └──────────┼───────────┘          │
+│                 │                      │
+│  ┌───────────┐  │  ┌───────────────┐   │
+│  │FRONTEND_  │  │  │   ARCHITECT   │   │
+│  │   ENG     │  │  │               │   │
+│  └───────────┘  │  └───────────────┘   │
+│      │          │           │          │
+│      └──────────┼───────────┘          │
+│                 │                      │
+│         ┌───────────────┐              │
+│         │PRODUCT_OWNER │              │
+│         │SME_RESEARCHER│              │
+│         └───────────────┘              │
+│                                         │
+│     → Synthesis → Deliverables         │
+└─────────────────────────────────────────┘
 ```
 
-### Workflow Execution
+### Workflow Events
 
-1. **Parallel Analysis**: All agents analyze RFE simultaneously
-2. **Context Retrieval**: Each agent queries its specialized RAG store
-3. **Structured Output**: JSON responses with analysis, concerns, recommendations
-4. **Event Coordination**: Progress tracking and state management
+1. **RFEAnalysisEvent**: User input triggers workflow
+2. **AgentAnalysisCompleteEvent**: Each agent completes analysis
+3. **AllAnalysesCompleteEvent**: Synthesis phase begins
+4. **SynthesisCompleteEvent**: Generate deliverables
+5. **StopEvent**: Workflow completion with results
 
 ## Storage Architecture
 
 ### Vector Store Strategy
 
-**FAISS (Facebook AI Similarity Search)**:
-- Efficient similarity search for document retrieval
-- Serializable to JSON for Python/TypeScript compatibility
-- Memory-efficient for production deployment
+**LlamaIndex + FAISS Integration**:
+- Native Python LlamaIndex v0.12+ vector stores
+- FAISS backend for efficient similarity search  
+- Persona-specific indices for domain expertise
+- Persistent storage for production deployment
 
-### Hybrid Loading Strategy
+### Index Loading Strategy
 
-```typescript
-// Priority-based loading
-async function loadAgentData(agent: Agent) {
-  // 1. Try Python-generated index
-  const pythonIndex = await tryLoadPythonIndex(agent.persona);
-  if (pythonIndex) return pythonIndex;
-  
-  // 2. Fall back to local directory
-  const localData = await tryLoadLocalDirectory(agent.dataSources);
-  if (localData) return localData;
-  
-  // 3. Use sample knowledge
-  return createSampleIndex(agent.sampleKnowledge);
-}
+```python
+class RFEAgentManager:
+    async def get_agent_index(self, persona: str):
+        # 1. Try Python RAG index (primary)
+        storage_dir = Path(f"../output/python-rag/{persona.lower()}")
+        if storage_dir.exists():
+            storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
+            return load_index_from_storage(storage_context)
+        
+        # 2. Fall back to LlamaCloud index (if available)
+        llamacloud_dir = Path(f"../output/llamacloud/{persona.lower()}")
+        if llamacloud_dir.exists():
+            storage_context = StorageContext.from_defaults(persist_dir=llamacloud_dir)
+            return load_index_from_storage(storage_context)
+        
+        # 3. No index available
+        return None
 ```
 
-## Event System
+## LlamaDeploy Event System
 
 ### Workflow Events
 
-- `rfe:submitted` - User submits RFE for analysis
-- `agents:analyzing` - Multi-agent analysis phase begins
-- `agent:complete` - Individual agent completes analysis
-- `synthesis:complete` - All agents completed, synthesis begins
-- `workflow:complete` - Full analysis pipeline complete
+```python
+class RFEAnalysisEvent(Event):
+    rfe_description: str
+    chat_history: List[Dict] = []
+
+class AgentAnalysisCompleteEvent(Event):  
+    persona: str
+    analysis: Dict[str, Any]
+
+class AllAnalysesCompleteEvent(Event):
+    analyses: List[Dict[str, Any]]
+    rfe_description: str
+
+class SynthesisCompleteEvent(Event):
+    synthesis: Dict[str, Any]
+    analyses: List[Dict[str, Any]]
+```
 
 ### State Management
 
-- **Stateful Middleware**: Maintains context across workflow steps
-- **Progress Tracking**: Real-time updates to UI
-- **Error Handling**: Graceful degradation and recovery
+- **LlamaDeploy Orchestration**: Built-in workflow state management
+- **Task Tracking**: Each analysis gets unique task ID
+- **Progress Streaming**: Real-time updates via API endpoints
+- **Error Recovery**: Graceful handling of individual agent failures
+- **Observability**: Built-in monitoring and logging
 
-## Scalability Considerations
+## Production Deployment
 
-### Performance Optimizations
+### Scalability Features
 
-- **Parallel Agent Execution**: All agents analyze simultaneously
-- **Cached Embeddings**: Vector stores persist across restarts
-- **Lazy Loading**: Agents load data sources on-demand
-- **Batch Operations**: Efficient bulk document processing
+- **LlamaDeploy Orchestration**: Enterprise-grade workflow management
+- **Parallel Agent Execution**: All agents analyze simultaneously via async/await
+- **Persistent Vector Stores**: Indices cached across restarts
+- **API-First Design**: RESTful endpoints for horizontal scaling
+- **Health Monitoring**: Built-in observability and health checks
 
-### Production Deployment
+### Deployment Architecture
 
 ```bash
-# Scheduled data ingestion (nightly/weekly)
-0 2 * * * cd /app/python-rag-ingestion && python simple_ingest.py
+# 1. Start LlamaDeploy API server
+uv run -m llama_deploy.apiserver  # Port 8000
 
-# Continuous TypeScript application
-npm start
+# 2. Deploy workflow
+uv run llamactl deploy llama_deploy.yml
+
+# 3. Start frontend
+npm run dev  # Port 3001
+
+# 4. Optional: Scheduled ingestion updates
+0 2 * * * cd /app/python-rag-ingestion && rhoai-rag ingest
+```
+
+### Production Monitoring
+
+```bash
+# Check deployment status
+uv run llamactl status
+
+# View workflow logs  
+uv run llamactl logs rfe-workflow
+
+# Monitor tasks
+uv run llamactl tasks
+
+# Health checks
+curl http://localhost:8000/health
+curl http://localhost:3001/health
 ```
 
 ## Development Workflow
@@ -237,29 +377,70 @@ npm start
 ### Adding New Agents
 
 1. Create YAML configuration in `src/agents/`
-2. Add data sources to `data/` directory or configure GitHub sources
-3. Run Python ingestion (optional): `python simple_ingest.py`
-4. Restart application: `npm start`
+2. Configure data sources (local directories or GitHub repositories)
+3. Run Python ingestion: `cd python-rag-ingestion && rhoai-rag ingest`
+4. Restart backend: LlamaDeploy automatically reloads agent configurations
 
 ### Updating Knowledge Bases
 
-1. **Local Sources**: Update files in `data/` directories
-2. **GitHub Sources**: Re-run Python ingestion to pull latest
-3. **Agent Config**: Modify YAML files and restart application
+1. **Local Sources**: Update files in `data/` directories, re-run ingestion
+2. **GitHub Sources**: Re-run Python ingestion to pull latest commits
+3. **Agent Config**: Modify YAML files, LlamaDeploy hot-reloads configurations
+
+### Backend Development
+
+```bash
+cd backend
+
+# Install development dependencies
+uv sync --dev
+
+# Run tests
+uv run pytest
+
+# Type checking  
+uv run mypy src/
+
+# Restart workflow
+uv run llamactl deploy llama_deploy.yml
+```
+
+### Frontend Development
+
+```bash
+cd frontend
+
+# Install dependencies
+npm install
+
+# Development mode with hot reload
+npm run dev
+
+# Build for production
+npm run build
+```
 
 ## Integration Points
 
+### API Endpoints
+
+- **Task Management**: `/deployments/rhoai/tasks/*`
+- **Event Streaming**: `/deployments/rhoai/tasks/{task_id}/events`
+- **Health Checks**: `/health`, `/docs`
+- **Workflow Status**: `/deployments/rhoai/status`
+
 ### External Systems
 
-- **OpenAI API**: Language model and embedding generation
-- **GitHub API**: Repository access and documentation retrieval
-- **File System**: Shared storage for Python/TypeScript communication
+- **OpenAI API**: GPT-4 language model and text-embedding-3-small
+- **GitHub API**: Repository access and documentation retrieval (via python-rag-ingestion)
+- **LlamaDeploy**: Production workflow orchestration and monitoring
 
 ### Extension Capabilities
 
-- **Custom Readers**: Add new data source types in Python pipeline
-- **Agent Specializations**: Create domain-specific agent configurations
-- **Workflow Customization**: Extend event system and state management
-- **UI Integration**: Connect to front-end frameworks
+- **Custom Workflows**: Extend `RFEWorkflow` with additional analysis steps
+- **Agent Specializations**: Create domain-specific agent personas and prompts
+- **Data Source Integration**: Add new readers to python-rag-ingestion pipeline
+- **UI Customization**: Configure @llamaindex/server chat interface
+- **API Integration**: Build external applications using REST endpoints
 
-This architecture provides a robust foundation for multi-agent feature analysis with clear separation of concerns and extensible component design.
+This production-ready architecture provides enterprise-grade multi-agent analysis with built-in scalability, monitoring, and extensibility for complex feature refinement workflows.

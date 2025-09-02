@@ -1,10 +1,10 @@
-# RFE Refiner - Multi-Agent Feature Refinement System
+# RHOAI AI Feature Sizing Platform
 
-A multi-agent system built with LlamaIndex that analyzes Request for Enhancement (RFE) descriptions using specialized AI personas with domain expertise and RAG-powered knowledge bases.
+A production-ready multi-agent system for analyzing Request for Enhancement (RFE) descriptions using specialized AI personas with RAG-powered knowledge bases, built on **LlamaDeploy** and **@llamaindex/server**.
 
 ## Overview
 
-The RFE Refiner uses 7 specialized AI agents working together to analyze feature requirements:
+RHOAI uses 7 specialized AI agents working together to provide comprehensive feature analysis:
 
 - **UX Designer (UXD)** - User experience, interface design, accessibility
 - **Product Manager (PM)** - Business requirements, prioritization, stakeholder alignment  
@@ -14,74 +14,126 @@ The RFE Refiner uses 7 specialized AI agents working together to analyze feature
 - **Product Owner** - Business value, acceptance criteria, stakeholder management
 - **SME/Researcher** - Domain expertise, industry best practices, research
 
-## Current Features
+## Features
 
-- **Multi-Agent Analysis**: Each agent analyzes RFEs from their specialized perspective
-- **RAG Knowledge Bases**: Agents access domain-specific knowledge from configured data sources
-- **Hybrid Data Architecture**: Python pipeline for advanced data ingestion + TypeScript runtime
-- **GitHub Integration**: Direct repository indexing for real documentation
-- **Event-Driven Workflow**: Real-time progress tracking and state management
-- **Structured Output**: JSON analysis reports with complexity estimates and recommendations
+- **🐍 Production Python Backend**: LlamaDeploy workflow orchestration with native Python LlamaIndex
+- **🟨 Modern TypeScript Frontend**: Professional chat UI powered by @llamaindex/server
+- **🤖 Multi-Agent Analysis**: Each agent analyzes RFEs from their specialized perspective
+- **📚 RAG Knowledge Bases**: Agents access domain-specific knowledge from configured data sources
+- **🚀 Production Ready**: Enterprise-grade deployment, monitoring, and scaling
+- **🔗 API Access**: Full REST API for programmatic integration
+- **📊 Real-time Progress**: Streaming responses and workflow observability
 
 ## Architecture
 
-### Hybrid System Design
+### Production System Design
 ```
 ┌─────────────────────────────┐    ┌─────────────────────────────┐
-│     Python Pipeline         │    │   TypeScript Application    │
+│     Python Backend          │    │   TypeScript Frontend       │
+│     (LlamaDeploy)           │    │   (@llamaindex/server)      │
 │                             │    │                             │
-│ • GitHub Repository Reader  │────│ • Agent Workflow Engine     │
-│ • Vector Store Creation     │    │ • RAG Retrieval System      │
-│ • Document Indexing         │    │ • Multi-Agent Coordination  │
+│ • Multi-Agent Workflows     │────│ • Modern Chat Interface     │
+│ • RAG Vector Retrieval      │    │ • Real-time Updates         │
+│ • Python LlamaIndex v0.12+  │    │ • API Integration           │
+│ • Production Orchestration  │    │ • Professional UI           │
 └─────────────────────────────┘    └─────────────────────────────┘
 ```
 
 ### Agent Workflow
-1. **RFE Input** - User submits feature description
-2. **Multi-Agent Analysis** - All 7 agents analyze simultaneously 
-3. **Knowledge Retrieval** - RAG system provides domain-specific context
-4. **Structured Output** - JSON reports with analysis and recommendations
+1. **RFE Input** - User submits feature description via chat UI
+2. **Multi-Agent Analysis** - LlamaDeploy orchestrates all 7 agents simultaneously 
+3. **Knowledge Retrieval** - RAG system provides domain-specific context for each agent
+4. **Synthesis** - Comprehensive analysis combining all agent perspectives
+5. **Deliverables** - Component teams, architecture diagrams, implementation timeline
 
-## Quick Start
+## Prerequisites
 
-### 1. Install Dependencies
+If you haven't installed uv, you can follow the instructions [here](https://docs.astral.sh/uv/getting-started/installation/) to install it.
+
+You can configure [LLM model](https://docs.llamaindex.ai/en/stable/module_guides/models/llms) and [embedding model](https://docs.llamaindex.ai/en/stable/module_guides/models/embeddings) in [src/settings.py](src/settings.py).
+
+Please setup their API keys in the `src/.env` file.
+
+## Installation
+
+Both the SDK and the CLI are part of the LlamaDeploy Python package. To install, just run:
+
 ```bash
-npm install
+uv sync
 ```
 
-### 2. Configure Environment
-```bash
-# Copy environment template
-cp env.template .env
+## Generate Index
 
-# Edit .env with your API keys
-export OPENAI_API_KEY="sk-your-openai-api-key"
-export GITHUB_TOKEN="github_pat_your-token"  # optional
+Generate the embeddings of the documents in the `./data` directory:
+
+```shell
+uv run generate
 ```
 
-### 3. Start Application
-```bash
-npm start
+## Running the Deployment
+
+At this point we have all we need to run this deployment. Ideally, we would have the API server already running
+somewhere in the cloud, but to get started let's start an instance locally. Run the following python script
+from a shell:
+
+```
+$ uv run -m llama_deploy.apiserver
+INFO:     Started server process [10842]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:4501 (Press CTRL+C to quit)
 ```
 
-The application will run with sample knowledge bases. For enhanced RAG with real data, see the Python ingestion setup below.
+From another shell, use the CLI, `llamactl`, to create the deployment:
 
-## Enhanced RAG Setup (Optional)
-
-### Python Pipeline for Real Data
-```bash
-# Set up Python environment
-cd python-rag-ingestion/
-
-# Follow setup instructions in python-rag-ingestion/README.md
-# Quick version:
-uv venv && source .venv/bin/activate && uv sync && uv pip install -e .
-
-# Run ingestion for enhanced knowledge bases
-rhoai-rag ingest --verbose
+```
+$ uv run llamactl deploy deployment.yml
+Deployment successful: rhoai-ai-feature-sizing
 ```
 
-This creates vector indexes from GitHub repositories that the TypeScript application automatically loads.
+## UI Interface
+
+LlamaDeploy will serve the UI through the apiserver. Point the browser to [http://localhost:4501/deployments/rhoai-ai-feature-sizing/ui](http://localhost:4501/deployments/rhoai-ai-feature-sizing/ui) to interact with your deployment through a user-friendly interface.
+
+## API endpoints
+
+You can find all the endpoints in the [API documentation](http://localhost:4501/docs). To get started, you can try the following endpoints:
+
+Create a new task:
+
+```bash
+curl -X POST 'http://localhost:4501/deployments/rhoai-ai-feature-sizing/tasks/create' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "input": "{\"user_msg\":\"Hello\",\"chat_history\":[]}",
+    "service_id": "rfe-workflow"
+  }'
+```
+
+Stream events:
+
+```bash
+curl 'http://localhost:4501/deployments/rhoai-ai-feature-sizing/tasks/0b411be6-005d-43f0-9b6b-6a0017f08002/events?session_id=dd36442c-45ca-4eaa-8d75-b4e6dad1a83e&raw_event=true' \
+  -H 'Content-Type: application/json'
+```
+
+Note that the task_id and session_id are returned when creating a new task.
+
+## Use Case
+
+We have prepared an [example workflow](./src/workflow.py) for the agentic RAG use case, where you can ask questions about RFE descriptions using our 7 specialized AI agents.
+To update the workflow, you can modify the code in [`src/workflow.py`](src/workflow.py).
+
+## Customize the UI
+
+The UI is served by LlamaDeploy, you can configure the UI by modifying the `uiConfig` in the [ui/index.ts](ui/index.ts) file.
+
+The following are the available options:
+
+- `starterQuestions`: Predefined questions for chat interface
+- `componentsDir`: Directory for custom event components
+- `layoutDir`: Directory for custom layout components
+- `llamaDeploy`: The LlamaDeploy configuration (deployment name and workflow name that defined in the [deployment.yml](deployment.yml) file)
 
 ## Agent Configuration
 
@@ -122,32 +174,41 @@ Configure in agent YAML files. Python pipeline handles cloning and indexing.
 
 ## Technical Stack
 
-- **TypeScript** - Application runtime, agent coordination, workflow management
-- **Python** - Advanced data ingestion, GitHub readers, vector store creation
-- **LlamaIndex** - RAG system, vector stores, document processing
+- **Python** - Core workflow engine, agent coordination, LlamaDeploy orchestration
+- **TypeScript** - Modern UI configuration and customization
+- **LlamaIndex** - RAG system, vector stores, document processing, workflows
+- **LlamaDeploy** - Production deployment and service orchestration
 - **OpenAI** - Language model and embeddings
-- **YAML** - Agent configuration with JSON schema validation
+- **YAML** - Agent configuration with structured definitions
 
 ## Development
 
 ```bash
-# Start with hot reload
-npm run dev
+# Start with hot reload for development
+uv run -m llama_deploy.apiserver
 
-# Test agent configurations
-node test-agents.js
+# In another terminal, deploy your changes
+uv run llamactl deploy deployment.yml
 ```
 
 ## File Structure
 
 ```
 /
-├── src/agents/          # Agent YAML configurations
-├── src/app/            # Core application logic
-├── python-rag-ingestion/  # Python data pipeline
+├── src/agents/          # Agent YAML configurations  
+├── src/                # Core Python workflow and settings
+├── ui/                 # TypeScript UI configuration
 ├── data/               # Local knowledge bases
-├── output/             # Generated indexes and storage
-└── components/         # UI components
+└── deployment.yml      # LlamaDeploy configuration
 ```
 
-This system provides a foundation for multi-agent feature analysis with extensible agent configurations and flexible data source integration.
+## Learn More
+
+- [LlamaIndex Documentation](https://docs.llamaindex.ai) - learn about LlamaIndex.
+- [Workflows Introduction](https://docs.llamaindex.ai/en/stable/understanding/workflows/) - learn about LlamaIndex workflows.
+- [LlamaDeploy GitHub Repository](https://github.com/run-llama/llama_deploy)
+- [Chat-UI Documentation](https://ts.llamaindex.ai/docs/chat-ui)
+
+You can check out [the LlamaIndex GitHub repository](https://github.com/run-llama/llama_index) - your feedback and contributions are welcome!
+
+This system provides a foundation for multi-agent RFE analysis with extensible agent configurations and flexible data source integration.
