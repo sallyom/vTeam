@@ -104,4 +104,4 @@ Thumbs.db
 .claude
 
 output/
-src/__pycache__/**
+src/__pycache__

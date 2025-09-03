@@ -13,9 +13,15 @@ import {
   CheckCircle, 
   Loader2,
   MessageSquare,
-  Lightbulb
+  Lightbulb,
+  User,
+  Settings,
+  Code,
+  Palette,
+  Search,
+  Target
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 const PHASE_META = {
   building: {
@@ -48,8 +54,20 @@ const ARTIFACT_ICONS = {
   epics_stories: ListChecks,
 };
 
+const AGENT_ICONS = {
+  PM: Target,
+  PRODUCT_OWNER: User,
+  ARCHITECT: Building2,
+  BACKEND_ENG: Code,
+  FRONTEND_ENG: Code,
+  UXD: Palette,
+  SME_RESEARCHER: Search,
+};
+
 function RFEBuilderProgressCard({ event }) {
   const [visible, setVisible] = useState(true);
+  
+  console.log("RFEBuilderProgressCard event:", event);
   
   useEffect(() => {
     if (event?.stage === "completed" && event?.progress === 100) {
@@ -79,6 +97,15 @@ function RFEBuilderProgressCard({ event }) {
             subtitle: "Working with AI agents to refine your idea",
             showLoader: true,
             streaming: streaming_type === 'reasoning'
+          };
+        case 'agent_analysis':
+          return {
+            title: event.agent_name ? `${event.agent_name} Analyzing` : "Agent Analysis",
+            subtitle: event.agent_role ? `${event.agent_role} • ${description || "Analyzing RFE from specialized perspective"}` : (description || "Analyzing RFE requirements"),
+            showLoader: true,
+            streaming: streaming_type === 'reasoning',
+            isAgent: true,
+            agentPersona: event.agent_persona
           };
         case 'refining':
           return {
@@ -171,26 +198,48 @@ function RFEBuilderProgressCard({ event }) {
           <div className="space-y-3">
             {/* Stage information */}
             <div className="flex items-start gap-3">
-              {ArtifactIcon && (
+              {/* Show agent-specific icon if agent is working */}
+              {stageInfo.isAgent && stageInfo.agentPersona && AGENT_ICONS[stageInfo.agentPersona] ? (
+                <div className="mt-0.5">
+                  <div className="flex items-center justify-center rounded-full p-1.5 bg-blue-50">
+                    {React.createElement(AGENT_ICONS[stageInfo.agentPersona], {
+                      className: "h-4 w-4 text-blue-600"
+                    })}
+                  </div>
+                </div>
+              ) : ArtifactIcon ? (
                 <div className="mt-0.5">
                   <ArtifactIcon className="h-4 w-4 text-gray-500" />
                 </div>
-              )}
+              ) : null}
+              
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className={cn(
+                    "text-sm font-medium",
+                    stageInfo.isAgent ? "text-blue-900" : "text-gray-900"
+                  )}>
                     {stageInfo.title}
                   </span>
                   {stageInfo.showLoader && (
-                    <Loader2 className="h-3 w-3 animate-spin text-gray-400" />
+                    <Loader2 className={cn(
+                      "h-3 w-3 animate-spin", 
+                      stageInfo.isAgent ? "text-blue-400" : "text-gray-400"
+                    )} />
                   )}
                   {stageInfo.streaming && (
-                    <Badge variant="outline" className="text-xs animate-pulse">
+                    <Badge variant="outline" className={cn(
+                      "text-xs animate-pulse",
+                      stageInfo.isAgent && "border-blue-200 text-blue-700"
+                    )}>
                       {streaming_type === 'reasoning' ? '🧠 Thinking' : '✍️ Writing'}
                     </Badge>
                   )}
                 </div>
-                <div className="text-xs text-gray-600 mt-1">
+                <div className={cn(
+                  "text-xs mt-1",
+                  stageInfo.isAgent ? "text-blue-600" : "text-gray-600"
+                )}>
                   {stageInfo.subtitle}
                 </div>
               </div>
@@ -249,8 +298,8 @@ function RFEBuilderProgressCard({ event }) {
 export default function Component({ events }) {
   const aggregateEvents = () => {
     if (!events || events.length === 0) return null;
-    const rfeBuilderEvents = events.filter(e => e.type === 'rfe_builder_progress');
-    return rfeBuilderEvents[rfeBuilderEvents.length - 1]?.data;
+    // Events are already the data objects from rfe_builder_progress events
+    return events[events.length - 1];
   };
 
   const event = aggregateEvents();

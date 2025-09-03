@@ -2,7 +2,7 @@ import yaml
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Union
 
 from pydantic import BaseModel, Field
 from llama_index.core import VectorStoreIndex
@@ -160,7 +160,7 @@ class RFEAgentManager:
         return None
 
     async def analyze_rfe(
-        self, persona: str, rfe_description: str, config: Dict
+        self, persona: str, rfe_description: str, config: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Analyze RFE with specific agent persona"""
         print(f"🔍 {persona} analyzing RFE...")
@@ -217,8 +217,21 @@ class RFEAgentManager:
                     RFEAnalysis, prompt_template
                 )
 
-            # Ensure persona is set correctly
-            response.persona = persona
+            # Ensure we have a proper RFEAnalysis object
+            if isinstance(response, str):
+                # If response is a string, create an RFEAnalysis object
+                fallback = RFEAnalysis(
+                    analysis=response,
+                    persona=persona,
+                    estimatedComplexity="UNKNOWN",
+                    concerns=[],
+                    recommendations=[],
+                    requiredComponents=[],
+                )
+                response = fallback
+            elif hasattr(response, "persona"):
+                # Ensure persona is set correctly
+                response.persona = persona
 
             print(f"✅ {persona} analysis complete")
             # Convert Pydantic model to dict for backward compatibility
@@ -269,6 +282,19 @@ class RFEAgentManager:
                 Synthesis, prompt_template
             )
 
+            # Ensure we have a proper Synthesis object
+            if isinstance(response, str):
+                # If response is a string, create a Synthesis object
+                fallback = Synthesis(
+                    overallComplexity="UNKNOWN",
+                    consensusRecommendations=[],
+                    criticalRisks=[],
+                    requiredCapabilities=[],
+                    estimatedTimeline="Unknown",
+                    synthesis=response,
+                )
+                response = fallback
+
             print("✅ Synthesis complete")
             return response.model_dump()
 
@@ -303,6 +329,18 @@ class RFEAgentManager:
                 ComponentTeamsList, prompt_template
             )
 
+            # Ensure we have a proper ComponentTeamsList object
+            if isinstance(response, str):
+                # If response is a string, create a ComponentTeamsList object with a fallback team
+                fallback_team = ComponentTeam(
+                    teamName="Development Team",
+                    components=["Implementation"],
+                    responsibilities=["Feature development"],
+                    epicTitle="Feature Implementation",
+                    epicDescription="Implement the requested feature",
+                )
+                response = ComponentTeamsList(teams=[fallback_team])
+
             # Convert to list of dicts for backward compatibility
             return [team.model_dump() for team in response.teams]
 
@@ -335,6 +373,18 @@ class RFEAgentManager:
             response = await Settings.llm.astructured_predict(
                 Architecture, prompt_template
             )
+
+            # Ensure we have a proper Architecture object
+            if isinstance(response, str):
+                # If response is a string, create an Architecture object
+                fallback = Architecture(
+                    type="system",
+                    mermaidCode="graph TD\n    A[User] --> B[System]\n    B --> C[Database]",
+                    description=response,
+                    components=[],
+                    integrations=[],
+                )
+                response = fallback
 
             return response.model_dump()
 

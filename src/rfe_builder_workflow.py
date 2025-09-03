@@ -97,6 +97,16 @@ class RFEBuilderUIEventData(BaseModel):
     streaming_type: Optional[Literal["reasoning", "writing"]] = Field(
         default=None, description="Type of streaming content"
     )
+    # Agent-specific fields
+    agent_name: Optional[str] = Field(
+        default=None, description="Name of the agent currently working"
+    )
+    agent_persona: Optional[str] = Field(
+        default=None, description="Persona code of the agent"
+    )
+    agent_role: Optional[str] = Field(
+        default=None, description="Role description of the agent"
+    )
 
 
 def create_rfe_builder_workflow() -> Workflow:
@@ -176,24 +186,41 @@ class RFEBuilderWorkflow(Workflow):
             ev.user_input, ev.current_rfe, ev.iteration_count
         )
 
-        # Get agent insights and suggestions
+        # Get agent insights and suggestions from all agents
         agent_insights = []
-        if agent_personas:
-            # Use first available agent for simplicity in this phase
-            persona_key = (
-                list(agent_personas.keys())[0]
-                if isinstance(agent_personas, dict)
-                else agent_personas[0]
-            )
-            if isinstance(agent_personas, dict):
-                persona_config = agent_personas[persona_key]
+        if agent_personas and isinstance(agent_personas, dict):
+            total_agents = len(agent_personas)
+            for i, (persona_key, persona_config) in enumerate(
+                agent_personas.items(), 1
+            ):
+                # Emit agent-specific progress event
+                ctx.write_event_to_stream(
+                    UIEvent(
+                        type="rfe_builder_progress",
+                        data=RFEBuilderUIEventData(
+                            phase=RFEPhase.BUILDING,
+                            stage="agent_analysis",
+                            description=f"Consulting with {persona_config.get('name', persona_key)}...",
+                            progress=15
+                            + (
+                                10 * i // total_agents
+                            ),  # Progress 15-25 during agent analysis
+                            streaming_type="reasoning",
+                            agent_name=persona_config.get("name", persona_key),
+                            agent_persona=persona_key,
+                            agent_role=persona_config.get("role", "Analyst"),
+                        ),
+                    )
+                )
+
                 try:
                     insight = await self.agent_manager.analyze_rfe(
                         persona_key, context_prompt, persona_config
                     )
                     agent_insights.append(insight)
                 except Exception as e:
-                    print(f"Agent insight error: {e}")
+                    print(f"Agent {persona_key} insight error: {e}")
+                    # Continue with other agents even if one fails
 
         # Generate refined RFE
         ctx.write_event_to_stream(

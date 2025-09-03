@@ -84,34 +84,40 @@ function ArtifactTab({ artifactType, content, isActive, onEdit }) {
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
             onClick={handleCopy}
-            className="h-8"
+            className="h-8 px-3 hover:bg-gray-100"
+            title={copied ? "Copied!" : "Copy content"}
           >
             {copied ? (
-              <Check className="h-3 w-3 text-green-600" />
+              <Check className="h-4 w-4 text-green-600 mr-1" />
             ) : (
-              <Copy className="h-3 w-3" />
+              <Copy className="h-4 w-4 mr-1" />
             )}
+            <span className="text-xs">{copied ? "Copied" : "Copy"}</span>
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={handleDownload}
-            className="h-8"
+            className="h-8 px-3 hover:bg-gray-100"
+            title="Download as markdown file"
           >
-            <Download className="h-3 w-3" />
+            <Download className="h-4 w-4 mr-1" />
+            <span className="text-xs">Download</span>
           </Button>
           <Button
             variant="ghost"
             size="sm"
             onClick={() => onEdit(artifactType)}
-            className="h-8"
+            className="h-8 px-3 hover:bg-gray-100 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+            title="Edit this document"
           >
-            <Edit3 className="h-3 w-3" />
+            <Edit3 className="h-4 w-4 mr-1" />
+            <span className="text-xs">Edit</span>
           </Button>
         </div>
       </div>
@@ -196,9 +202,8 @@ export default function ArtifactTabs({ artifacts = {}, events = [], onEditArtifa
   }, [artifacts, activeTab]);
 
   // Get the latest progress event
-  const latestProgressEvent = events
-    .filter(e => e.type === 'rfe_builder_progress')
-    .slice(-1)[0]?.data;
+  // Events are already the data objects from rfe_builder_progress events
+  const latestProgressEvent = events && events.length > 0 ? events[events.length - 1] : null;
 
   const artifactCount = Object.keys(artifacts).length;
   const hasArtifacts = artifactCount > 0;
