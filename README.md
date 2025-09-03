@@ -1,367 +1,214 @@
-# RHOAI AI Feature Sizing
+# RHOAI AI Feature Sizing Platform
 
-An intelligent system for analyzing and sizing AI features using Llama Stack with Ollama and Jira integration.
+A production-ready multi-agent system for analyzing Request for Enhancement (RFE) descriptions using specialized AI personas with RAG-powered knowledge bases, built on **LlamaDeploy** and **@llamaindex/server**.
 
-## 📦 Installation
+## Overview
 
-### Prerequisites
+RHOAI uses 7 specialized AI agents working together to provide comprehensive feature analysis:
 
-1. **Python 3.12+** - Required for the CLI application
-2. **uv** - Fast Python package manager
-3. **Ollama** - Local LLM runtime
-4. **Docker** - For containerized services
-5. **Jira Access** - API token for Jira integration
+- **UX Designer (UXD)** - User experience, interface design, accessibility
+- **Product Manager (PM)** - Business requirements, prioritization, stakeholder alignment  
+- **Backend Engineer** - System architecture, APIs, database design
+- **Frontend Engineer** - React implementation, TypeScript, state management
+- **Architect** - Overall system design, integration patterns, scalability
+- **Product Owner** - Business value, acceptance criteria, stakeholder management
+- **SME/Researcher** - Domain expertise, industry best practices, research
 
+## Features
 
-### Step 1: Clone and Setup Project
+- **🐍 Production Python Backend**: LlamaDeploy workflow orchestration with native Python LlamaIndex
+- **🟨 Modern TypeScript Frontend**: Professional chat UI powered by @llamaindex/server
+- **🤖 Multi-Agent Analysis**: Each agent analyzes RFEs from their specialized perspective
+- **📚 RAG Knowledge Bases**: Agents access domain-specific knowledge from configured data sources
+- **🚀 Production Ready**: Enterprise-grade deployment, monitoring, and scaling
+- **🔗 API Access**: Full REST API for programmatic integration
+- **📊 Real-time Progress**: Streaming responses and workflow observability
+
+## Architecture
+
+### Production System Design
+```
+┌─────────────────────────────┐    ┌─────────────────────────────┐
+│     Python Backend          │    │   TypeScript Frontend       │
+│     (LlamaDeploy)           │    │   (@llamaindex/server)      │
+│                             │    │                             │
+│ • Multi-Agent Workflows     │────│ • Modern Chat Interface     │
+│ • RAG Vector Retrieval      │    │ • Real-time Updates         │
+│ • Python LlamaIndex v0.12+  │    │ • API Integration           │
+│ • Production Orchestration  │    │ • Professional UI           │
+└─────────────────────────────┘    └─────────────────────────────┘
+```
+
+### Agent Workflow
+1. **RFE Input** - User submits feature description via chat UI
+2. **Multi-Agent Analysis** - LlamaDeploy orchestrates all 7 agents simultaneously 
+3. **Knowledge Retrieval** - RAG system provides domain-specific context for each agent
+4. **Synthesis** - Comprehensive analysis combining all agent perspectives
+5. **Deliverables** - Component teams, architecture diagrams, implementation timeline
+
+## Prerequisites
+
+If you haven't installed uv, you can follow the instructions [here](https://docs.astral.sh/uv/getting-started/installation/) to install it.
+
+You can configure [LLM model](https://docs.llamaindex.ai/en/stable/module_guides/models/llms) and [embedding model](https://docs.llamaindex.ai/en/stable/module_guides/models/embeddings) in [src/settings.py](src/settings.py).
+
+Please setup their API keys in the `src/.env` file.
+
+## Installation
+
+Both the SDK and the CLI are part of the LlamaDeploy Python package. To install, just run:
 
 ```bash
-# Clone the repository
-git clone <repo-url>
-cd rhoai-ai-feature-sizing
-
-# Install Python dependencies with uv
 uv sync
-
-# Copy environment template
-cp env.example .env
-# Edit .env with your Jira credentials
 ```
 
-### Step 2: Start Ollama and Pull Model
+## Generate Index
+
+Generate the embeddings of the documents in the `./data` directory:
+
+```shell
+uv run generate
+```
+
+## Running the Deployment
+
+At this point we have all we need to run this deployment. Ideally, we would have the API server already running
+somewhere in the cloud, but to get started let's start an instance locally. Run the following python script
+from a shell:
+
+```
+$ uv run -m llama_deploy.apiserver
+INFO:     Started server process [10842]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:4501 (Press CTRL+C to quit)
+```
+
+From another shell, use the CLI, `llamactl`, to create the deployment:
+
+```
+$ uv run llamactl deploy deployment.yml
+Deployment successful: rhoai-ai-feature-sizing
+```
+
+## UI Interface
+
+LlamaDeploy will serve the UI through the apiserver. Point the browser to [http://localhost:4501/deployments/rhoai-ai-feature-sizing/ui](http://localhost:4501/deployments/rhoai-ai-feature-sizing/ui) to interact with your deployment through a user-friendly interface.
+
+## API endpoints
+
+You can find all the endpoints in the [API documentation](http://localhost:4501/docs). To get started, you can try the following endpoints:
+
+Create a new task:
 
 ```bash
-# Pull the model
-ollama pull llama3.2:3b
-
-# Start Ollama server
-ollama serve
+curl -X POST 'http://localhost:4501/deployments/rhoai-ai-feature-sizing/tasks/create' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "input": "{\"user_msg\":\"Hello\",\"chat_history\":[]}",
+    "service_id": "rfe-builder-workflow"
+  }'
 ```
 
-### Step 3: Start Services
+Stream events:
 
 ```bash
-# Start Docker services (Llama Stack + Jira MCP)
-docker-compose up -d
-
-# Verify services are running
-docker-compose ps
+curl 'http://localhost:4501/deployments/rhoai-ai-feature-sizing/tasks/0b411be6-005d-43f0-9b6b-6a0017f08002/events?session_id=dd36442c-45ca-4eaa-8d75-b4e6dad1a83e&raw_event=true' \
+  -H 'Content-Type: application/json'
 ```
 
-## 🚀 Running the CLI
+Note that the task_id and session_id are returned when creating a new task.
 
-### Deployment Options
+## Use Case
 
-**Local Development (Current):**
-- Uses Docker Compose with Ollama
-- Requires local GPU or CPU inference
-- See main instructions below
+We have prepared a comprehensive RFE Builder workflow system that helps you interactively build RFEs with multi-agent collaboration, generate multiple artifacts, and edit them through chat.
+The main workflow is in [`src/rfe_builder_workflow.py`](src/rfe_builder_workflow.py).
 
-**OpenShift Production (New):**
-- Uses any OpenAI-compatible API (OpenAI, Mistral, Gemini, Azure OpenAI, vLLM, etc.)
-- **PostgreSQL database** for multi-pod scalability (no SQLite limitations)
-- **Persistent storage** for data reliability
-- No local GPU required
-- Requires building and pushing a custom Docker image
-- See [OpenShift Deployment Guide](OPENSHIFT-DEPLOYMENT.md)
+## Customize the UI
 
-### Basic Usage
+The UI is served by LlamaDeploy, you can configure the UI by modifying the `uiConfig` in the [ui/index.ts](ui/index.ts) file.
+
+The following are the available options:
+
+- `starterQuestions`: Predefined questions for chat interface
+- `componentsDir`: Directory for custom event components
+- `layoutDir`: Directory for custom layout components
+- `llamaDeploy`: The LlamaDeploy configuration (deployment name and workflow name that defined in the [deployment.yml](deployment.yml) file)
+
+## Agent Configuration
+
+Agents are configured in YAML files in `src/agents/`. Each agent specifies:
+
+- **Persona & Role** - Name and domain expertise
+- **Data Sources** - Knowledge base directories or GitHub repositories  
+- **Analysis Prompts** - Structured prompts for consistent output
+- **Sample Knowledge** - Fallback knowledge when no custom data available
+
+Example agent configuration:
+```yaml
+name: "Frontend Engineer"
+persona: "FRONTEND_ENG"
+expertise: ["react", "typescript", "ui-components"]
+
+dataSources:
+  - "frontend-patterns"
+  - name: "react-docs"
+    type: "github"
+    source: "facebook/react"
+    options:
+      path: "docs/"
+```
+
+## Data Sources
+
+### Local Directories
+Place documentation in `data/` subdirectories matching agent data source names.
+
+### GitHub Repositories  
+Configure in agent YAML files. Python pipeline handles cloning and indexing.
+
+### Hybrid Loading
+1. **Python indexes** - Loaded first if available
+2. **Local directories** - TypeScript fallback for simple cases
+3. **Sample knowledge** - Built-in fallback for testing
+
+## Technical Stack
+
+- **Python** - Core workflow engine, agent coordination, LlamaDeploy orchestration
+- **TypeScript** - Modern UI configuration and customization
+- **LlamaIndex** - RAG system, vector stores, document processing, workflows
+- **LlamaDeploy** - Production deployment and service orchestration
+- **OpenAI** - Language model and embeddings
+- **YAML** - Agent configuration with structured definitions
+
+## Development
 
 ```bash
-# Check available commands
-uv run python -m rhoai_ai_feature_sizing.main --help
+# Start with hot reload for development
+uv run -m llama_deploy.apiserver
+
+# In another terminal, deploy your changes
+uv run llamactl deploy deployment.yml
 ```
 
-### Individual Stages
-
-```bash
-# 1. Refine a Jira issue into detailed spec
-uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
-
-# 2. Create epics from refined spec (not yet implemented)
-uv run python -m rhoai_ai_feature_sizing.main stage epics refined_PROJ-123.md
-
-# 3. Draft Jira tickets from refined spec (soft mode - no actual tickets created)
-uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md
-
-# 3a. Draft Jira tickets in hard mode (creates actual Jira tickets)
-uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md --hard-mode
-
-# 4. Create estimates from tickets (not yet implemented)
-uv run python -m rhoai_ai_feature_sizing.main stage estimate jiras_PROJ-123.md
-```
-
-### Common Workflows
-
-```bash
-# Workflow 1: Analyze and plan feature implementation (soft mode)
-uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
-uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md
-# Review jiras_PROJ-123.md for epic/story breakdown and estimates
-
-# Workflow 2: Complete feature setup with actual Jira tickets
-uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
-uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md --hard-mode
-# Actual epics and stories will be created in your Jira instance
-
-# Workflow 3: Run full pipeline (currently uses soft mode by default)
-uv run python -m rhoai_ai_feature_sizing.main run PROJ-123
-```
-
-### Full Pipeline
-
-```bash
-# Run complete workflow (refine + jiras stages work)
-uv run python -m rhoai_ai_feature_sizing.main run PROJ-123
-
-# Run with hard mode for actual Jira ticket creation
-uv run python -m rhoai_ai_feature_sizing.main run PROJ-123 --hard-mode
-```
-
-### API Server Mode
-
-```bash
-# Start the FastAPI server
-uv run python -m rhoai_ai_feature_sizing.api
-```
-
-## 🛠️ Configuration
-
-### Environment Variables (.env file)
-
-```bash
-# Jira Configuration (Required)
-JIRA_URL=https://your-company.atlassian.net
-JIRA_API_TOKEN=your-jira-api-token-here
-
-# Ollama Configuration
-INFERENCE_MODEL=llama3.2:3b
-OLLAMA_URL=http://host.docker.internal:11434
-LLAMA_STACK_PORT=8321
-
-# Service URLs
-LLAMA_STACK_URL=http://localhost:8321
-MCP_ATLASSIAN_URL=http://localhost:9000/sse
-
-# API Configuration  
-OUTPUT_DIR=./outputs
-```
-
-## 🔧 What's Currently Implemented
-
-### ✅ Working Features
-
-**Refine Stage** - Convert Jira issues to detailed specs:
-```bash
-# Fetch a Jira issue and refine it into a detailed spec
-uv run python -m rhoai_ai_feature_sizing.main stage refine PROJ-123
-# Output: refined_PROJ-123.md
-```
-
-**Draft Jiras Stage** - Break down features into implementable tickets:
-```bash
-# Generate Jira tickets structure from refined spec (soft mode - no actual tickets)
-uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md
-# Output: jiras_PROJ-123.md
-
-# Create actual Jira tickets (hard mode)
-uv run python -m rhoai_ai_feature_sizing.main stage jiras refined_PROJ-123.md --hard-mode
-```
-
-**Soft Mode vs Hard Mode:**
-- **Soft Mode** (default): Generates a structured markdown document with detailed ticket definitions including titles, descriptions, dependencies, story points, and parent-child relationships. No actual Jira tickets are created.
-- **Hard Mode**: Uses the MCP Atlassian integration to create actual Jira tickets in your configured Jira instance based on the generated structure.
-
-**API Server** - RESTful API with job management:
-```bash
-# Start the API server
-uv run python -m rhoai_ai_feature_sizing.api
-
-# API endpoints available at http://localhost:8000:
-# POST /api/v1/stages/refine    - Refine a Jira issue
-# GET  /api/v1/jobs/{job_id}    - Check job status
-# GET  /api/v1/files/{filename} - Download output files
-# GET  /health                  - Service health check
-```
-
-**CLI Client** - Connects to API server:
-```bash
-# All CLI commands work by connecting to the API server
-uv run python -m rhoai_ai_feature_sizing.cli config --api-url http://localhost:8000
-uv run python -m rhoai_ai_feature_sizing.cli health
-uv run python -m rhoai_ai_feature_sizing.cli refine PROJ-123 --wait
-```
-
-### 🚧 Planned Features (Not Yet Implemented)
-
-The following stages are defined but not implemented:
-- **Epics Stage**: Break refined specs into epics  
-- **Estimate Stage**: Add story point estimates to tickets
-
-### 🔍 Architecture Details
-
-**What Actually Happens:**
-1. **CLI** makes HTTP requests to **API server** (FastAPI)
-2. **API server** uses **Llama Stack client** to connect to **Llama Stack server**
-3. **Llama Stack** uses **MCP Atlassian toolgroup** to fetch Jira issues
-4. **AI model** (via Ollama) processes the issue and fills template
-
-**File Flow:**
-```
-Jira Issue PROJ-123 
-  ↓ (via MCP)
-Jira details (JSON)
-  ↓ (via LLM + template)
-refined_PROJ-123.md
-  ↓ (via LLM + template)
-jiras_PROJ-123.md (soft mode: structure only / hard mode: actual tickets)
-  ↓ (planned stages)
-epics_PROJ-123.md → estimates_PROJ-123.md
-```
-
-## 🎯 Architecture Overview
+## File Structure
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   CLI/API       │    │  Llama Stack    │    │   Jira MCP      │
-│   (Python)      │───▶│   (Docker)      │───▶│   (Docker)      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         │                       ▼                       ▼
-         │              ┌─────────────────┐    ┌─────────────────┐
-         └─────────────▶│     Ollama      │    │   Jira API      │
-                        │   (Local LLM)   │    │   (Remote)      │
-                        └─────────────────┘    └─────────────────┘
+/
+├── src/agents/          # Agent YAML configurations  
+├── src/                # Core Python workflow and settings
+├── ui/                 # TypeScript UI configuration
+├── data/               # Local knowledge bases
+└── deployment.yml      # LlamaDeploy configuration
 ```
 
-**Key Components:**
-- **CLI Client**: Python application that makes HTTP requests to API server
-- **API Server**: FastAPI application with job management and file handling
-- **Llama Stack**: LLM inference server with tool integration (Docker)
-- **Ollama**: Local LLM runtime (llama3.2:3b) 
-- **Jira MCP**: Model Context Protocol server for Jira integration (Docker)  
+## Learn More
 
-## 🔍 Troubleshooting
+- [LlamaIndex Documentation](https://docs.llamaindex.ai) - learn about LlamaIndex.
+- [Workflows Introduction](https://docs.llamaindex.ai/en/stable/understanding/workflows/) - learn about LlamaIndex workflows.
+- [LlamaDeploy GitHub Repository](https://github.com/run-llama/llama_deploy)
+- [Chat-UI Documentation](https://ts.llamaindex.ai/docs/chat-ui)
 
-### Installation Issues
+You can check out [the LlamaIndex GitHub repository](https://github.com/run-llama/llama_index) - your feedback and contributions are welcome!
 
-**uv not found**:
-```bash
-# Install uv
-curl -LsSf https://astral.sh/uv/install.sh | sh
-source ~/.bashrc  # or restart terminal
-```
-
-**Python version too old**:
-```bash
-# Check Python version
-python --version  # Should be 3.12+
-
-# Install Python 3.12+ if needed (macOS)
-brew install python@3.12
-```
-
-**Ollama not found**:
-```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
-ollama serve
-```
-
-### Runtime Issues
-
-**Model not available**:
-```bash
-# Pull the model manually
-ollama pull llama3.2:3b
-
-# Check available models
-ollama list
-```
-
-**Services not running**:
-```bash
-# Check container status
-docker-compose ps
-
-# View logs
-docker-compose logs -f llama-stack
-docker-compose logs -f jira-mcp
-
-# Restart services
-docker-compose restart
-```
-
-**CLI import errors**:
-```bash
-# Reinstall dependencies
-uv sync --reinstall
-
-# Check if services are accessible
-curl http://localhost:8321/health
-curl http://localhost:9000/healthz
-```
-
-### Service Health Checks
-
-```bash
-# Test Llama Stack
-curl http://localhost:8321/health
-
-# Test Jira MCP
-curl http://localhost:9000/healthz
-
-# Test Ollama
-curl http://localhost:11434/api/tags
-
-# Test CLI connectivity
-uv run python -c "from rhoai_ai_feature_sizing.cli import main; print('CLI import successful')"
-```
-
-## 📚 Development
-
-### Project Structure
-```
-rhoai-ai-feature-sizing/
-├── src/rhoai_ai_feature_sizing/
-│   ├── cli.py              # CLI commands
-│   ├── api.py              # FastAPI server
-│   ├── main.py             # Core logic
-│   └── stages/             # Processing pipelines
-├── tests/                  # Test files
-├── docker-compose.yml      # Local services configuration
-├── Dockerfile              # Custom Docker image for OpenShift
-├── openshift-deployment.yaml # OpenShift deployment configuration
-├── deploy-to-openshift.sh  # OpenShift deployment script
-├── pyproject.toml          # Python dependencies
-└── README.md
-```
-
-### Adding New Features
-1. **Add CLI commands**: Edit `src/rhoai_ai_feature_sizing/cli.py`
-2. **Add processing stages**: Create files in `src/rhoai_ai_feature_sizing/stages/`
-3. **Add tests**: Create test files in `tests/`
-4. **Update dependencies**: Run `uv add <package>`
-
-### Contributing
-```bash
-# Setup development environment
-uv sync --dev
-
-# Run tests
-uv run pytest
-
-# Format code
-uv run ruff format src/ tests/
-
-# Type checking
-uv run mypy src/
-```
-
-## 🔗 Resources
-
-- [uv Documentation](https://docs.astral.sh/uv/)
-- [Ollama Models](https://ollama.com/library)
-- [Llama Stack Documentation](https://llama-stack.readthedocs.io/)
-- [Jira API Tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
-- [Docker Compose](https://docs.docker.com/compose/)
+This system provides a foundation for multi-agent RFE analysis with extensible agent configurations and flexible data source integration.
