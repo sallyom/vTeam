@@ -356,7 +356,7 @@ def cli(ctx, version):
 
 @cli.command()
 @click.option('--agents-dir', '-a', type=click.Path(exists=True, path_type=Path), 
-              default=Path('../src/agents'), help='Directory containing agent YAML configs')
+              default=Path('src/agents'), help='Directory containing agent YAML configs')
 @click.option('--output-dir', '-o', type=click.Path(path_type=Path), 
               default=Path('../output/python-rag'), help='Output directory for vector stores')
 @click.option('--chunking-strategy', '-c', type=click.Choice(['sentence', 'semantic', 'large']),
