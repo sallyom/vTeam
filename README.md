@@ -106,7 +106,7 @@ curl -X POST 'http://localhost:4501/deployments/rhoai-ai-feature-sizing/tasks/cr
   -H 'Content-Type: application/json' \
   -d '{
     "input": "{\"user_msg\":\"Hello\",\"chat_history\":[]}",
-    "service_id": "rfe-workflow"
+    "service_id": "rfe-builder-workflow"
   }'
 ```
 
@@ -121,8 +121,8 @@ Note that the task_id and session_id are returned when creating a new task.
 
 ## Use Case
 
-We have prepared an [example workflow](./src/workflow.py) for the agentic RAG use case, where you can ask questions about RFE descriptions using our 7 specialized AI agents.
-To update the workflow, you can modify the code in [`src/workflow.py`](src/workflow.py).
+We have prepared a comprehensive RFE Builder workflow system that helps you interactively build RFEs with multi-agent collaboration, generate multiple artifacts, and edit them through chat.
+The main workflow is in [`src/rfe_builder_workflow.py`](src/rfe_builder_workflow.py).
 
 ## Customize the UI
 

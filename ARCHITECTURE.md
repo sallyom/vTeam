@@ -47,7 +47,8 @@ RHOAI implements a production-ready architecture with **LlamaDeploy Python backe
 ```
 
 **Key Files**:
-- `backend/src/workflow.py` - LlamaDeploy workflow definition
+- `backend/src/rfe_builder_workflow.py` - Main RFE Builder workflow definition
+- `backend/src/artifact_editor_workflow.py` - Artifact editing workflow
 - `backend/src/agents.py` - Multi-agent management
 - `backend/llama_deploy.yml` - Deployment configuration
 
@@ -362,7 +363,7 @@ npm run dev  # Port 3001
 uv run llamactl status
 
 # View workflow logs  
-uv run llamactl logs rfe-workflow
+uv run llamactl logs rfe-builder-workflow
 
 # Monitor tasks
 uv run llamactl tasks

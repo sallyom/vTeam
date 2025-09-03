@@ -1,21 +1,32 @@
 name: rhoai-ai-feature-sizing
 
 control-plane:
-  port: 8000
+  port: 4501
 
-default-service: rfe-workflow
+default-service: rfe-builder-workflow
 
 services:
-  rfe-workflow:
-    name: RFE Analysis Workflow
+  rfe-builder-workflow:
+    name: RFE Builder Workflow
     source:
       type: local
       name: src
-    path: src/workflow:workflow
+    path: src/rfe_builder_workflow:rfe_builder_workflow
     python-dependencies:
       - llama-index-llms-openai>=0.3.2
       - llama-index-core>=0.12.0
       - pyyaml>=6.0
+  artifact-editor-workflow:
+    name: Artifact Editor Workflow
+    source:
+      type: local
+      name: src
+    path: src/artifact_editor_workflow:artifact_editor_workflow
+    python-dependencies:
+      - llama-index-llms-openai>=0.3.2
+      - llama-index-core>=0.12.0
+      - pyyaml>=6.0
+
 
 ui:
   name: Chat UI

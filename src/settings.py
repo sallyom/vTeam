@@ -9,9 +9,12 @@ def init_settings():
     """Initialize LlamaIndex settings"""
     load_dotenv()
 
-    # Set up OpenAI
+    # Set up OpenAI with streaming enabled
     Settings.llm = OpenAI(
-        model="gpt-4", temperature=0.1, api_key=os.getenv("OPENAI_API_KEY")
+        model="gpt-4",
+        temperature=0.1,
+        api_key=os.getenv("OPENAI_API_KEY"),
+        streaming=True,
     )
 
     Settings.embed_model = OpenAIEmbedding(
