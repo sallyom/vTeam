@@ -5,19 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { DocumentEditor, Markdown } from "@llamaindex/chat-ui/widgets";
 import "@llamaindex/chat-ui/styles/editor.css";
-import RFEBuilderProgressComponent from "./rfe_builder_progress";
+// import RFEBuilderProgressComponent from "./rfe_builder_progress";
 import { 
   FileText, 
   Workflow, 
@@ -30,23 +21,7 @@ import {
   Upload,
   X,
   CheckCircle,
-  AlertCircle,
-  Users,
-  Brain,
-  Loader2,
-  MessageSquare,
-  Lightbulb,
-  User,
-  Settings,
-  Code,
-  Palette,
-  Search,
-  Target,
-  ChevronDown,
-  ChevronRight,
-  Eye,
-  EyeOff
-} from "lucide-react";
+  AlertCircle} from "lucide-react";
 
 // CSS for better DocumentEditor integration
 const editorStyles = `
@@ -254,12 +229,12 @@ function ArtifactTab({ artifactType, content, isActive, onEdit }) {
   );
 }
 
-// Using enhanced RFEBuilderProgress component imported above
-function RFEBuilderProgress({ event }) {
-  // Convert single event to events array format expected by the component
-  const events = event ? [event] : [];
-  return <RFEBuilderProgressComponent events={events} />;
-}
+// // Using enhanced RFEBuilderProgress component imported above
+// function RFEBuilderProgress({ event }) {
+//   // Convert single event to events array format expected by the component
+//   const events = event ? [event] : [];
+//   return <RFEBuilderProgressComponent events={events} />;
+// }
 
 // Inline File Upload Component (using only supported imports)
 function InlineFileUpload({ onFilesUploaded }) {
@@ -535,29 +510,29 @@ export default function ArtifactTabs({ artifacts = {}, events = [], onEditArtifa
     );
   }
 
-  if (latestProgressEvent && !hasArtifacts) {
-    return (
-      <div className="h-full p-4">
-        <RFEBuilderProgress event={latestProgressEvent} />
-        <div className="flex items-center justify-center flex-1 text-gray-500 mt-8">
-          <div className="text-center">
-            <Building2 className="h-12 w-12 mx-auto mb-4 text-gray-300 animate-pulse" />
-            <p>Building your RFE and artifacts...</p>
-            <p className="text-sm">This may take a few minutes.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // if (latestProgressEvent && !hasArtifacts) {
+  //   return (
+  //     <div className="h-full p-4">
+  //       <RFEBuilderProgress event={latestProgressEvent} />
+  //       <div className="flex items-center justify-center flex-1 text-gray-500 mt-8">
+  //         <div className="text-center">
+  //           <Building2 className="h-12 w-12 mx-auto mb-4 text-gray-300 animate-pulse" />
+  //           <p>Building your RFE and artifacts...</p>
+  //           <p className="text-sm">This may take a few minutes.</p>
+  //         </div>
+  //       </div>
+  //     </div>
+  //   );
+  // }
 
   return (
     <div className="h-full flex flex-col">
-      {/* Progress indicator if still in progress */}
+      {/* Progress indicator if still in progress
       {latestProgressEvent && latestProgressEvent.progress < 100 && (
         <div className="p-4 border-b">
           <RFEBuilderProgress event={latestProgressEvent} />
         </div>
-      )}
+      )} */}
 
       {/* Artifact tabs */}
       {hasArtifacts && (
