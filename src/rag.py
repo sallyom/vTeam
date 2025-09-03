@@ -19,8 +19,7 @@ from llama_index.core.storage.storage_context import StorageContext
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.extractors import TitleExtractor
-from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.llms.openai import OpenAI
+# LLM imports now handled by centralized settings
 
 # Load environment variables
 load_dotenv()
@@ -58,9 +57,9 @@ class RAGIngestor:
         self.verbose = verbose
         self.github_token = os.getenv("GITHUB_TOKEN")
         
-        # Setup LlamaIndex
-        Settings.embed_model = OpenAIEmbedding()
-        Settings.llm = OpenAI()
+        # Setup LlamaIndex using centralized settings
+        from src.settings import init_settings
+        init_settings()
         
         # Create ingestion pipeline
         self.pipeline = self._create_ingestion_pipeline()
@@ -95,8 +94,8 @@ class RAGIngestor:
         # Add metadata extraction
         transformations.append(TitleExtractor())
         
-        # Add embeddings
-        transformations.append(OpenAIEmbedding())
+        # Add embeddings (uses Settings.embed_model from init_settings)
+        transformations.append(Settings.embed_model)
         
         return IngestionPipeline(transformations=transformations)
     
@@ -358,7 +357,7 @@ def cli(ctx, version):
 @click.option('--agents-dir', '-a', type=click.Path(exists=True, path_type=Path), 
               default=Path('src/agents'), help='Directory containing agent YAML configs')
 @click.option('--output-dir', '-o', type=click.Path(path_type=Path), 
-              default=Path('../output/python-rag'), help='Output directory for vector stores')
+              default=Path('output/python-rag'), help='Output directory for vector stores')
 @click.option('--chunking-strategy', '-c', type=click.Choice(['sentence', 'semantic', 'large']),
               default='sentence', help='Text chunking strategy')
 @click.option('--agents', '-ag', multiple=True, help='Specific agents to process (default: all)')

@@ -52,6 +52,11 @@ If you haven't installed uv, you can follow the instructions [here](https://docs
 
 You can configure [LLM model](https://docs.llamaindex.ai/en/stable/module_guides/models/llms) and [embedding model](https://docs.llamaindex.ai/en/stable/module_guides/models/embeddings) in [src/settings.py](src/settings.py).
 
+You must also install `pnpm` globally
+```bash
+npm i -g pnpm
+```
+
 Please setup their API keys in the `src/.env` file.
 
 ## Installation

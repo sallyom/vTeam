@@ -7,24 +7,22 @@ requires-python = ">=3.11,<3.14"
 dependencies = [
     # Core LlamaIndex (compatible version)
     "llama-index-core>=0.12.0,<0.13.0",
-    "llama-index-llms-openai>=0.3.2,<0.4.0", 
+    "llama-index-llms-openai>=0.3.2,<0.4.0",
     "llama-index-embeddings-openai>=0.3.1,<0.4.0",
     "llama-index-readers-file>=0.4.6,<1.0.0",
-    
     # LlamaDeploy
     "llama-deploy",
-    
-    # Your existing ingestion dependencies  
+    # Your existing ingestion dependencies
     "llama-index-readers-github",
     "llama-index-readers-web",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
     "click>=8.0.0",
     "pydantic>=2.11.5",
-    
     # Additional workflow dependencies
     "aiostream>=0.5.2,<0.6.0",
-    "docx2txt>=0.8,<0.9"
+    "docx2txt>=0.8,<0.9",
+    "llama-index-llms-anthropic>=0.7.6",
 ]
 
 [project.scripts]
