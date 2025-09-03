@@ -12,8 +12,7 @@ from llama_index.core.storage.storage_context import StorageContext
 from llama_index.core.ingestion import IngestionPipeline
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.extractors import TitleExtractor
-from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.llms.openai import OpenAI
+# LLM imports now handled by centralized settings
 
 # Load environment variables
 load_dotenv()
@@ -47,15 +46,15 @@ class RAGIngestor:
                  verbose: bool = False):
         
         # Default paths for new backend structure
-        self.agents_dir = agents_dir or Path("../src/agents")
-        self.output_dir = output_dir or Path("../output/python-rag")
+        self.agents_dir = agents_dir or Path("src/agents")
+        self.output_dir = output_dir or Path("output/python-rag")
         self.chunking_strategy = chunking_strategy
         self.verbose = verbose
         self.github_token = os.getenv("GITHUB_TOKEN")
         
-        # Setup LlamaIndex (compatible versions)
-        Settings.embed_model = OpenAIEmbedding(model="text-embedding-3-small")
-        Settings.llm = OpenAI(model="gpt-4", temperature=0.1)
+        # Setup LlamaIndex using centralized settings
+        from src.settings import init_settings
+        init_settings()
         
         # Create ingestion pipeline
         self.pipeline = self._create_ingestion_pipeline()
@@ -90,8 +89,8 @@ class RAGIngestor:
         # Add metadata extraction
         transformations.append(TitleExtractor())
         
-        # Add embeddings
-        transformations.append(OpenAIEmbedding(model="text-embedding-3-small"))
+        # Add embeddings (uses Settings.embed_model from init_settings)
+        transformations.append(Settings.embed_model)
         
         return IngestionPipeline(transformations=transformations)
     
