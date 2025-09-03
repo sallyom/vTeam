@@ -26,6 +26,18 @@ services:
       - llama-index-llms-openai>=0.3.2
       - llama-index-core>=0.12.0
       - pyyaml>=6.0
+  file-upload-workflow:
+    name: File Upload Workflow
+    source:
+      type: local
+      name: src
+    path: src/file_upload_workflow:file_upload_workflow
+    python-dependencies:
+      - llama-index-llms-openai>=0.3.2
+      - llama-index-core>=0.12.0
+      - llama-index-readers-file>=0.4.6
+      - python-multipart>=0.0.6
+      - pyyaml>=6.0
 
 
 ui:

@@ -2,7 +2,7 @@ import yaml
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, AsyncGenerator
 
 from pydantic import BaseModel, Field
 from llama_index.core import VectorStoreIndex
@@ -217,7 +217,7 @@ class RFEAgentManager:
                     RFEAnalysis, prompt_template
                 )
 
-            # Ensure we have a proper RFEAnalysis object
+            # Ensure we have a proper RFEAnalysis object and handle validation errors
             if isinstance(response, str):
                 # If response is a string, create an RFEAnalysis object
                 fallback = RFEAnalysis(
@@ -232,6 +232,29 @@ class RFEAgentManager:
             elif hasattr(response, "persona"):
                 # Ensure persona is set correctly
                 response.persona = persona
+
+                # Fix list fields if they came back as strings (common LLM issue)
+                if isinstance(response.concerns, str):
+                    # Split by bullet points or lines and clean up
+                    response.concerns = [
+                        line.strip().lstrip("- ").lstrip("• ").strip()
+                        for line in response.concerns.split("\n")
+                        if line.strip() and line.strip() not in ["- ", "• ", "-", "•"]
+                    ]
+
+                if isinstance(response.recommendations, str):
+                    response.recommendations = [
+                        line.strip().lstrip("- ").lstrip("• ").strip()
+                        for line in response.recommendations.split("\n")
+                        if line.strip() and line.strip() not in ["- ", "• ", "-", "•"]
+                    ]
+
+                if isinstance(response.requiredComponents, str):
+                    response.requiredComponents = [
+                        line.strip().lstrip("- ").lstrip("• ").strip()
+                        for line in response.requiredComponents.split("\n")
+                        if line.strip() and line.strip() not in ["- ", "• ", "-", "•"]
+                    ]
 
             print(f"✅ {persona} analysis complete")
             # Convert Pydantic model to dict for backward compatibility
@@ -249,6 +272,187 @@ class RFEAgentManager:
                 requiredComponents=[],
             )
             return fallback.model_dump()
+
+    async def analyze_rfe_streaming(
+        self, persona: str, rfe_description: str, config: Dict[str, Any]
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream RFE analysis with progress updates"""
+        print(f"🔍 {persona} starting streaming analysis...")
+
+        # Yield initial progress
+        yield {
+            "type": "progress",
+            "persona": persona,
+            "stage": "initializing",
+            "message": f"Starting {config.get('name', persona)} analysis...",
+            "progress": 0,
+        }
+
+        # Get relevant context from agent's knowledge base
+        yield {
+            "type": "progress",
+            "persona": persona,
+            "stage": "searching",
+            "message": "Searching knowledge base for relevant context...",
+            "progress": 20,
+        }
+
+        index = await self.get_agent_index(persona)
+        context = "No specific knowledge base available."
+
+        if index:
+            try:
+                retriever = index.as_retriever(similarity_top_k=5)
+                nodes = retriever.retrieve(rfe_description)
+                if nodes:
+                    context = "\n\n".join([node.node.get_content() for node in nodes])
+                    print(f"📚 Retrieved {len(nodes)} relevant documents for {persona}")
+                    yield {
+                        "type": "progress",
+                        "persona": persona,
+                        "stage": "context_found",
+                        "message": f"Found {len(nodes)} relevant documents",
+                        "progress": 40,
+                    }
+            except Exception as e:
+                print(f"❌ Error retrieving context for {persona}: {e}")
+                yield {
+                    "type": "error",
+                    "persona": persona,
+                    "message": f"Error retrieving context: {e}",
+                    "progress": 30,
+                }
+
+        # Yield thinking stage
+        yield {
+            "type": "progress",
+            "persona": persona,
+            "stage": "analyzing",
+            "message": "Analyzing RFE from specialized perspective...",
+            "progress": 60,
+            "streaming_type": "reasoning",
+        }
+
+        # Use the persona's analysis prompt or fallback
+        analysis_prompt_config = config.get("analysisPrompt", {})
+        if analysis_prompt_config and "template" in analysis_prompt_config:
+            # Use the agent's custom prompt template
+            template = analysis_prompt_config["template"]
+            prompt = template.replace("{rfe_description}", rfe_description).replace(
+                "{context}", context
+            )
+        else:
+            # Use fallback prompt
+            prompt = get_prompt(
+                PROMPT_NAMES.AGENT_ANALYSIS,
+                {
+                    "rfe_description": rfe_description,
+                    "context": context,
+                    "persona": config.get("name", persona),
+                },
+            )
+
+        # Yield writing stage
+        yield {
+            "type": "progress",
+            "persona": persona,
+            "stage": "writing",
+            "message": "Writing analysis and recommendations...",
+            "progress": 80,
+            "streaming_type": "writing",
+        }
+
+        try:
+            # Create PromptTemplate for structured prediction
+            if analysis_prompt_config and "template" in analysis_prompt_config:
+                # Use the agent's custom prompt template
+                prompt_template = PromptTemplate(analysis_prompt_config["template"])
+                response = await Settings.llm.astructured_predict(
+                    RFEAnalysis,
+                    prompt_template,
+                    rfe_description=rfe_description,
+                    context=context,
+                    persona=persona,
+                )
+            else:
+                # Use fallback prompt template
+                prompt_template = PromptTemplate(prompt)
+                response = await Settings.llm.astructured_predict(
+                    RFEAnalysis, prompt_template
+                )
+
+                # Ensure we have a proper RFEAnalysis object and handle validation errors
+            if isinstance(response, str):
+                # If response is a string, create an RFEAnalysis object
+                fallback = RFEAnalysis(
+                    analysis=response,
+                    persona=persona,
+                    estimatedComplexity="UNKNOWN",
+                    concerns=[],
+                    recommendations=[],
+                    requiredComponents=[],
+                )
+                response = fallback
+            elif hasattr(response, "persona"):
+                # Ensure persona is set correctly
+                response.persona = persona
+
+                # Fix list fields if they came back as strings (common LLM issue)
+                if isinstance(response.concerns, str):
+                    # Split by bullet points or lines and clean up
+                    response.concerns = [
+                        line.strip().lstrip("- ").lstrip("• ").strip()
+                        for line in response.concerns.split("\n")
+                        if line.strip() and line.strip() not in ["- ", "• ", "-", "•"]
+                    ]
+
+                if isinstance(response.recommendations, str):
+                    response.recommendations = [
+                        line.strip().lstrip("- ").lstrip("• ").strip()
+                        for line in response.recommendations.split("\n")
+                        if line.strip() and line.strip() not in ["- ", "• ", "-", "•"]
+                    ]
+
+                if isinstance(response.requiredComponents, str):
+                    response.requiredComponents = [
+                        line.strip().lstrip("- ").lstrip("• ").strip()
+                        for line in response.requiredComponents.split("\n")
+                        if line.strip() and line.strip() not in ["- ", "• ", "-", "•"]
+                    ]
+
+            print(f"✅ {persona} analysis complete")
+
+            # Yield completion with full analysis
+            yield {
+                "type": "complete",
+                "persona": persona,
+                "stage": "completed",
+                "message": "Analysis complete",
+                "progress": 100,
+                "result": response.model_dump(),
+            }
+
+        except Exception as e:
+            print(f"❌ Error generating analysis for {persona}: {e}")
+            # Return structured fallback using the Pydantic model
+            fallback = RFEAnalysis(
+                analysis=f"Error during analysis: {str(e)}",
+                persona=persona,
+                estimatedComplexity="UNKNOWN",
+                concerns=[f"Analysis failed: {str(e)}"],
+                recommendations=["Manual review required"],
+                requiredComponents=[],
+            )
+
+            # Yield error completion
+            yield {
+                "type": "error",
+                "persona": persona,
+                "stage": "failed",
+                "message": f"Analysis failed: {str(e)}",
+                "progress": 100,
+                "result": fallback.model_dump(),
+            }
 
     async def synthesize_analyses(self, analyses: List[Dict]) -> Dict[str, Any]:
         """Synthesize multiple agent analyses"""

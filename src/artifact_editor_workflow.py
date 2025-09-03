@@ -25,6 +25,7 @@ from llama_index.core.chat_ui.models.artifact import (
     Artifact,
     ArtifactType,
     DocumentArtifactData,
+    DocumentArtifactSource,
 )
 from llama_index.core.chat_ui.events import (
     UIEvent,
@@ -157,7 +158,7 @@ class ArtifactEditorWorkflow(Workflow):
 
         title = title_map.get(ev.edit_request.artifact_type, "Document")
 
-        # Emit the updated artifact
+        # Emit the updated artifact with source identifier
         ctx.write_event_to_stream(
             ArtifactEvent(
                 data=Artifact(
@@ -167,6 +168,9 @@ class ArtifactEditorWorkflow(Workflow):
                         title=title,
                         content=ev.updated_content,
                         type="markdown",
+                        sources=[
+                            DocumentArtifactSource(id=ev.edit_request.artifact_type)
+                        ],
                     ),
                 ),
             )
