@@ -16,9 +16,6 @@ Create a well-structured RFE document that captures the business requirements an
 
 ## Output Format
 
-<<<<<<< HEAD:src/prompts/final-document.md
-Use markdown formatting for readability. Include all critical information from the agent analyses while maintaining clarity and organization.
-=======
 Use markdown formatting for readability. Focus on business value, user needs, and high-level requirements.
 
 ## Jira Feature Title
