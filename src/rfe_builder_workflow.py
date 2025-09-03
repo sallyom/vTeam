@@ -10,6 +10,7 @@ This system provides:
 import re
 import time
 import json
+import asyncio
 from typing import Any, Dict, List, Literal, Optional, Union
 from enum import Enum
 
@@ -29,6 +30,7 @@ from llama_index.core.chat_ui.models.artifact import (
     Artifact,
     ArtifactType,
     DocumentArtifactData,
+    DocumentArtifactSource,
 )
 from llama_index.core.chat_ui.events import (
     UIEvent,
@@ -96,6 +98,20 @@ class RFEBuilderUIEventData(BaseModel):
     progress: int = Field(default=0, description="Overall progress percentage")
     streaming_type: Optional[Literal["reasoning", "writing"]] = Field(
         default=None, description="Type of streaming content"
+    )
+    # Agent-specific fields
+    agent_name: Optional[str] = Field(
+        default=None, description="Name of the agent currently working"
+    )
+    agent_persona: Optional[str] = Field(
+        default=None, description="Persona code of the agent"
+    )
+    agent_role: Optional[str] = Field(
+        default=None, description="Role description of the agent"
+    )
+    # Agent streaming data
+    agent_streaming: Optional[Dict[str, Any]] = Field(
+        default=None, description="Real-time agent streaming data"
     )
 
 
@@ -176,24 +192,94 @@ class RFEBuilderWorkflow(Workflow):
             ev.user_input, ev.current_rfe, ev.iteration_count
         )
 
-        # Get agent insights and suggestions
+        # Get agent insights and suggestions from all agents
         agent_insights = []
-        if agent_personas:
-            # Use first available agent for simplicity in this phase
-            persona_key = (
-                list(agent_personas.keys())[0]
-                if isinstance(agent_personas, dict)
-                else agent_personas[0]
-            )
-            if isinstance(agent_personas, dict):
-                persona_config = agent_personas[persona_key]
-                try:
-                    insight = await self.agent_manager.analyze_rfe(
-                        persona_key, context_prompt, persona_config
+        if agent_personas and isinstance(agent_personas, dict):
+            total_agents = len(agent_personas)
+            for i, (persona_key, persona_config) in enumerate(
+                agent_personas.items(), 1
+            ):
+                # Emit agent-specific progress event
+                ctx.write_event_to_stream(
+                    UIEvent(
+                        type="rfe_builder_progress",
+                        data=RFEBuilderUIEventData(
+                            phase=RFEPhase.BUILDING,
+                            stage="agent_analysis",
+                            description=f"Consulting with {persona_config.get('name', persona_key)}...",
+                            progress=15
+                            + (
+                                10 * i // total_agents
+                            ),  # Progress 15-25 during agent analysis
+                            streaming_type="reasoning",
+                            agent_name=persona_config.get("name", persona_key),
+                            agent_persona=persona_key,
+                            agent_role=persona_config.get("role", "Analyst"),
+                        ),
                     )
-                    agent_insights.append(insight)
+                )
+
+                try:
+                    # Use streaming analysis for better UI feedback
+                    final_result = None
+                    async for stream_event in self.agent_manager.analyze_rfe_streaming(
+                        persona_key, context_prompt, persona_config
+                    ):
+                        # Emit agent streaming events to UI
+                        ctx.write_event_to_stream(
+                            UIEvent(
+                                type="rfe_builder_progress",
+                                data=RFEBuilderUIEventData(
+                                    phase=RFEPhase.BUILDING,
+                                    stage="agent_analysis",
+                                    description=stream_event.get(
+                                        "message", "Processing..."
+                                    ),
+                                    progress=15 + (10 * i // total_agents),
+                                    streaming_type=(
+                                        "reasoning"
+                                        if stream_event.get("stage") == "analyzing"
+                                        else None
+                                    ),
+                                    agent_name=persona_config.get("name", persona_key),
+                                    agent_persona=persona_key,
+                                    agent_role=persona_config.get("role", "Analyst"),
+                                    agent_streaming=stream_event,
+                                ),
+                            )
+                        )
+
+                        # Capture final result
+                        if stream_event.get("type") in ["complete", "error"]:
+                            final_result = stream_event.get("result")
+
+                    if final_result:
+                        agent_insights.append(final_result)
                 except Exception as e:
-                    print(f"Agent insight error: {e}")
+                    print(f"Agent {persona_key} insight error: {e}")
+                    # Emit error event
+                    ctx.write_event_to_stream(
+                        UIEvent(
+                            type="rfe_builder_progress",
+                            data=RFEBuilderUIEventData(
+                                phase=RFEPhase.BUILDING,
+                                stage="agent_analysis",
+                                description=f"Error in {persona_config.get('name', persona_key)}: {str(e)}",
+                                progress=15 + (10 * i // total_agents),
+                                agent_name=persona_config.get("name", persona_key),
+                                agent_persona=persona_key,
+                                agent_role=persona_config.get("role", "Analyst"),
+                                agent_streaming={
+                                    "type": "error",
+                                    "persona": persona_key,
+                                    "stage": "failed",
+                                    "message": f"Analysis failed: {str(e)}",
+                                    "progress": 100,
+                                },
+                            ),
+                        )
+                    )
+                    # Continue with other agents even if one fails
 
         # Generate refined RFE
         ctx.write_event_to_stream(
@@ -215,8 +301,17 @@ class RFEBuilderWorkflow(Workflow):
 
         # Check if user is satisfied (simplified - in real implementation this would be interactive)
         # For now, we'll do 3 iterations then move to artifact generation
-        if ev.iteration_count >= 2:
-            # User is satisfied, move to artifact generation
+        # Move to artifact generation after 2 iterations or if RFE is comprehensive
+        rfe_is_comprehensive = (
+            len(refined_rfe.split()) > 100 and "requirement" in refined_rfe.lower()
+        )
+
+        print(
+            f"DEBUG: iteration_count={ev.iteration_count}, rfe_length={len(refined_rfe.split())}, comprehensive={rfe_is_comprehensive}"
+        )
+
+        if ev.iteration_count >= 1 or rfe_is_comprehensive:
+            # Move to artifact generation - we have enough to work with
             ctx.write_event_to_stream(
                 UIEvent(
                     type="rfe_builder_progress",
@@ -249,9 +344,9 @@ class RFEBuilderWorkflow(Workflow):
         artifacts = {}
         artifact_types = [
             (RFEArtifactType.RFE_DESCRIPTION, "RFE Description"),
-            (RFEArtifactType.FEATURE_REFINEMENT, "Feature Refinement Document"),
-            (RFEArtifactType.ARCHITECTURE, "Architecture Document"),
-            (RFEArtifactType.EPICS_STORIES, "Epics and Stories"),
+            (RFEArtifactType.FEATURE_REFINEMENT, "Feature Refinement"),
+            (RFEArtifactType.ARCHITECTURE, "Architecture Design"),
+            (RFEArtifactType.EPICS_STORIES, "Epics & Stories"),
         ]
 
         for i, (artifact_type, display_name) in enumerate(artifact_types):
@@ -294,21 +389,25 @@ class RFEBuilderWorkflow(Workflow):
 
             artifacts[artifact_type.value] = content
 
-            # Create and emit artifact
+            # Create and emit artifact with unique identifiers to prevent versioning
+            artifact_timestamp = int(time.time()) + i  # Ensure unique timestamps
             ctx.write_event_to_stream(
                 ArtifactEvent(
                     data=Artifact(
                         type=ArtifactType.DOCUMENT,
-                        created_at=int(time.time()),
+                        created_at=artifact_timestamp,
                         data=DocumentArtifactData(
                             title=display_name,
                             content=content,
                             type="markdown",
-                            sources=[],
+                            sources=[DocumentArtifactSource(id=artifact_type.value)],
                         ),
                     ),
                 )
             )
+
+            # Small delay to ensure artifacts are processed separately
+            await asyncio.sleep(0.1)
 
         # Final completion
         ctx.write_event_to_stream(
@@ -333,15 +432,32 @@ class RFEBuilderWorkflow(Workflow):
         )
 
     def _build_collaboration_prompt(
-        self, user_input: str, current_rfe: Optional[str], iteration: int
+        self,
+        user_input: str,
+        current_rfe: Optional[str],
+        iteration: int,
+        uploaded_context: str = "",
+        relevant_docs: List[str] = None,
     ) -> str:
         """Build prompt for agent collaboration"""
+
+        base_context = ""
+        if uploaded_context:
+            base_context += f"\n📚 UPLOADED CONTEXT:\n{uploaded_context}\n"
+
+        if relevant_docs:
+            base_context += "\n🔍 RELEVANT DOCUMENT EXCERPTS:\n"
+            for i, doc in enumerate(relevant_docs, 1):
+                base_context += f"\nDocument {i}:\n{doc[:800]}...\n"
+            base_context += "\n"
+
         if current_rfe is None:
             return f"""
             The user has this initial idea for an RFE: {user_input}
-            
+            {base_context}
             Help them flesh out this idea into a comprehensive RFE by asking clarifying questions
             and providing suggestions for technical requirements, scope, and implementation considerations.
+            Use the uploaded context and documents to inform your analysis where relevant.
             """
         else:
             return f"""
@@ -350,12 +466,14 @@ class RFEBuilderWorkflow(Workflow):
             Current RFE: {current_rfe}
             
             Original user input: {user_input}
-            
+            {base_context}
             Provide feedback and suggestions to improve the RFE. Consider:
             - Technical feasibility
             - Scope clarity  
             - Missing requirements
             - Implementation complexity
+            
+            Use the uploaded documents and context to provide more informed suggestions.
             """
 
     async def _refine_rfe(
@@ -415,6 +533,10 @@ class RFEBuilderWorkflow(Workflow):
                 - Technical Specifications
                 - Acceptance Criteria
                 - Timeline Considerations
+                
+                Generate a complete, detailed document with substantial content for each section.
+                The document should be thorough and provide comprehensive coverage of all aspects.
+                Do not truncate or summarize - provide full details.
             """,
             RFEArtifactType.FEATURE_REFINEMENT: """
                 Create a feature refinement document in markdown format.
@@ -427,6 +549,10 @@ class RFEBuilderWorkflow(Workflow):
                 - Performance Requirements
                 - Security Considerations
                 - Testing Strategy
+                
+                Generate a complete, detailed document with substantial content for each section.
+                The document should be thorough and provide comprehensive coverage of all aspects.
+                Do not truncate or summarize - provide full details.
             """,
             RFEArtifactType.ARCHITECTURE: """
                 Create an architecture document in markdown format.
@@ -439,6 +565,10 @@ class RFEBuilderWorkflow(Workflow):
                 - Technology Stack
                 - Deployment Considerations
                 - Scalability and Performance
+                
+                Generate a complete, detailed document with substantial content for each section.
+                The document should be thorough and provide comprehensive coverage of all aspects.
+                Do not truncate or summarize - provide full details.
             """,
             RFEArtifactType.EPICS_STORIES: """
                 Create an epics and stories document in markdown format.
@@ -450,12 +580,53 @@ class RFEBuilderWorkflow(Workflow):
                 - Story Point Estimates
                 - Dependencies
                 - Sprint Planning Considerations
+                
+                Generate a complete, detailed document with substantial content for each section.
+                The document should be thorough and provide comprehensive coverage of all aspects.
+                Do not truncate or summarize - provide full details.
             """,
         }
 
         prompt = PromptTemplate(prompts[artifact_type]).format(rfe=final_rfe)
-        response = await self.llm.acomplete(prompt)
-        return response.text.strip()
+
+        try:
+            # Use explicit parameters to ensure complete generation
+            response = await self.llm.acomplete(
+                prompt,
+                max_tokens=4000,  # Ensure sufficient tokens for full documents
+                temperature=0.1,
+            )
+
+            generated_content = response.text.strip()
+
+            # Check if content seems truncated (basic heuristic)
+            if (
+                len(generated_content) < 200
+            ):  # Very short response might indicate an issue
+                print(
+                    f"⚠️ Warning: Generated {artifact_type.value} content seems short ({len(generated_content)} chars)"
+                )
+
+            return generated_content
+
+        except Exception as e:
+            print(f"❌ Error generating {artifact_type.value}: {e}")
+
+            # Fallback to a minimal document
+            fallback_content = f"""# {artifact_type.value.replace('_', ' ').title()}
+
+## Overview
+This document was generated as a fallback due to an error in the primary generation process.
+
+## RFE Summary
+{final_rfe}
+
+## Error Details
+Generation failed with: {str(e)}
+
+Please regenerate this document or edit it manually.
+"""
+            return fallback_content
 
 
 # Export for LlamaDeploy

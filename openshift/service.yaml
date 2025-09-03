@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: rhoai-ai-feature-sizing
+  namespace: rhoai-ai-feature-sizing
+  labels:
+    app: rhoai-ai-feature-sizing
+    component: llama-deploy-app
+spec:
+  type: ClusterIP
+  ports:
+  - name: control-plane
+    port: 4501
+    targetPort: control-plane
+    protocol: TCP
+  - name: api-server
+    port: 8000
+    targetPort: api-server
+    protocol: TCP
+  selector:
+    app: rhoai-ai-feature-sizing
+    component: llama-deploy-app
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rhoai-ui
+  namespace: rhoai-ai-feature-sizing
+  labels:
+    app: rhoai-ai-feature-sizing
+    component: ui
+spec:
+  type: ClusterIP
+  ports:
+  - name: ui
+    port: 4501
+    targetPort: control-plane
+    protocol: TCP
+  selector:
+    app: rhoai-ai-feature-sizing
+    component: llama-deploy-app

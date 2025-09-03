@@ -2,6 +2,16 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { 
   Users, 
@@ -13,9 +23,19 @@ import {
   CheckCircle, 
   Loader2,
   MessageSquare,
-  Lightbulb
+  Lightbulb,
+  User,
+  Settings,
+  Code,
+  Palette,
+  Search,
+  Target,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  EyeOff
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 const PHASE_META = {
   building: {
@@ -48,15 +68,51 @@ const ARTIFACT_ICONS = {
   epics_stories: ListChecks,
 };
 
+const AGENT_ICONS = {
+  PM: Target,
+  PRODUCT_OWNER: User,
+  ARCHITECT: Building2,
+  BACKEND_ENG: Code,
+  FRONTEND_ENG: Code,
+  UXD: Palette,
+  SME_RESEARCHER: Search,
+};
+
 function RFEBuilderProgressCard({ event }) {
   const [visible, setVisible] = useState(true);
+  const [selectedAgent, setSelectedAgent] = useState(null);
+  const [agentDetails, setAgentDetails] = useState({});
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  
+  // console.log("RFEBuilderProgressCard event:", event);
   
   useEffect(() => {
     if (event?.stage === "completed" && event?.progress === 100) {
       // Keep visible for editing phase
       setVisible(true);
     }
-  }, [event]);
+    
+    // Handle agent streaming data
+    if (event?.agent_streaming) {
+      const { persona, stage, message, result, progress } = event.agent_streaming;
+      setAgentDetails(prev => ({
+        ...prev,
+        [persona]: {
+          ...prev[persona],
+          stage,
+          message,
+          result,
+          progress: progress || 0,
+          lastUpdate: new Date().toISOString()
+        }
+      }));
+      
+      // Auto-select the agent if not already selected
+      if (!selectedAgent && persona) {
+        setSelectedAgent(persona);
+      }
+    }
+  }, [event, selectedAgent]);
 
   if (!event || !visible) return null;
 
@@ -79,6 +135,15 @@ function RFEBuilderProgressCard({ event }) {
             subtitle: "Working with AI agents to refine your idea",
             showLoader: true,
             streaming: streaming_type === 'reasoning'
+          };
+        case 'agent_analysis':
+          return {
+            title: event.agent_name ? `${event.agent_name} Analyzing` : "Agent Analysis",
+            subtitle: event.agent_role ? `${event.agent_role} • ${description || "Analyzing RFE from specialized perspective"}` : (description || "Analyzing RFE requirements"),
+            showLoader: true,
+            streaming: streaming_type === 'reasoning',
+            isAgent: true,
+            agentPersona: event.agent_persona
           };
         case 'refining':
           return {
@@ -171,26 +236,48 @@ function RFEBuilderProgressCard({ event }) {
           <div className="space-y-3">
             {/* Stage information */}
             <div className="flex items-start gap-3">
-              {ArtifactIcon && (
+              {/* Show agent-specific icon if agent is working */}
+              {stageInfo.isAgent && stageInfo.agentPersona && AGENT_ICONS[stageInfo.agentPersona] ? (
+                <div className="mt-0.5">
+                  <div className="flex items-center justify-center rounded-full p-1.5 bg-blue-50">
+                    {React.createElement(AGENT_ICONS[stageInfo.agentPersona], {
+                      className: "h-4 w-4 text-blue-600"
+                    })}
+                  </div>
+                </div>
+              ) : ArtifactIcon ? (
                 <div className="mt-0.5">
                   <ArtifactIcon className="h-4 w-4 text-gray-500" />
                 </div>
-              )}
+              ) : null}
+              
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className={cn(
+                    "text-sm font-medium",
+                    stageInfo.isAgent ? "text-blue-900" : "text-gray-900"
+                  )}>
                     {stageInfo.title}
                   </span>
                   {stageInfo.showLoader && (
-                    <Loader2 className="h-3 w-3 animate-spin text-gray-400" />
+                    <Loader2 className={cn(
+                      "h-3 w-3 animate-spin", 
+                      stageInfo.isAgent ? "text-blue-400" : "text-gray-400"
+                    )} />
                   )}
                   {stageInfo.streaming && (
-                    <Badge variant="outline" className="text-xs animate-pulse">
+                    <Badge variant="outline" className={cn(
+                      "text-xs animate-pulse",
+                      stageInfo.isAgent && "border-blue-200 text-blue-700"
+                    )}>
                       {streaming_type === 'reasoning' ? '🧠 Thinking' : '✍️ Writing'}
                     </Badge>
                   )}
                 </div>
-                <div className="text-xs text-gray-600 mt-1">
+                <div className={cn(
+                  "text-xs mt-1",
+                  stageInfo.isAgent ? "text-blue-600" : "text-gray-600"
+                )}>
                   {stageInfo.subtitle}
                 </div>
               </div>
@@ -222,6 +309,111 @@ function RFEBuilderProgressCard({ event }) {
               </div>
             )}
 
+            {/* Agent streaming details */}
+            {Object.keys(agentDetails).length > 0 && (
+              <div className="space-y-3 border-t pt-3 mt-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-900">Agent Analysis</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsDetailsOpen(!isDetailsOpen)}
+                    className="h-6 px-2 text-xs"
+                  >
+                    {isDetailsOpen ? <EyeOff className="h-3 w-3 mr-1" /> : <Eye className="h-3 w-3 mr-1" />}
+                    {isDetailsOpen ? 'Hide' : 'Show'} Details
+                  </Button>
+                </div>
+                
+                {isDetailsOpen && (
+                  <div className="space-y-3">
+                    {/* Agent selector */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-gray-700">Select Agent:</label>
+                      <Select value={selectedAgent} onValueChange={setSelectedAgent}>
+                        <SelectTrigger className="h-8 text-xs">
+                          <SelectValue placeholder="Choose an agent to view details" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.keys(agentDetails).map((persona) => {
+                            const AgentIcon = AGENT_ICONS[persona];
+                            const details = agentDetails[persona];
+                            return (
+                              <SelectItem key={persona} value={persona}>
+                                <div className="flex items-center gap-2">
+                                  {AgentIcon && <AgentIcon className="h-3 w-3" />}
+                                  <span>{persona.replace('_', ' ')}</span>
+                                  <Badge variant="outline" className="ml-auto text-xs">
+                                    {details.progress}%
+                                  </Badge>
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Selected agent details */}
+                    {selectedAgent && agentDetails[selectedAgent] && (
+                      <Collapsible>
+                        <CollapsibleTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className="w-full justify-between h-8 text-xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              {AGENT_ICONS[selectedAgent] && 
+                                React.createElement(AGENT_ICONS[selectedAgent], {
+                                  className: "h-3 w-3"
+                                })
+                              }
+                              <span>{agentDetails[selectedAgent].message}</span>
+                            </div>
+                            <ChevronDown className="h-3 w-3" />
+                          </Button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent className="space-y-2 pt-2">
+                          {/* Agent progress */}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-gray-500">
+                                {agentDetails[selectedAgent].stage}
+                              </span>
+                              <span className="font-medium">
+                                {agentDetails[selectedAgent].progress}%
+                              </span>
+                            </div>
+                            <div className="w-full bg-gray-200 rounded-full h-1">
+                              <div 
+                                className="bg-blue-500 h-1 rounded-full transition-all duration-300"
+                                style={{ width: `${agentDetails[selectedAgent].progress}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Agent analysis result (if available) */}
+                          {agentDetails[selectedAgent].result && (
+                            <ScrollArea className="h-24 w-full border rounded-md">
+                              <div className="p-2 text-xs text-gray-700 whitespace-pre-wrap">
+                                {typeof agentDetails[selectedAgent].result === 'string' 
+                                  ? agentDetails[selectedAgent].result 
+                                  : JSON.stringify(agentDetails[selectedAgent].result, null, 2)
+                                }
+                              </div>
+                            </ScrollArea>
+                          )}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Completion message */}
             {phase === 'editing' && (
               <div className="flex items-center gap-2 p-2 bg-purple-50 rounded-lg">
@@ -249,8 +441,8 @@ function RFEBuilderProgressCard({ event }) {
 export default function Component({ events }) {
   const aggregateEvents = () => {
     if (!events || events.length === 0) return null;
-    const rfeBuilderEvents = events.filter(e => e.type === 'rfe_builder_progress');
-    return rfeBuilderEvents[rfeBuilderEvents.length - 1]?.data;
+    // Events are already the data objects from rfe_builder_progress events
+    return events[events.length - 1];
   };
 
   const event = aggregateEvents();
