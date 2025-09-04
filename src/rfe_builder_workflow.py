@@ -2,6 +2,7 @@
 
 import time
 import json
+import asyncio
 from typing import Any, Dict, List, Literal, Optional
 from enum import Enum
 
@@ -135,6 +136,9 @@ class RFEBuilderWorkflow(Workflow):
                 except Exception as e:
                     print(f"Agent {persona_key} error: {e}")
 
+        # Small delay to ensure agent completion events are processed first
+        await asyncio.sleep(0.5)
+
         # Summarize all agent analyses
         if agent_insights:
             await self._summarize_agent_analyses(ctx, agent_insights)
@@ -257,6 +261,7 @@ class RFEBuilderWorkflow(Workflow):
                 data={
                     "status": "generating",
                     "message": "Synthesizing insights from all agent analyses...",
+                    "timestamp": int(time.time() * 1000),  # milliseconds
                 },
             )
         )
@@ -279,6 +284,7 @@ class RFEBuilderWorkflow(Workflow):
                                 "status": "streaming",
                                 "summary": accumulated_text,
                                 "message": "Generating analysis summary...",
+                                "timestamp": int(time.time() * 1000),
                             },
                         )
                     )
@@ -292,6 +298,7 @@ class RFEBuilderWorkflow(Workflow):
                         "status": "complete",
                         "summary": accumulated_text.strip(),
                         "message": "Agent analysis summary complete",
+                        "timestamp": int(time.time() * 1000),
                     },
                 )
             )
@@ -302,6 +309,7 @@ class RFEBuilderWorkflow(Workflow):
                     data={
                         "status": "error",
                         "message": f"Failed to generate summary: {str(e)}",
+                        "timestamp": int(time.time() * 1000),
                     },
                 )
             )

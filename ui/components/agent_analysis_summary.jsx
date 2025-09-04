@@ -6,20 +6,29 @@ function AgentAnalysisSummary({ events }) {
   const [summaryState, setSummaryState] = useState({
     status: null,
     message: null,
-    summary: null
+    summary: null,
+    timestamp: null
   });
 
-  // Process events to update summary state
+  // Process events to update summary state, keeping the latest timestamp
   useEffect(() => {
-    events.forEach(event => {
-        const { status, message, summary } = event;
+    // Sort events by timestamp if available
+    const sortedEvents = events.sort((a, b) => {
+      const timestampA = a.timestamp || 0;
+      const timestampB = b.timestamp || 0;
+      return timestampA - timestampB;
+    });
+
+    // Process events in chronological order
+    sortedEvents.forEach(event => {
+        const { status, message, summary, timestamp } = event;
         
-        setSummaryState({
+        setSummaryState(prev => ({
           status,
           message,
-          summary: summary || null
-        });
-      
+          summary: summary || prev.summary, // Keep existing summary if not provided
+          timestamp: timestamp || prev.timestamp
+        }));
     });
   }, [events]);
 
