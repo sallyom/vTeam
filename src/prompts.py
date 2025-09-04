@@ -76,5 +76,6 @@ class PROMPT_NAMES:
     ARCHITECTURE_DIAGRAM = "architecture-diagram"
     EPICS_STORIES = "epics-stories"
     IMPLEMENTATION_TIMELINE = "implementation-timeline"
-    FINAL_DOCUMENT = "final-document"
+    RFE_DOCUMENT = "rfe-document"
+    FEATURE_REFINEMENT = "feature-refinement"
     AGENT_ANALYSIS = "agent-analysis"
