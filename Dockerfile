@@ -1,7 +1,7 @@
 # Multi-stage build for RHOAI AI Feature Sizing with LlamaDeploy
 # For Apple Silicon Macs use: linux/arm64
 # For Intel Macs use: linux/amd64
-FROM --platform=linux/arm64 python:3.11-slim as base
+FROM --platform=linux/amd64 python:3.11-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -25,7 +25,7 @@ WORKDIR /app
 COPY pyproject.toml uv.lock* README.md ./
 
 # Install Python dependencies
-RUN uv sync --no-dev --frozen
+RUN uv sync --no-dev --frozen && chmod -R g+w .venv
 
 # Copy source code
 COPY src/ ./src/
@@ -35,11 +35,10 @@ COPY deploy.py ./
 # Create necessary directories
 RUN mkdir -p output/python-rag output/session-contexts
 
-# Install Node.js and pnpm for UI build (if needed)
-FROM base as ui-builder
+# Install Node.js for UI build
+FROM base AS ui-builder
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs \
-    && npm install -g pnpm
+    && apt-get install -y nodejs
 
 # Copy UI source
 COPY ui/ ./ui/
@@ -50,17 +49,24 @@ RUN npm install
 RUN npm run build
 
 # Final production stage
-FROM base as production
+FROM base AS production
 
 # Copy built UI from ui-builder stage
 COPY --from=ui-builder /app/ui/dist ./ui/dist
 COPY --from=ui-builder /app/ui/package.json ./ui/
 
-# Copy the rest of the application
-COPY --from=ui-builder /app ./
+# Copy Python application files (avoiding node_modules)
+COPY --from=ui-builder /app/src ./src
+COPY --from=ui-builder /app/output ./output
+COPY --from=ui-builder /app/deploy.py ./
+COPY --from=ui-builder /app/deployment.yml ./
+COPY --from=ui-builder /app/pyproject.toml ./
+COPY --from=ui-builder /app/uv.lock* ./
+COPY --from=ui-builder /app/README.md ./
 
 # Set permissions for OpenShift (any user can access)
-RUN chmod -R g+w /app && \
+# Include .venv directory for uv operations
+RUN chmod -R g+w /app/src /app/output /app/deploy.py /app/deployment.yml /app/.venv && \
     chmod g+w /tmp
 
 # Expose ports

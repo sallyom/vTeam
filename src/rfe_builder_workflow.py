@@ -92,18 +92,18 @@ class RFEBuilderWorkflow(Workflow):
         """Simple start: get user input and go straight to RFE building"""
         user_msg = ev.get("user_msg", "")
 
-        # Simple progress event
-        ctx.write_event_to_stream(
-            UIEvent(
-                type="rfe_builder_progress",
-                data=RFEBuilderUIEventData(
-                    phase=RFEPhase.BUILDING,
-                    stage="building",
-                    description="Building RFE with AI agents...",
-                    progress=10,
-                ),
-            )
-        )
+        # # Simple progress event
+        # ctx.write_event_to_stream(
+        #     UIEvent(
+        #         type="rfe_builder_progress",
+        #         data=RFEBuilderUIEventData(
+        #             phase=RFEPhase.BUILDING,
+        #             stage="building",
+        #             description="Building RFE with AI agents...",
+        #             progress=10,
+        #         ),
+        #     )
+        # )
 
         # Get agent personas and build RFE
         agent_personas = await get_agent_personas()
@@ -238,7 +238,7 @@ class RFEBuilderWorkflow(Workflow):
         )
 
         summary_prompt = f"""
-        Based on the following agent analyses, provide a concise executive summary that highlights:
+        Based on the following agent analyses, provide a concise summary that highlights:
         - Key themes and patterns across all analyses
         - Critical requirements and considerations
         - Main risks or challenges identified
@@ -262,16 +262,35 @@ class RFEBuilderWorkflow(Workflow):
         )
 
         try:
-            response = await self.llm.acomplete(summary_prompt)
-            summary_text = response.text.strip()
+            # Stream the summary generation
+            accumulated_text = ""
+            char_count = 0
 
-            # Stream the completed summary
+            async for chunk in self.llm.astream_complete(summary_prompt):
+                accumulated_text += chunk.delta
+                char_count += len(chunk.delta)
+
+                # Stream update every 10 characters
+                if char_count >= 10:
+                    ctx.write_event_to_stream(
+                        UIEvent(
+                            type="agent_analysis_summary",
+                            data={
+                                "status": "streaming",
+                                "summary": accumulated_text,
+                                "message": "Generating analysis summary...",
+                            },
+                        )
+                    )
+                    char_count = 0
+
+            # Send final complete event
             ctx.write_event_to_stream(
                 UIEvent(
                     type="agent_analysis_summary",
                     data={
                         "status": "complete",
-                        "summary": summary_text,
+                        "summary": accumulated_text.strip(),
                         "message": "Agent analysis summary complete",
                     },
                 )
