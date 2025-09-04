@@ -7,8 +7,8 @@ This guide explains how to deploy the RHOAI AI Feature Sizing Platform to your O
 The application consists of:
 - **LlamaDeploy Backend**: Multi-agent workflow orchestration 
 - **Chat UI**: TypeScript-based modern chat interface
-- **Multiple Services**: RFE builder, artifact editor, and file upload workflows
-- **Persistent Storage**: For uploads, outputs, and vector indices
+- **Multiple Services**: RFE builder and Jira RFE to architecture workflows
+- **Persistent Storage**: For outputs and vector indices
 
 ## Prerequisites
 
@@ -138,8 +138,8 @@ resources:
 │  │  │ └─────────┘ │    ┌────────────────┐ │   │
 │  │  └─────────────┘    │      PVCs      │ │   │
 │  │         │           │                │ │   │
-│  │  ┌─────────────┐    │ - uploads-pvc  │ │   │
-│  │  │  Services   │    │ - output-pvc   │ │   │
+│  │  ┌─────────────┐    │ - output-pvc   │ │   │
+│  │  │  Services   │    │                │ │   │
 │  │  │             │    └────────────────┘ │   │
 │  │  │ - rhoai-api │                       │   │
 │  │  │ - rhoai-ui  │                       │   │
@@ -211,7 +211,7 @@ oc top pods -n rhoai-ai-feature-sizing
 oc get pvc -n rhoai-ai-feature-sizing
 
 # Describe PVC for events
-oc describe pvc rhoai-uploads-pvc -n rhoai-ai-feature-sizing
+oc describe pvc rhoai-output-pvc -n rhoai-ai-feature-sizing
 ```
 
 #### Networking Issues
@@ -297,7 +297,7 @@ oc rollout status deployment/rhoai-ai-feature-sizing -n rhoai-ai-feature-sizing
 ### Backup
 ```bash
 # Backup persistent volumes (example)
-oc create job backup-uploads --from=cronjob/volume-backup -n rhoai-ai-feature-sizing
+oc create job backup-output --from=cronjob/volume-backup -n rhoai-ai-feature-sizing
 
 # Export configuration
 oc export all --selector=app=rhoai-ai-feature-sizing -n rhoai-ai-feature-sizing

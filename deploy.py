@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Simple deployment script for RHOAI AI Feature Sizing with file upload
+Simple deployment script for RHOAI AI Feature Sizing
 """
 
 import asyncio
 from pathlib import Path
 import yaml
 
-from llama_deploy import LlamaDeployClient, ControlPlaneConfig
 from llama_deploy.apiserver import serve
 
 

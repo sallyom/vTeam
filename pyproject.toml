@@ -23,8 +23,6 @@ dependencies = [
     "aiostream>=0.5.2,<0.6.0",
     "docx2txt>=0.8,<0.9",
     "llama-index-llms-anthropic>=0.7.6",
-    # File upload workflow dependencies (compatible with llama-deploy)
-    "python-multipart>=0.0.6,<0.1.0",
 ]
 
 [project.scripts]

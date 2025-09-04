@@ -1,5 +1,7 @@
 # Multi-stage build for RHOAI AI Feature Sizing with LlamaDeploy
-FROM python:3.11-slim as base
+# For Apple Silicon Macs use: linux/arm64
+# For Intel Macs use: linux/amd64
+FROM --platform=linux/amd64 python:3.11-slim AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -20,10 +22,10 @@ RUN pip install --no-cache-dir uv
 WORKDIR /app
 
 # Copy dependency files
-COPY pyproject.toml uv.lock* ./
+COPY pyproject.toml uv.lock* README.md ./
 
 # Install Python dependencies
-RUN uv sync --no-dev --frozen
+RUN uv sync --no-dev --frozen && chmod -R g+w .venv
 
 # Copy source code
 COPY src/ ./src/
@@ -31,38 +33,41 @@ COPY deployment.yml ./
 COPY deploy.py ./
 
 # Create necessary directories
-RUN mkdir -p uploads/temp uploads/workflow_temp output/python-rag output/session-contexts
+RUN mkdir -p output/python-rag output/session-contexts
 
-# Install Node.js and pnpm for UI build (if needed)
-FROM base as ui-builder
+# Install Node.js for UI build
+FROM base AS ui-builder
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs \
-    && npm install -g pnpm
+    && apt-get install -y nodejs
 
 # Copy UI source
 COPY ui/ ./ui/
 WORKDIR /app/ui
 
 # Install UI dependencies and build
-RUN pnpm install --frozen-lockfile
-RUN pnpm build
+RUN npm install
+RUN npm run build
 
 # Final production stage
-FROM base as production
+FROM base AS production
 
 # Copy built UI from ui-builder stage
 COPY --from=ui-builder /app/ui/dist ./ui/dist
 COPY --from=ui-builder /app/ui/package.json ./ui/
 
-# Copy the rest of the application
-COPY --from=ui-builder /app ./
+# Copy Python application files (avoiding node_modules)
+COPY --from=ui-builder /app/src ./src
+COPY --from=ui-builder /app/output ./output
+COPY --from=ui-builder /app/deploy.py ./
+COPY --from=ui-builder /app/deployment.yml ./
+COPY --from=ui-builder /app/pyproject.toml ./
+COPY --from=ui-builder /app/uv.lock* ./
+COPY --from=ui-builder /app/README.md ./
 
-# Create non-root user for OpenShift security
-RUN groupadd -r appuser && useradd -r -g appuser appuser \
-    && chown -R appuser:appuser /app \
-    && chmod -R 755 /app
-
-USER appuser
+# Set permissions for OpenShift (any user can access)
+# Include .venv directory for uv operations
+RUN chmod -R g+w /app/src /app/output /app/deploy.py /app/deployment.yml /app/.venv && \
+    chmod g+w /tmp
 
 # Expose ports
 EXPOSE 4501 8000
