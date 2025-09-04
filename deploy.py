@@ -7,7 +7,6 @@ import asyncio
 from pathlib import Path
 import yaml
 
-from llama_deploy import LlamaDeployClient, ControlPlaneConfig
 from llama_deploy.apiserver import serve
 
 

@@ -93,21 +93,25 @@ class RFEBuilderWorkflow(Workflow):
         """Simple start: get user input and go straight to RFE building"""
         user_msg = ev.get("user_msg", "")
 
-        # # Simple progress event
-        # ctx.write_event_to_stream(
-        #     UIEvent(
-        #         type="rfe_builder_progress",
-        #         data=RFEBuilderUIEventData(
-        #             phase=RFEPhase.BUILDING,
-        #             stage="building",
-        #             description="Building RFE with AI agents...",
-        #             progress=10,
-        #         ),
-        #     )
-        # )
-
         # Get agent personas and build RFE
         agent_personas = await get_agent_personas()
+
+        # Filter to only include specific agents
+        filtered_agents = {
+            "UX_RESEARCHER",
+            "UX_FEATURE_LEAD",
+            "ENGINEERING_MANAGER",
+            "STAFF_ENGINEER",
+            "TECHNICAL_WRITER",
+            "UX_ARCHITECT",
+        }
+
+        agent_personas = {
+            key: config
+            for key, config in agent_personas.items()
+            if key in filtered_agents
+        }
+
         agent_insights = []
 
         if agent_personas:

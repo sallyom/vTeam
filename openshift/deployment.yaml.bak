@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: rhoai-app
-        image: quay.io/gkrumbach07/llama-index-demo:latest
+        image: quay.io/gkrumbach07/llama-index-demo/rhoai-ai-feature-sizing:latest
         imagePullPolicy: Always
         ports:
         - containerPort: 4501
