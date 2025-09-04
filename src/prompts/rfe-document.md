@@ -77,5 +77,3 @@ Use markdown formatting for readability. Focus on business value, user needs, an
 
 *Provide any additional customer-specific considerations that must be made when designing and delivering the Feature.*
 
-* Text
->>>>>>> 2b0170c (separated the feature refinement and rfe):src/prompts/rfe-document.md
