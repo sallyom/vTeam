@@ -46,8 +46,8 @@ COPY ui/ ./ui/
 WORKDIR /app/ui
 
 # Install UI dependencies and build
-RUN pnpm install --no-frozen-lockfile
-RUN pnpm build
+RUN npm install
+RUN npm run build
 
 # Final production stage
 FROM base as production
