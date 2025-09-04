@@ -33,6 +33,7 @@ class RFEPhase(str, Enum):
     BUILDING = "building"
     GENERATING_PHASE_1 = "generating_phase_1"
     PHASE_1_READY = "phase_1_ready"
+    EDITING = "editing"
     GENERATING_PHASE_2 = "generating_phase_2"
     COMPLETED = "completed"
 
@@ -62,6 +63,12 @@ class GenerateArtifactsEvent(Event):
     context: Dict[str, Any]
 
 
+class EditArtifactEvent(Event):
+    user_input: str
+    existing_artifacts: Dict[str, str]
+    edit_instruction: str
+
+
 class RFEBuilderUIEventData(BaseModel):
     """Simple UI event data"""
 
@@ -79,19 +86,30 @@ def create_rfe_builder_workflow() -> Workflow:
 
 
 class RFEBuilderWorkflow(Workflow):
-    """Simple RFE builder: user input -> agents -> artifacts -> done"""
+    """RFE builder with editing support: user input -> agents -> artifacts -> editing"""
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         self.llm: LLM = Settings.llm
         self.agent_manager = RFEAgentManager()
+        # Session state to track if artifacts exist
+        self.session_artifacts: Dict[str, str] = {}
+        self.artifacts_generated = False
 
     @step
     async def start_rfe_builder(
         self, ctx: Context, ev: StartEvent
-    ) -> GenerateArtifactsEvent:
-        """Simple start: get user input and go straight to RFE building"""
+    ) -> GenerateArtifactsEvent | EditArtifactEvent:
+        """Route to editing if artifacts exist, otherwise create new RFE"""
         user_msg = ev.get("user_msg", "")
+        
+        # Check if we already have artifacts - if so, route to editing
+        if self.artifacts_generated and self.session_artifacts:
+            return EditArtifactEvent(
+                user_input=user_msg,
+                existing_artifacts=self.session_artifacts.copy(),
+                edit_instruction=user_msg
+            )
 
         # Get agent personas and build RFE
         agent_personas = await get_agent_personas()
@@ -177,6 +195,8 @@ class RFEBuilderWorkflow(Workflow):
         for artifact_type, display_name in PHASE_1_ARTIFACTS:
             content = await self._generate_simple_artifact(artifact_type, ev.final_rfe)
             phase_1_artifacts[artifact_type.value] = content
+            # Store in session state for editing
+            self.session_artifacts[artifact_type.value] = content
 
             # Emit artifact
             ctx.write_event_to_stream(
@@ -223,12 +243,16 @@ class RFEBuilderWorkflow(Workflow):
             )
         )
 
+        # Mark artifacts as generated for future editing
+        self.artifacts_generated = True
+
         return StopEvent(
             result={
                 "final_rfe": ev.final_rfe,
                 "phase_1_artifacts": phase_1_artifacts,
                 "ready_for_rfe_creation": True,
                 "message": "Phase 1 complete! You can now iterate on your documents or create the RFE in Jira.",
+                "editing_enabled": True,
             }
         )
 
@@ -361,6 +385,128 @@ class RFEBuilderWorkflow(Workflow):
         }
 
         prompt = artifact_prompts[artifact_type]
+        response = await self.llm.acomplete(prompt)
+        return response.text.strip()
+
+    @step
+    async def edit_artifact(
+        self, ctx: Context, ev: EditArtifactEvent
+    ) -> StopEvent:
+        """Edit existing artifacts based on user input"""
+        
+        ctx.write_event_to_stream(
+            UIEvent(
+                type="rfe_builder_progress",
+                data=RFEBuilderUIEventData(
+                    phase=RFEPhase.EDITING,
+                    stage="analyzing_edit",
+                    description="Analyzing your edit request...",
+                    progress=10,
+                ),
+            )
+        )
+
+        # Determine which artifact to edit (default to RFE if unclear)
+        target_artifact = await self._determine_target_artifact(ev.user_input, ev.existing_artifacts)
+        
+        ctx.write_event_to_stream(
+            UIEvent(
+                type="rfe_builder_progress",
+                data=RFEBuilderUIEventData(
+                    phase=RFEPhase.EDITING,
+                    stage="editing_artifact",
+                    description=f"Editing {target_artifact.replace('_', ' ').title()}...",
+                    progress=50,
+                ),
+            )
+        )
+
+        # Edit the target artifact
+        updated_content = await self._edit_artifact_content(
+            target_artifact, ev.edit_instruction, ev.existing_artifacts[target_artifact]
+        )
+        
+        # Update session state
+        self.session_artifacts[target_artifact] = updated_content
+
+        # Emit updated artifact
+        display_names = {
+            "rfe_description": "RFE Description",
+            "feature_refinement": "Feature Refinement"
+        }
+        
+        ctx.write_event_to_stream(
+            ArtifactEvent(
+                data=Artifact(
+                    id=target_artifact,
+                    type=ArtifactType.DOCUMENT,
+                    created_at=int(time.time()),
+                    data=DocumentArtifactData(
+                        title=display_names.get(target_artifact, target_artifact.title()),
+                        content=updated_content,
+                        type="markdown",
+                        sources=[],
+                    ),
+                )
+            )
+        )
+
+        ctx.write_event_to_stream(
+            UIEvent(
+                type="rfe_builder_progress",
+                data=RFEBuilderUIEventData(
+                    phase=RFEPhase.EDITING,
+                    stage="edit_complete",
+                    description="Edit complete! You can make additional changes or create the RFE.",
+                    progress=100,
+                ),
+            )
+        )
+
+        return StopEvent(
+            result={
+                "edited_artifact": target_artifact,
+                "updated_content": updated_content,
+                "message": f"Successfully updated {display_names.get(target_artifact, target_artifact)}!",
+                "all_artifacts": self.session_artifacts,
+                "editing_enabled": True,
+            }
+        )
+
+    async def _determine_target_artifact(
+        self, user_input: str, existing_artifacts: Dict[str, str]
+    ) -> str:
+        """Determine which artifact the user wants to edit"""
+        user_lower = user_input.lower()
+        
+        # Simple keyword matching
+        if any(word in user_lower for word in ["refinement", "feature", "technical"]):
+            return "feature_refinement"
+        else:
+            return "rfe_description"  # Default to RFE document
+
+    async def _edit_artifact_content(
+        self, artifact_type: str, edit_instruction: str, current_content: str
+    ) -> str:
+        """Edit artifact content based on instruction"""
+        
+        prompt = f"""
+        Edit the following document based on the user's instruction:
+        
+        EDIT INSTRUCTION: {edit_instruction}
+        
+        CURRENT DOCUMENT:
+        {current_content}
+        
+        Please update the document according to the instruction while:
+        1. Maintaining the overall structure and format
+        2. Keeping existing good content that wasn't specifically targeted for change
+        3. Making the requested changes clearly and comprehensively
+        4. Ensuring the document remains coherent and well-formatted
+        
+        Return the complete updated document:
+        """
+        
         response = await self.llm.acomplete(prompt)
         return response.text.strip()
 
