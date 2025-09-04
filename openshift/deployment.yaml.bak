@@ -1,0 +1,100 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rhoai-ai-feature-sizing
+  namespace: rhoai-ai-feature-sizing
+  labels:
+    app: rhoai-ai-feature-sizing
+    component: llama-deploy-app
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: rhoai-ai-feature-sizing
+      component: llama-deploy-app
+  template:
+    metadata:
+      labels:
+        app: rhoai-ai-feature-sizing
+        component: llama-deploy-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: rhoai-app
+        image: quay.io/gkrumbach07/llama-index-demo/rhoai-ai-feature-sizing:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 4501
+          name: control-plane
+          protocol: TCP
+        - containerPort: 8000
+          name: api-server
+          protocol: TCP
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: PYTHONDONTWRITEBYTECODE
+          value: "1"
+        envFrom:
+        - configMapRef:
+            name: rhoai-config
+        - secretRef:
+            name: rhoai-secrets
+        volumeMounts:
+        - name: output-storage
+          mountPath: /app/output
+        - name: temp-storage
+          mountPath: /tmp
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 1000
+          runAsGroup: 1000
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+      volumes:
+      - name: output-storage
+        persistentVolumeClaim:
+          claimName: rhoai-output-pvc
+      - name: temp-storage
+        emptyDir:
+          sizeLimit: 1Gi
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30

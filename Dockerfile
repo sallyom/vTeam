@@ -1,5 +1,7 @@
 # Multi-stage build for RHOAI AI Feature Sizing with LlamaDeploy
-FROM python:3.11-slim as base
+# For Apple Silicon Macs use: linux/arm64
+# For Intel Macs use: linux/amd64
+FROM --platform=linux/arm64 python:3.11-slim as base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
@@ -20,7 +22,7 @@ RUN pip install --no-cache-dir uv
 WORKDIR /app
 
 # Copy dependency files
-COPY pyproject.toml uv.lock* ./
+COPY pyproject.toml uv.lock* README.md ./
 
 # Install Python dependencies
 RUN uv sync --no-dev --frozen
@@ -31,7 +33,7 @@ COPY deployment.yml ./
 COPY deploy.py ./
 
 # Create necessary directories
-RUN mkdir -p uploads/temp uploads/workflow_temp output/python-rag output/session-contexts
+RUN mkdir -p output/python-rag output/session-contexts
 
 # Install Node.js and pnpm for UI build (if needed)
 FROM base as ui-builder
@@ -44,7 +46,7 @@ COPY ui/ ./ui/
 WORKDIR /app/ui
 
 # Install UI dependencies and build
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --no-frozen-lockfile
 RUN pnpm build
 
 # Final production stage
@@ -57,12 +59,9 @@ COPY --from=ui-builder /app/ui/package.json ./ui/
 # Copy the rest of the application
 COPY --from=ui-builder /app ./
 
-# Create non-root user for OpenShift security
-RUN groupadd -r appuser && useradd -r -g appuser appuser \
-    && chown -R appuser:appuser /app \
-    && chmod -R 755 /app
-
-USER appuser
+# Set permissions for OpenShift (any user can access)
+RUN chmod -R g+w /app && \
+    chmod g+w /tmp
 
 # Expose ports
 EXPOSE 4501 8000

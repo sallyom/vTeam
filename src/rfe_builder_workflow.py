@@ -30,8 +30,10 @@ from src.agents import RFEAgentManager, get_agent_personas
 
 class RFEPhase(str, Enum):
     BUILDING = "building"
-    GENERATING = "generating"
-    EDITING = "editing"
+    GENERATING_PHASE_1 = "generating_phase_1"
+    PHASE_1_READY = "phase_1_ready"
+    GENERATING_PHASE_2 = "generating_phase_2"
+    COMPLETED = "completed"
 
 
 class RFEArtifactType(str, Enum):
@@ -39,6 +41,19 @@ class RFEArtifactType(str, Enum):
     FEATURE_REFINEMENT = "feature_refinement"
     ARCHITECTURE = "architecture"
     EPICS_STORIES = "epics_stories"
+
+
+# Phase 1 artifacts (refinement phase)
+PHASE_1_ARTIFACTS = [
+    (RFEArtifactType.RFE_DESCRIPTION, "RFE Description"),
+    (RFEArtifactType.FEATURE_REFINEMENT, "Feature Refinement"),
+]
+
+# Phase 2 artifacts (detailed design phase)
+PHASE_2_ARTIFACTS = [
+    (RFEArtifactType.ARCHITECTURE, "Architecture"),
+    (RFEArtifactType.EPICS_STORIES, "Epics & Stories"),
+]
 
 
 class GenerateArtifactsEvent(Event):
@@ -120,40 +135,39 @@ class RFEBuilderWorkflow(Workflow):
                 except Exception as e:
                     print(f"Agent {persona_key} error: {e}")
 
+        # Summarize all agent analyses
+        if agent_insights:
+            await self._summarize_agent_analyses(ctx, agent_insights)
+
         # Build final RFE from insights
         final_rfe = await self._build_final_rfe(user_msg, agent_insights)
 
         return GenerateArtifactsEvent(final_rfe=final_rfe, context={})
 
     @step
-    async def generate_artifacts(
+    async def generate_phase_1_artifacts(
         self, ctx: Context, ev: GenerateArtifactsEvent
     ) -> StopEvent:
-        """Simple artifact generation"""
+        """Generate only Phase 1 artifacts (RFE + Feature Refinement)"""
 
         ctx.write_event_to_stream(
             UIEvent(
                 type="rfe_builder_progress",
                 data=RFEBuilderUIEventData(
-                    phase=RFEPhase.GENERATING,
-                    stage="generating",
-                    description="Generating artifacts...",
+                    phase=RFEPhase.GENERATING_PHASE_1,
+                    stage="generating_phase_1",
+                    description="Generating Phase 1 artifacts (RFE & Feature Refinement)...",
                     progress=50,
                 ),
             )
         )
 
-        artifacts = {}
-        artifact_types = [
-            (RFEArtifactType.RFE_DESCRIPTION, "RFE Description"),
-            (RFEArtifactType.FEATURE_REFINEMENT, "Feature Refinement"),
-            (RFEArtifactType.ARCHITECTURE, "Architecture"),
-            (RFEArtifactType.EPICS_STORIES, "Epics & Stories"),
-        ]
+        phase_1_artifacts = {}
 
-        for artifact_type, display_name in artifact_types:
+        # Generate only Phase 1 artifacts
+        for artifact_type, display_name in PHASE_1_ARTIFACTS:
             content = await self._generate_simple_artifact(artifact_type, ev.final_rfe)
-            artifacts[artifact_type.value] = content
+            phase_1_artifacts[artifact_type.value] = content
 
             # Emit artifact
             ctx.write_event_to_stream(
@@ -172,20 +186,106 @@ class RFEBuilderWorkflow(Workflow):
                 )
             )
 
-        # Done
+        # Phase 1 complete - ready for iteration and then phase transition
         ctx.write_event_to_stream(
             UIEvent(
                 type="rfe_builder_progress",
                 data=RFEBuilderUIEventData(
-                    phase=RFEPhase.EDITING,
-                    stage="completed",
-                    description="All artifacts generated!",
+                    phase=RFEPhase.PHASE_1_READY,
+                    stage="phase_1_ready",
+                    description="Phase 1 artifacts ready! You can now iterate on your RFE and Feature Refinement documents. When ready, continue to Phase 2 for Architecture and Epics & Stories.",
                     progress=100,
                 ),
             )
         )
 
-        return StopEvent(result={"final_rfe": ev.final_rfe, "artifacts": artifacts})
+        # Show Create RFE button after Phase 1 completion
+        ctx.write_event_to_stream(
+            UIEvent(
+                type="create_rfe_ready",
+                data={
+                    "message": "RFE documents are ready! Create the RFE in Jira when you're satisfied with the content.",
+                    "artifacts": list(phase_1_artifacts.keys()),
+                    "rfe_content": phase_1_artifacts.get("rfe_description", ""),
+                    "refinement_content": phase_1_artifacts.get(
+                        "feature_refinement", ""
+                    ),
+                },
+            )
+        )
+
+        return StopEvent(
+            result={
+                "final_rfe": ev.final_rfe,
+                "phase_1_artifacts": phase_1_artifacts,
+                "ready_for_rfe_creation": True,
+                "message": "Phase 1 complete! You can now iterate on your documents or create the RFE in Jira.",
+            }
+        )
+
+    async def _summarize_agent_analyses(
+        self, ctx: Context, agent_insights: List[Dict]
+    ) -> None:
+        """Summarize all agent analyses and stream as plain text to UI"""
+
+        # Create summary prompt
+        insights_text = "\n\n".join(
+            [
+                f"**{insight.get('persona', 'Agent')}:**\n{insight.get('analysis', 'No analysis')}"
+                for insight in agent_insights
+                if insight
+            ]
+        )
+
+        summary_prompt = f"""
+        Based on the following agent analyses, provide a concise executive summary that highlights:
+        - Key themes and patterns across all analyses
+        - Critical requirements and considerations
+        - Main risks or challenges identified
+        - Recommended next steps
+        
+        Agent Analyses:
+        {insights_text}
+        
+        Provide a clear, structured summary in markdown format.
+        """
+
+        # Stream the summary generation
+        ctx.write_event_to_stream(
+            UIEvent(
+                type="agent_analysis_summary",
+                data={
+                    "status": "generating",
+                    "message": "Synthesizing insights from all agent analyses...",
+                },
+            )
+        )
+
+        try:
+            response = await self.llm.acomplete(summary_prompt)
+            summary_text = response.text.strip()
+
+            # Stream the completed summary
+            ctx.write_event_to_stream(
+                UIEvent(
+                    type="agent_analysis_summary",
+                    data={
+                        "status": "complete",
+                        "summary": summary_text,
+                        "message": "Agent analysis summary complete",
+                    },
+                )
+            )
+        except Exception as e:
+            ctx.write_event_to_stream(
+                UIEvent(
+                    type="agent_analysis_summary",
+                    data={
+                        "status": "error",
+                        "message": f"Failed to generate summary: {str(e)}",
+                    },
+                )
+            )
 
     async def _build_final_rfe(
         self, user_input: str, agent_insights: List[Dict]

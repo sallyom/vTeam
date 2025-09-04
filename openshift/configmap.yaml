@@ -23,9 +23,6 @@ data:
   LLAMA_DEPLOY_PORT: "8000"
   LLAMA_DEPLOY_CONTROL_PLANE_PORT: "4501"
   
-  # File upload settings
-  MAX_UPLOAD_SIZE: "100MB"
-  UPLOAD_TIMEOUT: "300"
   
   # RAG settings
   INDEX_CACHE_SIZE: "1000"

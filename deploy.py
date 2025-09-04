@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple deployment script for RHOAI AI Feature Sizing with file upload
+Simple deployment script for RHOAI AI Feature Sizing
 """
 
 import asyncio

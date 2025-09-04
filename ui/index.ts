@@ -4,7 +4,9 @@ import { config } from "dotenv";
 // Load environment variables
 config();
 
+// RFE Builder Workflow Server - Primary workflow for creating RFE documents
 new LlamaIndexServer({
+	port: 3000,
 	uiConfig: {
 		componentsDir: "components",
 		layoutDir: "layout",
@@ -19,8 +21,9 @@ new LlamaIndexServer({
 			"Build an RFE for implementing a multi-tenant architecture in our SaaS product",
 			"Help me create an RFE for migrating our database from MySQL to PostgreSQL",
 			"I want to add AI-powered search functionality to our knowledge base",
-			"Create an RFE for implementing automated testing pipelines",
-			"Edit the architecture document to include more security considerations"
+			"Create an RFE for implementing automated testing pipelines"
 		],
 	},
 }).start();
+
+

@@ -12,7 +12,7 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: gp2  # Change this to match your OpenShift storage class
+  storageClassName: standard-csi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -28,4 +28,4 @@ spec:
   resources:
     requests:
       storage: 20Gi
-  storageClassName: gp2  # Change this to match your OpenShift storage class
+  storageClassName: standard-csi

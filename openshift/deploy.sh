@@ -2,6 +2,7 @@
 
 # OpenShift Deployment Script for RHOAI AI Feature Sizing Platform
 # Usage: ./deploy.sh [REGISTRY_URL] [IMAGE_TAG]
+# Note: This script deploys a pre-built image. Use build.sh first to build and push the image.
 
 set -e
 
@@ -15,7 +16,7 @@ NC='\033[0m' # No Color
 # Configuration
 NAMESPACE="rhoai-ai-feature-sizing"
 APP_NAME="rhoai-ai-feature-sizing"
-DEFAULT_REGISTRY="your-registry.com"
+DEFAULT_REGISTRY="quay.io/gkrumbach07/llama-index-demo"
 DEFAULT_TAG="latest"
 
 # Parse arguments
@@ -42,11 +43,6 @@ if ! command_exists oc; then
     exit 1
 fi
 
-if ! command_exists docker; then
-    echo -e "${RED}❌ Docker not found. Please install it first.${NC}"
-    exit 1
-fi
-
 echo -e "${GREEN}✅ Prerequisites check passed${NC}"
 echo ""
 
@@ -60,13 +56,10 @@ fi
 echo -e "${GREEN}✅ Authenticated as: $(oc whoami)${NC}"
 echo ""
 
-# Build and push Docker image
-echo -e "${YELLOW}🔨 Building Docker image...${NC}"
-docker build -t "${IMAGE_FULL_NAME}" .
-
-echo -e "${YELLOW}📤 Pushing Docker image to registry...${NC}"
-docker push "${IMAGE_FULL_NAME}"
-echo -e "${GREEN}✅ Image pushed successfully${NC}"
+# Verify image exists in registry (optional check)
+echo -e "${YELLOW}🔍 Using pre-built image...${NC}"
+echo -e "Image: ${BLUE}${IMAGE_FULL_NAME}${NC}"
+echo -e "${YELLOW}💡 If image doesn't exist, run: ${BLUE}./openshift/build.sh${NC}"
 echo ""
 
 # Update deployment with new image
@@ -82,8 +75,19 @@ echo -e "${YELLOW}🚀 Deploying to OpenShift...${NC}"
 echo -e "${BLUE}📁 Creating namespace...${NC}"
 oc apply -f openshift/namespace.yaml
 
-# Wait for namespace to be ready
-oc wait --for=condition=Active namespace/${NAMESPACE} --timeout=60s
+# Check if namespace already exists and is active
+if oc get namespace ${NAMESPACE} >/dev/null 2>&1; then
+    echo -e "${GREEN}✅ Namespace already exists${NC}"
+else
+    echo -e "${YELLOW}⏳ Waiting for namespace to be ready...${NC}"
+    # Wait for namespace to be ready with increased timeout
+    oc wait --for=condition=Active namespace/${NAMESPACE} --timeout=300s || {
+        echo -e "${RED}❌ Namespace creation timed out. Checking status...${NC}"
+        oc describe namespace ${NAMESPACE}
+        echo -e "${YELLOW}💡 Try running: oc delete namespace ${NAMESPACE} && sleep 10${NC}"
+        exit 1
+    }
+fi
 
 # Create persistent volume claims
 echo -e "${BLUE}💾 Creating persistent volumes...${NC}"
