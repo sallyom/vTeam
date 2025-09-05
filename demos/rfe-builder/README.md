@@ -88,23 +88,25 @@ The RFE Builder implements a 7-agent workflow system:
 
    **Option B: Google Cloud Vertex AI (Enterprise)**
    ```bash
-   # Set environment variables for Vertex AI
+   # IMPORTANT: See VERTEX_AI_SETUP.md for complete setup instructions
+   
+   # Quick setup (requires Google Cloud project with Vertex AI enabled):
    export CLAUDE_CODE_USE_VERTEX=1
    export CLOUD_ML_REGION=us-east5  # Your preferred region
    export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id
    export ANTHROPIC_MODEL='claude-sonnet-4@20250514'
    export ANTHROPIC_SMALL_FAST_MODEL='claude-3-5-haiku@20241022'
 
-   # Optional: Configure timeouts and retry behavior
-   export ANTHROPIC_TIMEOUT=30.0  # Connection timeout in seconds
-   export ANTHROPIC_MAX_RETRIES=3  # Maximum retry attempts
-
-   # Dependencies are included in requirements.txt
-   # No additional installation needed if using requirements.txt
-
-   # Ensure Google Cloud authentication is configured
+   # Authenticate with Google Cloud
    gcloud auth application-default login
+
+   # Verify your setup
+   python check_vertex_setup.py
    ```
+   
+   Note: When running in Vertex AI mode, an Anthropic API key is not required. Leave `ANTHROPIC_API_KEY` unset (recommended). If you keep a `.streamlit/secrets.toml`, you may remove the key or set `ANTHROPIC_API_KEY = "using-vertex-ai"` to explicitly indicate Vertex usage.
+   
+   📋 **For detailed Vertex AI setup:** See [`VERTEX_AI_SETUP.md`](./VERTEX_AI_SETUP.md)
 
 5. **Run the application**
    ```bash
@@ -173,9 +175,8 @@ If you see "I'm having trouble connecting to the AI service" with Vertex AI:
 
 2. **Test your configuration:**
    ```bash
-   # Verify Google Cloud authentication works
-   gcloud auth list
-   gcloud config get-value project
+   # Run the setup verification script
+   python check_vertex_setup.py
    ```
 
 3. **Common issues:**
@@ -198,6 +199,8 @@ If you see "I'm having trouble connecting to the AI service" with Vertex AI:
 If using direct Anthropic API:
 - Verify your API key in `.streamlit/secrets.toml`
 - Check your account has sufficient credits at https://console.anthropic.com/
+
+If you are using Vertex AI mode (`CLAUDE_CODE_USE_VERTEX=1`), `ANTHROPIC_API_KEY` is optional and can be omitted.
 
 ## 🧪 Testing
 
