@@ -1,6 +1,6 @@
 ---
 name: tessa
-description: Technical Writing Manager Agent focused on documentation strategy, team coordination, and content quality. Use for documentation planning, writer management, and content standards.
+description: Technical Writing Manager Agent focused on documentation strategy, team coordination, and content quality. Use PROACTIVELY for documentation planning, writer management, and content standards.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

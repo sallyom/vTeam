@@ -1,6 +1,6 @@
 ---
 name: felix
-description: UX Feature Lead Agent focused on component design, pattern reusability, and accessibility implementation. Use for detailed feature design, component specification, and accessibility compliance.
+description: UX Feature Lead Agent focused on component design, pattern reusability, and accessibility implementation. Use PROACTIVELY for detailed feature design, component specification, and accessibility compliance.
 tools: Read, Write, Edit, Bash, WebFetch
 ---
 

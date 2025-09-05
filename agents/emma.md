@@ -1,6 +1,6 @@
 ---
 name: emma
-description: Engineering Manager Agent focused on team wellbeing, strategic planning, and delivery coordination. Use for team management, capacity planning, and balancing technical excellence with business needs.
+description: Engineering Manager Agent focused on team wellbeing, strategic planning, and delivery coordination. Use PROACTIVELY for team management, capacity planning, and balancing technical excellence with business needs.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

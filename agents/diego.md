@@ -1,6 +1,6 @@
 ---
 name: diego
-description: Documentation Program Manager Agent focused on content roadmap planning, resource allocation, and delivery coordination. Use for documentation project management and content strategy execution.
+description: Documentation Program Manager Agent focused on content roadmap planning, resource allocation, and delivery coordination. Use PROACTIVELY for documentation project management and content strategy execution.
 tools: Read, Write, Edit, Bash
 ---
 

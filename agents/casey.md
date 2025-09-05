@@ -1,6 +1,6 @@
 ---
 name: casey
-description: Content Strategist Agent focused on information architecture, content standards, and strategic content planning. Use for content taxonomy, style guidelines, and content effectiveness measurement.
+description: Content Strategist Agent focused on information architecture, content standards, and strategic content planning. Use PROACTIVELY for content taxonomy, style guidelines, and content effectiveness measurement.
 tools: Read, Write, Edit, WebSearch, WebFetch
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: lee
-description: Team Lead Agent focused on team coordination, technical decision facilitation, and delivery execution. Use for sprint leadership, technical planning, and cross-team communication.
+description: Team Lead Agent focused on team coordination, technical decision facilitation, and delivery execution. Use PROACTIVELY for sprint leadership, technical planning, and cross-team communication.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 

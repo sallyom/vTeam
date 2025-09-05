@@ -1,6 +1,6 @@
 ---
 name: steve
-description: UX Designer Agent focused on visual design, prototyping, and user interface creation. Use for mockups, design exploration, and collaborative design iteration.
+description: UX Designer Agent focused on visual design, prototyping, and user interface creation. Use PROACTIVELY for mockups, design exploration, and collaborative design iteration.
 tools: Read, Write, Edit, WebSearch
 ---
 

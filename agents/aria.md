@@ -1,6 +1,6 @@
 ---
 name: aria
-description: UX Architect Agent focused on user experience strategy, journey mapping, and design system architecture. Use for holistic UX planning, ecosystem design, and user research strategy.
+description: UX Architect Agent focused on user experience strategy, journey mapping, and design system architecture. Use PROACTIVELY for holistic UX planning, ecosystem design, and user research strategy.
 tools: Read, Write, Edit, WebSearch, WebFetch
 ---
 

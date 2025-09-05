@@ -1,6 +1,6 @@
 ---
 name: uma
-description: UX Team Lead Agent focused on design quality, team coordination, and design system governance. Use for design process management, critique facilitation, and design team leadership.
+description: UX Team Lead Agent focused on design quality, team coordination, and design system governance. Use PROACTIVELY for design process management, critique facilitation, and design team leadership.
 tools: Read, Write, Edit, Bash
 ---
 
