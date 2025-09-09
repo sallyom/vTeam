@@ -1,0 +1,54 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: rhoai-ai-feature-sizing
+
+# Namespace for all resources
+namespace: rhoai-ai-feature-sizing
+
+# Resources to include in deployment
+resources:
+- namespace.yaml
+- pvc.yaml
+- configmap.yaml
+- secret.yaml
+- deployment.yaml
+- service.yaml
+- route.yaml
+
+# Common labels applied to all resources
+commonLabels:
+  app: rhoai-ai-feature-sizing
+  version: v1.0.0
+  managed-by: kustomize
+
+# Common annotations applied to all resources
+commonAnnotations:
+  deployment.kubernetes.io/revision: "1"
+
+# Name prefix for all resources (optional)
+# namePrefix: rhoai-
+
+# Images to replace (for different environments)
+images:
+- name: your-registry.com/rhoai-ai-feature-sizing
+  newName: your-registry.com/rhoai-ai-feature-sizing
+  newTag: latest
+
+# Configuration patches for different environments
+patchesStrategicMerge: []
+
+# JSON 6902 patches
+patches: []
+
+# Config map and secret generators
+configMapGenerator:
+- name: rhoai-env-config
+  envs:
+  - .env.production
+
+secretGenerator:
+- name: rhoai-api-keys
+  envs:
+  - .env.secrets

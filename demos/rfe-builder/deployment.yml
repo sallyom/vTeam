@@ -1,0 +1,41 @@
+name: rhoai-ai-feature-sizing
+
+control-plane:
+  port: 4501
+
+default-service: rfe-builder-workflow
+
+services:
+  rfe-builder-workflow:
+    name: RFE Builder Workflow
+    description: Primary workflow for creating RFE documents with AI agents
+    source:
+      type: local
+      name: src
+    path: src/rfe_builder_workflow:rfe_builder_workflow
+    python-dependencies:
+      - llama-index-llms-openai>=0.3.2
+      - llama-index-core>=0.12.0
+      - pyyaml>=6.0
+      - python-dotenv>=1.0.0
+  
+  jira-rfe-to-architecture-workflow:
+    name: Jira RFE to Architecture Workflow
+    description: Processes existing Jira RFEs to generate detailed architecture and implementation plans
+    source:
+      type: local
+      name: src
+    path: src/jira_rfe_to_architecture_workflow:jira_rfe_to_architecture_workflow
+    python-dependencies:
+      - llama-index-llms-openai>=0.3.2
+      - llama-index-core>=0.12.0
+      - pyyaml>=6.0
+      - python-dotenv>=1.0.0
+
+
+ui:
+  name: Chat UI
+  port: 3000
+  source:
+    type: local
+    name: ui

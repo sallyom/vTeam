@@ -1,326 +1,219 @@
-# RFE Builder - AI-Powered Workflow Platform
+# RHOAI AI Feature Sizing Platform
 
-[![CI/CD Pipeline](https://github.com/jeremyeder/vTeam/actions/workflows/ci.yml/badge.svg)](https://github.com/jeremyeder/vTeam/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/jeremyeder/vTeam/branch/main/graph/badge.svg)](https://codecov.io/gh/jeremyeder/vTeam)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+A production-ready multi-agent system for analyzing Request for Enhancement (RFE) descriptions using specialized AI personas with RAG-powered knowledge bases, built on **LlamaDeploy** and **@llamaindex/server**.
 
-RFE Builder is an interactive Streamlit web application that guides Request for Enhancement (RFE) submissions through a structured 7-step council review process with AI-powered assistance and enterprise integration.
+## Overview
 
-## 🚀 Features
+RHOAI uses 7 specialized AI agents working together to provide comprehensive feature analysis:
 
-### Phase 1 (Foundation)
-- **📊 Visual Workflow Management**: Interactive Mermaid diagram showing the complete RFE Council process
-- **👥 Multi-Agent System**: 7 specialized agent roles with dedicated dashboards
-- **📈 Progress Tracking**: Real-time status updates and step-by-step progression
-- **🔄 State Management**: Persistent RFE data with comprehensive history tracking
-- **📋 Role-Based Interfaces**: Customized dashboards for each workflow participant
-- **✅ Comprehensive Testing**: Full test coverage with CI/CD pipeline
+- **UX Designer (UXD)** - User experience, interface design, accessibility
+- **Product Manager (PM)** - Business requirements, prioritization, stakeholder alignment  
+- **Backend Engineer** - System architecture, APIs, database design
+- **Frontend Engineer** - React implementation, TypeScript, state management
+- **Architect** - Overall system design, integration patterns, scalability
+- **Product Owner** - Business value, acceptance criteria, stakeholder management
+- **SME/Researcher** - Domain expertise, industry best practices, research
 
-### Phase 2 (Conversational AI) ✨ **NEW**
-- **💬 AI-Powered RFE Creation**: Natural language RFE creation using Anthropic Claude
-- **🤖 Intelligent Agent Assistants**: Role-specific AI guidance for all 7 workflow agents
-- **🎯 Smart Recommendations**: Context-aware suggestions based on RFE content
-- **💰 Cost Optimization**: Token usage tracking and intelligent prompt management
-- **📊 Dynamic Prompting**: Workflow-aware AI assistance that adapts to current step
+## Features
 
-## 🏗️ Architecture
+- **🐍 Production Python Backend**: LlamaDeploy workflow orchestration with native Python LlamaIndex
+- **🟨 Modern TypeScript Frontend**: Professional chat UI powered by @llamaindex/server
+- **🤖 Multi-Agent Analysis**: Each agent analyzes RFEs from their specialized perspective
+- **📚 RAG Knowledge Bases**: Agents access domain-specific knowledge from configured data sources
+- **🚀 Production Ready**: Enterprise-grade deployment, monitoring, and scaling
+- **🔗 API Access**: Full REST API for programmatic integration
+- **📊 Real-time Progress**: Streaming responses and workflow observability
 
-### Agent Roles
+## Architecture
 
-The RFE Builder implements a 7-agent workflow system:
+### Production System Design
+```
+┌─────────────────────────────┐    ┌─────────────────────────────┐
+│     Python Backend          │    │   TypeScript Frontend       │
+│     (LlamaDeploy)           │    │   (@llamaindex/server)      │
+│                             │    │                             │
+│ • Multi-Agent Workflows     │────│ • Modern Chat Interface     │
+│ • RAG Vector Retrieval      │    │ • Real-time Updates         │
+│ • Python LlamaIndex v0.12+  │    │ • API Integration           │
+│ • Production Orchestration  │    │ • Professional UI           │
+└─────────────────────────────┘    └─────────────────────────────┘
+```
 
-- **📊 Parker (Product Manager)** - RFE prioritization and stakeholder communication
-- **🏛️ Archie (Architect)** - Technical review and acceptance criteria validation
-- **⭐ Stella (Staff Engineer)** - Completeness assessment and final approval
-- **📋 Olivia (Product Owner)** - Information gathering and requirement clarification
-- **👥 Lee (Team Lead)** - Impact assessment and resource planning
-- **💻 Taylor (Team Member)** - Technical impact evaluation
-- **🚀 Derek (Delivery Owner)** - Feature ticket creation and assignment
+### Agent Workflow
+1. **RFE Input** - User submits feature description via chat UI
+2. **Multi-Agent Analysis** - LlamaDeploy orchestrates all 7 agents simultaneously 
+3. **Knowledge Retrieval** - RAG system provides domain-specific context for each agent
+4. **Synthesis** - Comprehensive analysis combining all agent perspectives
+5. **Deliverables** - Component teams, architecture diagrams, implementation timeline
 
-### Workflow Steps
+## Prerequisites
 
-1. **Prioritize RFE** (Parker) - Business impact and priority assessment
-2. **Review RFE** (Archie) - Technical feasibility and architecture review
-3. **Completeness Check** (Stella) - Requirements validation and gap analysis
-4. **Acceptance Criteria** (Archie) - Final technical approval
-5. **Accept/Reject Decision** (Stella) - Final disposition
-6. **Communicate Assessment** (Parker) - Stakeholder notification
-7. **Create Feature Ticket** (Derek) - Implementation planning and assignment
+If you haven't installed uv, you can follow the instructions [here](https://docs.astral.sh/uv/getting-started/installation/) to install it.
 
-## 🔧 Installation
+You can configure [LLM model](https://docs.llamaindex.ai/en/stable/module_guides/models/llms) and [embedding model](https://docs.llamaindex.ai/en/stable/module_guides/models/embeddings) in [src/settings.py](src/settings.py).
 
-### Prerequisites
+You must also install `pnpm` globally
+```bash
+npm i -g pnpm
+```
 
-- Python 3.10 or higher
-- pip package manager
+Please setup their API keys in the `src/.env` file.
 
-### Setup
+## Installation
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/jeremyeder/vTeam.git
-   cd vTeam/demos/rfe-builder
-   ```
-
-2. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies**
-   ```bash
-   # Using uv (recommended for speed)
-   uv pip install -r requirements.txt
-   # OR: pip install -r requirements.txt
-   ```
-
-4. **Configure AI features (Phase 2 - Optional)**
-
-   **Option A: Direct Anthropic API (Standard)**
-   ```bash
-   # Copy secrets template
-   cp .streamlit/secrets.toml.template .streamlit/secrets.toml
-
-   # Edit .streamlit/secrets.toml and add your Anthropic API key
-   # Get your key from: https://console.anthropic.com/
-   ```
-
-   **Option B: Google Cloud Vertex AI (Enterprise)**
-   ```bash
-   # IMPORTANT: See VERTEX_AI_SETUP.md for complete setup instructions
-   
-   # Quick setup (requires Google Cloud project with Vertex AI enabled):
-   export CLAUDE_CODE_USE_VERTEX=1
-   export CLOUD_ML_REGION=us-east5  # Your preferred region
-   export ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project-id
-   export ANTHROPIC_MODEL='claude-sonnet-4@20250514'
-   export ANTHROPIC_SMALL_FAST_MODEL='claude-3-5-haiku@20241022'
-
-   # Authenticate with Google Cloud
-   gcloud auth application-default login
-
-   # Verify your setup
-   python check_vertex_setup.py
-   ```
-   
-   Note: When running in Vertex AI mode, an Anthropic API key is not required. Leave `ANTHROPIC_API_KEY` unset (recommended). If you keep a `.streamlit/secrets.toml`, you may remove the key or set `ANTHROPIC_API_KEY = "using-vertex-ai"` to explicitly indicate Vertex usage.
-   
-   📋 **For detailed Vertex AI setup:** See [`VERTEX_AI_SETUP.md`](./VERTEX_AI_SETUP.md)
-
-5. **Run the application**
-   ```bash
-   streamlit run app.py
-   ```
-
-6. **Open in browser**
-   - The app will automatically open at `http://localhost:8501`
-
-## 📖 Usage
-
-### Creating an RFE
-
-#### Option 1: AI-Powered Conversational Creation (Phase 2) ⭐ **Recommended**
-1. Navigate to **"💬 AI Chat RFE"** in the sidebar
-2. Describe your enhancement idea in natural language
-3. The AI assistant will guide you through gathering all necessary information
-4. Review the generated RFE draft and create when ready
-
-#### Option 2: Traditional Form-Based Creation
-1. Navigate to **"📝 Create RFE"** in the sidebar
-2. Fill in the required fields:
-   - **Title**: Brief descriptive title
-   - **Description**: Detailed enhancement description
-   - **Business Justification** (optional): Business value explanation
-   - **Technical Requirements** (optional): Technical constraints
-   - **Success Criteria** (optional): Implementation success metrics
-3. Click **"Create RFE"** to submit
-
-### Managing Workflow
-
-1. **View Progress**: Use **"📊 Workflow Overview"** to see visual workflow status
-2. **Agent Actions**: Access **"👥 Agent Dashboard"** to perform role-specific tasks
-3. **Track RFEs**: Monitor all submissions in **"📈 RFE List"** with filtering options
-
-### Agent-Specific Actions
-
-Each agent role has specific capabilities with AI-powered assistance:
-
-- **Parker (PM)**:
-  - Prioritize new RFEs with AI business impact analysis
-  - Draft stakeholder communications with AI assistance
-- **Archie (Architect)**:
-  - Review technical feasibility with AI architectural guidance
-  - Validate acceptance criteria with AI recommendations
-- **Stella (Staff Engineer)**:
-  - Assess RFE completeness with AI gap analysis
-  - Make final accept/reject decisions with AI decision support
-- **Derek (Delivery Owner)**:
-  - Generate JIRA tickets and development tasks with AI assistance
-- **Other Agents**: Specialized assessment functions with role-specific AI guidance
-
-## 🔧 Troubleshooting
-
-### AI Configuration Issues
-
-#### Vertex AI Connection Problems
-If you see "I'm having trouble connecting to the AI service" with Vertex AI:
-
-1. **Verify environment variables are set:**
-   ```bash
-   echo $CLAUDE_CODE_USE_VERTEX
-   echo $ANTHROPIC_VERTEX_PROJECT_ID
-   echo $CLOUD_ML_REGION
-   ```
-
-2. **Test your configuration:**
-   ```bash
-   # Run the setup verification script
-   python check_vertex_setup.py
-   ```
-
-3. **Common issues:**
-   - Missing Google Cloud authentication: Run `gcloud auth application-default login`
-   - Wrong project ID: Verify your GCP project has Vertex AI API enabled
-   - Missing dependencies: Ensure `anthropic[vertex]` and `google-cloud-aiplatform` are installed
-   - Incorrect region: Use a region that supports Claude models (e.g., `us-east5`, `us-central1`)
-   - Unsupported model: Verify your model is supported (see supported models below)
-   - Connection timeouts: Increase `ANTHROPIC_TIMEOUT` for slow networks
-   - Intermittent failures: The system will retry up to `ANTHROPIC_MAX_RETRIES` times automatically
-
-#### Supported Vertex AI Models
-- `claude-3-5-sonnet@20241022` (recommended)
-- `claude-3-5-haiku@20241022` (fast, cost-effective)
-- `claude-sonnet-4@20250514` (latest, most capable)
-- `claude-3-sonnet@20240229`
-- `claude-3-haiku@20240307`
-
-#### Direct API Issues
-If using direct Anthropic API:
-- Verify your API key in `.streamlit/secrets.toml`
-- Check your account has sufficient credits at https://console.anthropic.com/
-
-If you are using Vertex AI mode (`CLAUDE_CODE_USE_VERTEX=1`), `ANTHROPIC_API_KEY` is optional and can be omitted.
-
-## 🧪 Testing
-
-### Run Tests
+Both the SDK and the CLI are part of the LlamaDeploy Python package. To install, just run:
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=data --cov=components --cov-report=html
-
-# Run specific test categories
-pytest tests/test_rfe_models.py -v
-pytest tests/test_workflow.py -v
+uv sync
 ```
 
-### Test Coverage
+## Generate Index
 
-- **RFE Models**: Data structure validation, workflow state management
-- **Workflow Components**: Step progression, agent assignment, status tracking
-- **Integration**: Complete workflow simulation, boundary conditions
+Generate the embeddings of the documents in the `./data` directory:
 
-## 🔄 CI/CD Pipeline
-
-The project includes comprehensive GitHub Actions workflows:
-
-- **Continuous Integration**: Automated testing across Python 3.10 and 3.11
-- **Code Quality**: Linting with flake8, type checking with mypy
-- **Security Scanning**: Safety and bandit security analysis
-- **Streamlit Validation**: App syntax and import testing
-- **Build Artifacts**: Deployment package creation
-
-## 📁 Project Structure
-
-```
-rfe-builder/
-├── app.py                      # Main Streamlit application
-├── data/
-│   ├── __init__.py
-│   └── rfe_models.py          # Data models and state management
-├── components/
-│   ├── __init__.py
-│   ├── workflow.py            # Workflow visualization components
-│   ├── chat_interface.py      # AI-powered conversational interface
-│   └── ai_assistants.py       # Agent-specific AI assistants
-├── ai_models/
-│   ├── __init__.py
-│   ├── cost_tracker.py        # AI usage cost tracking
-│   └── prompt_manager.py      # AI prompt management
-├── prompts/
-│   ├── conversational_rfe_creation.yaml
-│   └── agents/                # Agent-specific prompt templates
-├── pages/
-│   └── parker_pm.py           # Agent-specific page (example)
-├── tests/
-│   ├── __init__.py
-│   ├── test_rfe_models.py     # Model tests
-│   └── test_workflow.py       # Workflow tests
-├── .streamlit/
-│   ├── secrets.toml.template  # Configuration template
-│   └── secrets.toml           # API credentials (not in git)
-├── .github/
-│   └── workflows/
-│       └── ci.yml             # CI/CD pipeline
-├── requirements.txt           # Dependencies
-└── README.md                  # This file
+```shell
+uv run generate
 ```
 
-## 🔮 Roadmap
+## Running the Deployment
 
-### Phase 2: Conversational Interface (Planned)
-- AI-powered chat interface for RFE creation
-- Natural language processing for requirement extraction
-- Context-aware form generation
-- Smart suggestions and auto-completion
+At this point we have all we need to run this deployment. Ideally, we would have the API server already running
+somewhere in the cloud, but to get started let's start an instance locally. Run the following python script
+from a shell:
 
-### Phase 3: Enterprise Integration (Planned)
-- Jira/GitHub Issues integration
-- Bi-directional data synchronization
-- Webhook support for real-time updates
-- API gateway for third-party integrations
+```
+$ uv run -m llama_deploy.apiserver
+INFO:     Started server process [10842]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:4501 (Press CTRL+C to quit)
+```
 
-### Phase 4: Advanced Intelligence (Planned)
-- Predictive analytics for RFE success rates
-- Automated impact assessment
-- Historical data analysis and insights
-- Custom reporting and dashboards
+From another shell, use the CLI, `llamactl`, to create the deployment:
 
-## 🤝 Contributing
+```
+$ uv run llamactl deploy deployment.yml
+Deployment successful: rhoai-ai-feature-sizing
+```
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass (`pytest`)
-6. Commit your changes (`git commit -m 'Add amazing feature'`)
-7. Push to the branch (`git push origin feature/amazing-feature`)
-8. Open a Pull Request
+## UI Interface
 
-## 📄 License
+LlamaDeploy will serve the UI through the apiserver. Point the browser to [http://localhost:4501/deployments/rhoai-ai-feature-sizing/ui](http://localhost:4501/deployments/rhoai-ai-feature-sizing/ui) to interact with your deployment through a user-friendly interface.
 
-This project is part of the vTeam repository and follows the same licensing terms.
+## API endpoints
 
-## 🙋 Support
+You can find all the endpoints in the [API documentation](http://localhost:4501/docs). To get started, you can try the following endpoints:
 
-For questions or issues:
-- Open an issue in the [vTeam repository](https://github.com/jeremyeder/vTeam/issues)
-- Tag issues with `rfe-builder` for faster response
+Create a new task:
 
-## 🎯 Phase 1 Success Criteria
+```bash
+curl -X POST 'http://localhost:4501/deployments/rhoai-ai-feature-sizing/tasks/create' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "input": "{\"user_msg\":\"Hello\",\"chat_history\":[]}",
+    "service_id": "rfe-builder-workflow"
+  }'
+```
 
-- [x] ✅ Basic workflow functional with all agent roles
-- [x] ✅ Visual workflow matches mermaid diagram
-- [x] ✅ RFE state persistence across sessions
-- [x] ✅ Comprehensive test coverage (>80%)
-- [x] ✅ CI/CD pipeline with automated testing
-- [x] ✅ Agent-specific interfaces functional
-- [x] ✅ Step progression and status tracking working
+Stream events:
 
----
+```bash
+curl 'http://localhost:4501/deployments/rhoai-ai-feature-sizing/tasks/0b411be6-005d-43f0-9b6b-6a0017f08002/events?session_id=dd36442c-45ca-4eaa-8d75-b4e6dad1a83e&raw_event=true' \
+  -H 'Content-Type: application/json'
+```
 
-**Built with ❤️ using Streamlit and Python**
+Note that the task_id and session_id are returned when creating a new task.
+
+## Use Case
+
+We have prepared a comprehensive RFE Builder workflow system that helps you interactively build RFEs with multi-agent collaboration, generate multiple artifacts, and edit them through chat.
+The main workflow is in [`src/rfe_builder_workflow.py`](src/rfe_builder_workflow.py).
+
+## Customize the UI
+
+The UI is served by LlamaDeploy, you can configure the UI by modifying the `uiConfig` in the [ui/index.ts](ui/index.ts) file.
+
+The following are the available options:
+
+- `starterQuestions`: Predefined questions for chat interface
+- `componentsDir`: Directory for custom event components
+- `layoutDir`: Directory for custom layout components
+- `llamaDeploy`: The LlamaDeploy configuration (deployment name and workflow name that defined in the [deployment.yml](deployment.yml) file)
+
+## Agent Configuration
+
+Agents are configured in YAML files in `src/agents/`. Each agent specifies:
+
+- **Persona & Role** - Name and domain expertise
+- **Data Sources** - Knowledge base directories or GitHub repositories  
+- **Analysis Prompts** - Structured prompts for consistent output
+- **Sample Knowledge** - Fallback knowledge when no custom data available
+
+Example agent configuration:
+```yaml
+name: "Frontend Engineer"
+persona: "FRONTEND_ENG"
+expertise: ["react", "typescript", "ui-components"]
+
+dataSources:
+  - "frontend-patterns"
+  - name: "react-docs"
+    type: "github"
+    source: "facebook/react"
+    options:
+      path: "docs/"
+```
+
+## Data Sources
+
+### Local Directories
+Place documentation in `data/` subdirectories matching agent data source names.
+
+### GitHub Repositories  
+Configure in agent YAML files. Python pipeline handles cloning and indexing.
+
+### Hybrid Loading
+1. **Python indexes** - Loaded first if available
+2. **Local directories** - TypeScript fallback for simple cases
+3. **Sample knowledge** - Built-in fallback for testing
+
+## Technical Stack
+
+- **Python** - Core workflow engine, agent coordination, LlamaDeploy orchestration
+- **TypeScript** - Modern UI configuration and customization
+- **LlamaIndex** - RAG system, vector stores, document processing, workflows
+- **LlamaDeploy** - Production deployment and service orchestration
+- **OpenAI** - Language model and embeddings
+- **YAML** - Agent configuration with structured definitions
+
+## Development
+
+```bash
+# Start with hot reload for development
+uv run -m llama_deploy.apiserver
+
+# In another terminal, deploy your changes
+uv run llamactl deploy deployment.yml
+```
+
+## File Structure
+
+```
+/
+├── src/agents/          # Agent YAML configurations  
+├── src/                # Core Python workflow and settings
+├── ui/                 # TypeScript UI configuration
+├── data/               # Local knowledge bases
+└── deployment.yml      # LlamaDeploy configuration
+```
+
+## Learn More
+
+- [LlamaIndex Documentation](https://docs.llamaindex.ai) - learn about LlamaIndex.
+- [Workflows Introduction](https://docs.llamaindex.ai/en/stable/understanding/workflows/) - learn about LlamaIndex workflows.
+- [LlamaDeploy GitHub Repository](https://github.com/run-llama/llama_deploy)
+- [Chat-UI Documentation](https://ts.llamaindex.ai/docs/chat-ui)
+
+You can check out [the LlamaIndex GitHub repository](https://github.com/run-llama/llama_index) - your feedback and contributions are welcome!
+
+This system provides a foundation for multi-agent RFE analysis with extensible agent configurations and flexible data source integration.

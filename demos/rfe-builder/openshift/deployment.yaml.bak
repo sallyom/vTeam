@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rhoai-ai-feature-sizing
+  namespace: rhoai-ai-feature-sizing
+  labels:
+    app: rhoai-ai-feature-sizing
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rhoai-ai-feature-sizing
+  template:
+    metadata:
+      labels:
+        app: rhoai-ai-feature-sizing
+    spec:
+      containers:
+      - name: rhoai-app
+        image: quay.io/gkrumbach07/llama-index-demo/rhoai-ai-feature-sizing:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 4501
+          name: control-plane
+        - containerPort: 8000
+          name: api-server
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        envFrom:
+        - configMapRef:
+            name: rhoai-config
+        - secretRef:
+            name: rhoai-secrets
+        volumeMounts:
+        - name: uploads-storage
+          mountPath: /app/uploads
+        - name: output-storage
+          mountPath: /app/output
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: uploads-storage
+        persistentVolumeClaim:
+          claimName: rhoai-uploads-pvc
+      - name: output-storage
+        persistentVolumeClaim:
+          claimName: rhoai-output-pvc
