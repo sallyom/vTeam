@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rhoai-config
+  namespace: rhoai-ai-feature-sizing
+  labels:
+    app: rhoai-ai-feature-sizing
+data:
+  # LLM Configuration
+  LLM_PROVIDER: "openai"
+  EMBEDDING_PROVIDER: "openai"
+  
+  # Chunk settings
+  CHUNK_SIZE: "512"
+  CHUNK_OVERLAP: "50"
+  
+  # Application settings
+  PYTHONUNBUFFERED: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+  
+  # LlamaDeploy settings
+  LLAMA_DEPLOY_HOST: "0.0.0.0"
+  LLAMA_DEPLOY_PORT: "8000"
+  LLAMA_DEPLOY_CONTROL_PLANE_PORT: "4501"
+  
+  
+  # RAG settings
+  INDEX_CACHE_SIZE: "1000"
+  
+  # Agent workflow settings
+  MAX_AGENT_ITERATIONS: "10"
+  AGENT_TIMEOUT: "300"

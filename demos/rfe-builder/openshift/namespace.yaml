@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rhoai-ai-feature-sizing
+  labels:
+    name: rhoai-ai-feature-sizing
+    app: rhoai-ai-feature-sizing
+    openshift.io/cluster-monitoring: "true"
+  annotations:
+    openshift.io/description: "RHOAI AI Feature Sizing Platform - Multi-agent system for analyzing Request for Enhancement (RFE) descriptions"
+    openshift.io/display-name: "RHOAI AI Feature Sizing"
