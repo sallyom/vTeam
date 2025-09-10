@@ -310,28 +310,9 @@ class RFEBuilderWorkflow(Workflow):
         )
 
         try:
-            # Stream the summary generation
-            accumulated_text = ""
-            char_count = 0
-
-            async for chunk in self.llm.astream_complete(summary_prompt):
-                accumulated_text += chunk.delta
-                char_count += len(chunk.delta)
-
-                # Stream update every 10 characters
-                if char_count >= 10:
-                    ctx.write_event_to_stream(
-                        UIEvent(
-                            type="agent_analysis_summary",
-                            data={
-                                "status": "streaming",
-                                "summary": accumulated_text,
-                                "message": "Generating analysis summary...",
-                                "timestamp": int(time.time() * 1000),
-                            },
-                        )
-                    )
-                    char_count = 0
+            # Generate the summary (non-streaming for now to avoid async issues)
+            response = await self.llm.acomplete(summary_prompt)
+            summary_text = response.text.strip()
 
             # Send final complete event
             ctx.write_event_to_stream(
@@ -339,7 +320,7 @@ class RFEBuilderWorkflow(Workflow):
                     type="agent_analysis_summary",
                     data={
                         "status": "complete",
-                        "summary": accumulated_text.strip(),
+                        "summary": summary_text,
                         "message": "Agent analysis summary complete",
                         "timestamp": int(time.time() * 1000),
                     },
