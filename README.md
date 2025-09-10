@@ -81,7 +81,7 @@ The system implements a 7-step refinement process with specialized AI agents:
 
 #### 1. Clone the Repository
 ```bash
-git clone https://github.com/jeremyeder/vTeam.git
+git clone https://github.com/red-hat-data-services/vTeam.git
 cd vTeam
 ```
 
