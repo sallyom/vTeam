@@ -1,0 +1,88 @@
+name: RFE Builder Tests
+
+on:
+  pull_request:
+    paths:
+      - 'demos/rfe-builder/**'
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+    paths:
+      - 'demos/rfe-builder/**'
+
+jobs:
+  test-rfe-builder:
+    name: Test RFE Builder Workflow
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
+    timeout-minutes: 15
+    
+    defaults:
+      run:
+        working-directory: demos/rfe-builder
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "demos/rfe-builder/uv.lock"
+
+      - name: Install project dependencies
+        run: |
+          uv pip install -e .
+          uv pip install pytest pytest-asyncio
+
+      - name: Validate environment setup
+        run: |
+          python --version
+          python -c "import sys; print(f'Python path: {sys.path}')"
+          python -c "import pytest; print(f'pytest version: {pytest.__version__}')"
+
+      - name: Run RFE Builder Tests
+        env:
+          # Set test environment variables
+          LLM_PROVIDER: anthropic
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Test configuration
+          ENABLE_ALL_AGENTS: true
+          MAX_SYNTHESIS_ITERATIONS: 1  # Reduce for CI speed
+          RAG_TOP_K: 5  # Reduce for CI speed
+        run: |
+          python -m pytest test_rfe_builder.py -v --tb=short --durations=10
+        continue-on-error: false
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rfe-builder-test-results
+          path: |
+            demos/rfe-builder/.pytest_cache/
+            demos/rfe-builder/test-results.xml
+          retention-days: 7
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## RFE Builder Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Working Directory**: demos/rfe-builder" >> $GITHUB_STEP_SUMMARY
+          echo "- **Python Version**: $(python --version)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test Command**: python -m pytest test_rfe_builder.py -v" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: LLM_PROVIDER=anthropic" >> $GITHUB_STEP_SUMMARY
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "- **Status**: ✅ All tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status**: ❌ Some tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
