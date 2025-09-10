@@ -18,33 +18,15 @@ from src.prompts import get_prompt, PROMPT_NAMES
 async def stream_structured_predict(
     output_cls, prompt_template, persona: str, **prompt_args
 ):
-    """Simple streaming with UI events every 50 chars"""
+    """Non-streaming structured predict to avoid coroutine issues"""
     try:
-        stream_generator = Settings.llm.astream_structured_predict(
+        # Use non-streaming version to avoid async generator coroutine warnings
+        response = await Settings.llm.astructured_predict(
             output_cls, prompt_template, **prompt_args
         )
-
-        accumulated_text = ""
-        char_count = 0
-        final_response = None
-
-        async for partial_response in stream_generator:
-            # Get text content
-            current_text = (
-                getattr(partial_response, "analysis", "")
-                or getattr(partial_response, "synthesis", "")
-                or str(partial_response)
-            )
-
-            if len(current_text) > len(accumulated_text):
-                char_count += len(current_text) - len(accumulated_text)
-                accumulated_text = current_text
-
-            final_response = partial_response
-
-        return final_response
+        return response
     except Exception as e:
-        print(f"Error in stream_structured_predict for {persona}: {e}")
+        print(f"Error in structured_predict for {persona}: {e}")
         # Return a basic response object
         return output_cls(analysis=f"Error during analysis: {str(e)}", persona=persona)
 
