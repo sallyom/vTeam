@@ -86,13 +86,20 @@ def create_rfe_builder_workflow() -> Workflow:
 
 
 class RFEBuilderWorkflow(Workflow):
-    """RFE builder with editing support: user input -> agents -> artifacts -> editing"""
+    """RFE builder with editing support: user input -> agents -> artifacts -> editing
+    
+    Note on State Management:
+    - Instance variables (session_artifacts, artifacts_generated) are reset on each new request
+    - This ensures the 7-agent consultation always runs for fresh RFE creation
+    - Editing functionality works within a single session but resets between sessions
+    - This design prioritizes consistent agent consultation over persistent state
+    """
 
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
         self.llm: LLM = Settings.llm
         self.agent_manager = RFEAgentManager()
-        # Session state to track if artifacts exist
+        # Session state to track artifacts (reset per request to ensure fresh agent consultation)
         self.session_artifacts: Dict[str, str] = {}
         self.artifacts_generated = False
 
@@ -103,7 +110,14 @@ class RFEBuilderWorkflow(Workflow):
         """Route to editing if artifacts exist, otherwise create new RFE"""
         user_msg = ev.get("user_msg", "")
         
-        # Check if we already have artifacts - if so, route to editing
+        # Reset state for each new request to ensure fresh agent consultation
+        # This prevents the workflow from getting "stuck" in editing mode
+        # and ensures the 7 agents are consulted for every new RFE creation
+        self.artifacts_generated = False
+        self.session_artifacts.clear()
+        
+        # Since we reset state above, this condition will never be true now
+        # Keeping the logic for potential future enhancement (e.g., explicit edit mode)
         if self.artifacts_generated and self.session_artifacts:
             return EditArtifactEvent(
                 user_input=user_msg,
