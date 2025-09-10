@@ -14,7 +14,7 @@ jobs:
       - name: Add issue to project
         uses: actions/add-to-project@v1.0.2
         with:
-          project-url: https://github.com/users/jeremyeder/projects/12
+          project-url: https://github.com/orgs/red-hat-data-services/projects/12
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   hierarchy-validation:

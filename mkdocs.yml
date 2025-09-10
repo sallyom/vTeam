@@ -1,0 +1,93 @@
+site_name: vTeam Documentation
+site_description: AI-powered automation system for engineering refinement
+site_author: Red Hat AI Engineering Team
+site_url: https://vteam-docs.example.com
+
+repo_name: red-hat-data-services/vTeam
+repo_url: https://github.com/red-hat-data-services/vTeam
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: red
+      accent: red
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: red  
+      accent: red
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.annotate
+
+nav:
+  - Home: index.md
+  - User Guide:
+    - user-guide/index.md
+    - Getting Started: user-guide/getting-started.md
+    - Creating RFEs: user-guide/creating-rfes.md
+    - Agent Framework: user-guide/agent-framework.md
+    - Configuration: user-guide/configuration.md
+    - Troubleshooting: user-guide/troubleshooting.md
+  - Developer Guide:
+    - developer-guide/index.md
+    - Setup: developer-guide/setup.md
+    - Architecture: developer-guide/architecture.md
+    - Plugin Development: developer-guide/plugin-development.md
+    - API Reference: developer-guide/api-reference.md
+    - Contributing: developer-guide/contributing.md
+    - Testing: developer-guide/testing.md
+  - Labs:
+    - labs/index.md
+    - Basic:
+      - First RFE: labs/basic/lab-1-first-rfe.md
+      - Agent Interaction: labs/basic/lab-2-agent-interaction.md
+      - Workflow Basics: labs/basic/lab-3-workflow-basics.md
+    - Advanced:
+      - Custom Agents: labs/advanced/lab-4-custom-agents.md
+      - Workflow Modification: labs/advanced/lab-5-workflow-modification.md
+      - Integration Testing: labs/advanced/lab-6-integration-testing.md
+    - Production:
+      - Jira Integration: labs/production/lab-7-jira-integration.md
+      - OpenShift Deployment: labs/production/lab-8-openshift-deployment.md
+      - Scaling & Optimization: labs/production/lab-9-scaling-optimization.md
+    - Solutions: 
+      - Basic Solutions: labs/solutions/solutions-basic.md
+      - Advanced Solutions: labs/solutions/solutions-advanced.md
+      - Production Solutions: labs/solutions/solutions-production.md
+  - Reference:
+    - reference/index.md
+    - Agent Personas: reference/agent-personas.md
+    - API Endpoints: reference/api-endpoints.md
+    - Configuration Schema: reference/configuration-schema.md
+    - Glossary: reference/glossary.md
+
+plugins:
+  - search
+  - mermaid2
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - codehilite
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed
+  - toc:
+      permalink: true

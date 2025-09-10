@@ -39,9 +39,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jeremyeder/vTeam"
-Repository = "https://github.com/jeremyeder/vTeam"
-Issues = "https://github.com/jeremyeder/vTeam/issues"
+Homepage = "https://github.com/red-hat-data-services/vTeam"
+Repository = "https://github.com/red-hat-data-services/vTeam"
+Issues = "https://github.com/red-hat-data-services/vTeam/issues"
 
 [project.scripts]
 vteam-config = "vteam_shared_configs.cli:main"

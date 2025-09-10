@@ -1,0 +1,33 @@
+# Claude Code ignore file
+# Directories and files that Claude Code should not analyze
+
+# Archived demos - outdated system, should not be used for documentation
+demos/rfe-builder-archived/
+
+# Git internal files
+.git/
+
+# Build outputs and caches
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+venv/
+env/
+.env
+.venv
+site/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
