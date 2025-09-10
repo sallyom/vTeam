@@ -1,23 +1,27 @@
-# Multi-stage build for RHOAI AI Feature Sizing with LlamaDeploy
+# Multi-stage build for RHOAI AI Feature Sizing with LlamaDeploy - Fedora Edition
 # For Apple Silicon Macs use: linux/arm64
 # For Intel Macs use: linux/amd64
-#FROM --platform=linux/amd64 python:3.11-slim AS base
-FROM python:3.13-slim AS base
+FROM --platform=linux/amd64 fedora:40 AS base
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV UV_NO_CACHE=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies and Python
+RUN dnf update -y && dnf install -y \
+    python3 \
+    python3-pip \
+    python3-devel \
     git \
     curl \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    gcc \
+    gcc-c++ \
+    make \
+    && dnf clean all
 
-# Install uv for dependency management
-RUN pip install --no-cache-dir uv
+# Install latest uv for dependency management
+RUN pip3 install --no-cache-dir --upgrade uv
 
 # Create application directory
 WORKDIR /app
@@ -38,8 +42,7 @@ RUN mkdir -p output/python-rag output/session-contexts
 
 # Install Node.js for UI build
 FROM base AS ui-builder
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs
+RUN dnf install -y nodejs npm && dnf clean all
 
 # Copy UI source
 COPY ui/ ./ui/
