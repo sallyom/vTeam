@@ -19,29 +19,34 @@ async def stream_structured_predict(
     output_cls, prompt_template, persona: str, **prompt_args
 ):
     """Simple streaming with UI events every 50 chars"""
-    stream_generator = await Settings.llm.astream_structured_predict(
-        output_cls, prompt_template, **prompt_args
-    )
-
-    accumulated_text = ""
-    char_count = 0
-    final_response = None
-
-    async for partial_response in stream_generator:
-        # Get text content
-        current_text = (
-            getattr(partial_response, "analysis", "")
-            or getattr(partial_response, "synthesis", "")
-            or str(partial_response)
+    try:
+        stream_generator = Settings.llm.astream_structured_predict(
+            output_cls, prompt_template, **prompt_args
         )
 
-        if len(current_text) > len(accumulated_text):
-            char_count += len(current_text) - len(accumulated_text)
-            accumulated_text = current_text
+        accumulated_text = ""
+        char_count = 0
+        final_response = None
 
-        final_response = partial_response
+        async for partial_response in stream_generator:
+            # Get text content
+            current_text = (
+                getattr(partial_response, "analysis", "")
+                or getattr(partial_response, "synthesis", "")
+                or str(partial_response)
+            )
 
-    return final_response
+            if len(current_text) > len(accumulated_text):
+                char_count += len(current_text) - len(accumulated_text)
+                accumulated_text = current_text
+
+            final_response = partial_response
+
+        return final_response
+    except Exception as e:
+        print(f"Error in stream_structured_predict for {persona}: {e}")
+        # Return a basic response object
+        return output_cls(analysis=f"Error during analysis: {str(e)}", persona=persona)
 
 
 # Streaming helper that yields events
@@ -49,44 +54,67 @@ async def stream_structured_predict_with_events(
     output_cls, prompt_template, persona: str, **prompt_args
 ):
     """Streaming version that yields UI events"""
-    stream_generator = await Settings.llm.astream_structured_predict(
-        output_cls, prompt_template, **prompt_args
-    )
-
-    accumulated_text = ""
-    char_count = 0
-    final_response = None
-
-    async for partial_response in stream_generator:
-        # Get text content
-        current_text = (
-            getattr(partial_response, "analysis", "")
-            or getattr(partial_response, "synthesis", "")
-            or str(partial_response)
+    try:
+        stream_generator = Settings.llm.astream_structured_predict(
+            output_cls, prompt_template, **prompt_args
         )
 
-        if len(current_text) > len(accumulated_text):
-            char_count += len(current_text) - len(accumulated_text)
-            accumulated_text = current_text
+        accumulated_text = ""
+        char_count = 0
+        final_response = None
 
-            # UI event every 50 chars
-            if char_count >= 50:
-                yield {
-                    "type": "streaming",
+        async for partial_response in stream_generator:
+            # Get text content
+            current_text = (
+                getattr(partial_response, "analysis", "")
+                or getattr(partial_response, "synthesis", "")
+                or str(partial_response)
+            )
+
+            if len(current_text) > len(accumulated_text):
+                char_count += len(current_text) - len(accumulated_text)
+                accumulated_text = current_text
+
+                # UI event every 50 chars
+                if char_count >= 50:
+                    yield {
+                        "type": "streaming",
+                        "persona": persona,
+                        "partial_content": accumulated_text,
+                        "streaming_type": "writing",
+                    }
+                    char_count = 0
+
+            final_response = partial_response
+
+        # Yield final result
+        if final_response:
+            yield {
+                "type": "complete",
+                "persona": persona,
+                "result": final_response.model_dump(),
+            }
+        else:
+            # Fallback if no streaming occurred
+            yield {
+                "type": "complete",
+                "persona": persona,
+                "result": {
+                    "analysis": "Analysis completed without streaming",
                     "persona": persona,
-                    "partial_content": accumulated_text,
-                    "streaming_type": "writing",
-                }
-                char_count = 0
-
-        final_response = partial_response
-
-    # Yield final result
-    yield {
-        "type": "complete",
-        "persona": persona,
-        "result": final_response.model_dump(),
-    }
+                },
+            }
+    except Exception as e:
+        print(f"Error in streaming for {persona}: {e}")
+        # Yield error result
+        yield {
+            "type": "complete",
+            "persona": persona,
+            "result": {
+                "analysis": f"Error during analysis: {str(e)}",
+                "persona": persona,
+            },
+        }
 
 
 # Pydantic models for structured outputs
