@@ -33,6 +33,7 @@ jobs:
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             Please review this pull request and provide feedback on:
             - Code quality and best practices
