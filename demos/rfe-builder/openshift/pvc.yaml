@@ -12,7 +12,6 @@ spec:
   resources:
     requests:
       storage: 10Gi
-  storageClassName: standard-csi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -28,4 +27,3 @@ spec:
   resources:
     requests:
       storage: 20Gi
-  storageClassName: standard-csi

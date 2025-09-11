@@ -1,0 +1,40 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main, working-openshift-two ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-push:
+    environment: ci
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: mkdir
+      run: mkdir ./data
+
+    - name: Log in to Quay.io
+      uses: docker/login-action@v3
+      with:
+        registry: quay.io
+        username: ${{ secrets.QUAY_USERNAME }}
+        password: ${{ secrets.QUAY_PASSWORD }}
+
+    - name: Log in to Red Hat Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: registry.redhat.io
+        username: ${{ secrets.REDHAT_USERNAME }}
+        password: ${{ secrets.REDHAT_PASSWORD }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: quay.io/redhat-et/rhoai-feature-sizing
