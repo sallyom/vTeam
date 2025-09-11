@@ -16,34 +16,52 @@ spec:
         app: rhoai-ai-feature-sizing
     spec:
       containers:
-      - name: rhoai-app
-        image: quay.io/gkrumbach07/llama-index-demo/rhoai-ai-feature-sizing:latest
-        imagePullPolicy: Always
-        ports:
-        - containerPort: 4501
-          name: control-plane
-        - containerPort: 8000
-          name: api-server
-        env:
+      - env:
+        - name: LLM_PROVIDER
+          value: openshift_ai
         - name: PYTHONUNBUFFERED
           value: "1"
+        - name: UV_CACHE_DIR
+          value: /.cache/uv
         envFrom:
         - configMapRef:
             name: rhoai-config
         - secretRef:
             name: rhoai-secrets
-        volumeMounts:
-        - name: uploads-storage
-          mountPath: /app/uploads
-        - name: output-storage
-          mountPath: /app/output
+        image: quay.io/ambient_code/vteam/rhoai-ai-feature-sizing:latest
+        imagePullPolicy: Always
+        name: rhoai-app
+        ports:
+          - containerPort: 4501
+            name: control-plane
+            protocol: TCP
+          - containerPort: 8000
+            name: api-server
+            protocol: TCP
+          - containerPort: 3000
+            name: ui
+            protocol: TCP
         resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
           limits:
-            memory: "1Gi"
-            cpu: "500m"
+            cpu: "6"
+            memory: 12Gi
+          requests:
+            cpu: "2"
+            memory: 12Gi
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /.cache
+          name: cache
+        - mountPath: /app/uploads
+          name: uploads-storage
+        - mountPath: /app/output
+          name: output-storage
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
       volumes:
       - name: uploads-storage
         persistentVolumeClaim:
@@ -51,3 +69,5 @@ spec:
       - name: output-storage
         persistentVolumeClaim:
           claimName: rhoai-output-pvc
+      - emptyDir: {}
+        name: cache

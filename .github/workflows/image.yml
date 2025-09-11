@@ -2,18 +2,26 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [ main, working-openshift-two ]
-  pull_request:
+    branches: [ main ]
+  pull_request_target:
     branches: [ main ]
 
 jobs:
   build-and-push:
-    environment: ci
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      id-token: write
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+
+    - name: change dir
+      run: cd demos/rfe-builder
 
     - name: mkdir
       run: mkdir ./data
@@ -32,9 +40,18 @@ jobs:
         username: ${{ secrets.REDHAT_USERNAME }}
         password: ${{ secrets.REDHAT_PASSWORD }}
 
-    - name: Build and push Docker image
+    - name: Build and push Docker image only for merge into main
+      if: github.ref == 'refs/heads/main'
       uses: docker/build-push-action@v5
       with:
         context: .
         push: true
         tags: quay.io/redhat-et/rhoai-feature-sizing
+
+    - name: Build Docker image for pull requests but don't push
+      if: github.ref != 'refs/heads/main'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: quay.io/redhat-et/rhoai-feature-sizing:pr-${{ github.event.pull_request.number }}
