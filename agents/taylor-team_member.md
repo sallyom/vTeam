@@ -1,5 +1,5 @@
 ---
-name: taylor
+name: Taylor (Team Member)
 description: Team Member Agent focused on pragmatic implementation, code quality, and technical execution. Use PROACTIVELY for hands-on development, technical debt assessment, and story point estimation.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
