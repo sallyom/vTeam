@@ -1,5 +1,5 @@
 ---
-name: terry
+name: Terry (Technical Writer)
 description: Technical Writer Agent focused on user-centered documentation, procedure testing, and clear technical communication. Use PROACTIVELY for hands-on documentation creation and technical accuracy validation.
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---

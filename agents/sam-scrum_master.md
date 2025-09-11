@@ -1,5 +1,5 @@
 ---
-name: sam
+name: Sam (Scrum Master)
 description: Scrum Master Agent focused on agile facilitation, impediment removal, and team process optimization. Use PROACTIVELY for sprint planning, retrospectives, and process improvement.
 tools: Read, Write, Edit, Bash
 ---
