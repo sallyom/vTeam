@@ -38,13 +38,16 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "demos/rfe-builder/uv.lock"
 
-      - name: Install project dependencies
+      - name: Create virtual environment and install dependencies
         run: |
+          uv venv
+          source .venv/bin/activate
           uv pip install -e .
           uv pip install pytest pytest-asyncio
 
       - name: Validate environment setup
         run: |
+          source .venv/bin/activate
           python --version
           python -c "import sys; print(f'Python path: {sys.path}')"
           python -c "import pytest; print(f'pytest version: {pytest.__version__}')"
@@ -60,6 +63,7 @@ jobs:
           MAX_SYNTHESIS_ITERATIONS: 1  # Reduce for CI speed
           RAG_TOP_K: 5  # Reduce for CI speed
         run: |
+          source .venv/bin/activate
           python -m pytest test_rfe_builder.py -v --tb=short --durations=10
         continue-on-error: false
 
@@ -76,6 +80,7 @@ jobs:
       - name: Test Summary
         if: always()
         run: |
+          source .venv/bin/activate
           echo "## RFE Builder Test Results" >> $GITHUB_STEP_SUMMARY
           echo "- **Working Directory**: demos/rfe-builder" >> $GITHUB_STEP_SUMMARY
           echo "- **Python Version**: $(python --version)" >> $GITHUB_STEP_SUMMARY

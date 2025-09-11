@@ -18,9 +18,9 @@ from src.prompts import get_prompt, PROMPT_NAMES
 async def stream_structured_predict(
     output_cls, prompt_template, persona: str, **prompt_args
 ):
-    """Non-streaming structured predict to avoid coroutine issues"""
+    """Non-streaming structured predict to avoid async iterator issues"""
     try:
-        # Use non-streaming version to avoid async generator coroutine warnings
+        # Use non-streaming version to avoid coroutine/async iterator issues
         response = await Settings.llm.astructured_predict(
             output_cls, prompt_template, **prompt_args
         )
@@ -31,43 +31,47 @@ async def stream_structured_predict(
         return output_cls(analysis=f"Error during analysis: {str(e)}", persona=persona)
 
 
-# Streaming helper that yields events
+# Event-based helper that simulates streaming
 async def stream_structured_predict_with_events(
     output_cls, prompt_template, persona: str, **prompt_args
 ):
-    """Streaming version that yields UI events"""
+    """Non-streaming version that yields UI events to simulate streaming"""
     try:
-        stream_generator = Settings.llm.astream_structured_predict(
+        # Emit starting event
+        yield {
+            "type": "streaming", 
+            "persona": persona,
+            "partial_content": "",
+            "streaming_type": "thinking"
+        }
+        
+        # Get the final response (non-streaming to avoid async iterator issues)
+        final_response = await Settings.llm.astructured_predict(
             output_cls, prompt_template, **prompt_args
         )
-
-        accumulated_text = ""
-        char_count = 0
-        final_response = None
-
-        async for partial_response in stream_generator:
-            # Get text content
-            current_text = (
-                getattr(partial_response, "analysis", "")
-                or getattr(partial_response, "synthesis", "")
-                or str(partial_response)
-            )
-
-            if len(current_text) > len(accumulated_text):
-                char_count += len(current_text) - len(accumulated_text)
-                accumulated_text = current_text
-
-                # UI event every 50 chars
-                if char_count >= 50:
-                    yield {
-                        "type": "streaming",
-                        "persona": persona,
-                        "partial_content": accumulated_text,
-                        "streaming_type": "writing",
-                    }
-                    char_count = 0
-
-            final_response = partial_response
+        
+        # Get the final text content
+        final_text = (
+            getattr(final_response, "analysis", "")
+            or getattr(final_response, "synthesis", "")
+            or str(final_response)
+        )
+        
+        # Emit progress events to simulate streaming
+        if len(final_text) > 0:
+            # Break text into chunks for simulated streaming
+            chunk_size = 50
+            for i in range(0, len(final_text), chunk_size):
+                chunk = final_text[:i + chunk_size]
+                yield {
+                    "type": "streaming",
+                    "persona": persona,
+                    "partial_content": chunk,
+                    "streaming_type": "writing",
+                }
+                # Small delay to simulate streaming (optional)
+                import asyncio
+                await asyncio.sleep(0.01)
 
         # Yield final result
         if final_response:
