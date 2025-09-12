@@ -43,7 +43,7 @@ func main() {
 	// Get ambient-code runner image from environment or use default
 	ambientCodeRunnerImage = os.Getenv("AMBIENT_CODE_RUNNER_IMAGE")
 	if ambientCodeRunnerImage == "" {
-		ambientCodeRunnerImage = "quay.io/ambient_code/claude-code-runner:latest"
+		ambientCodeRunnerImage = "quay.io/ambient_code/vteam-claude-runner:latest"
 	}
 
 	log.Printf("Research Session Operator starting in namespace: %s", namespace)

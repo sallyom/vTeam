@@ -18,7 +18,7 @@ spec:
       serviceAccountName: backend-api
       containers:
       - name: backend-api
-        image: quay.io/ambient_code/backend:latest
+        image: quay.io/ambient_code/vteam-backend:latest
         ports:
         - containerPort: 8080
           name: http
