@@ -20,11 +20,8 @@ jobs:
       with:
         ref: ${{ github.event.pull_request.head.sha }}
 
-    - name: change dir
-      run: cd demos/rfe-builder
-
     - name: mkdir
-      run: mkdir ./data
+      run: mkdir demos/rfe-builder/data
 
     - name: Log in to Quay.io
       uses: docker/login-action@v3
@@ -44,7 +41,7 @@ jobs:
       if: github.ref == 'refs/heads/main'
       uses: docker/build-push-action@v5
       with:
-        context: .
+        context: demos/rfe-builder
         push: true
         tags: quay.io/redhat-et/rhoai-feature-sizing
 
@@ -52,6 +49,6 @@ jobs:
       if: github.ref != 'refs/heads/main'
       uses: docker/build-push-action@v5
       with:
-        context: .
+        context: demos/rfe-builder
         push: false
         tags: quay.io/redhat-et/rhoai-feature-sizing:pr-${{ github.event.pull_request.number }}
