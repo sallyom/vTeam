@@ -1,38 +1,41 @@
+---
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: rhoai-api
   labels:
     app: rhoai-ai-feature-sizing
     component: api
+  name: rhoai-api
 spec:
+  host: ''
+  port:
+    targetPort: api-server
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
   to:
     kind: Service
     name: rhoai-ai-feature-sizing
     weight: 100
-  port:
-    targetPort: api-server
-  tls:
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
   wildcardPolicy: None
 ---
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: rhoai-ui
   labels:
     app: rhoai-ai-feature-sizing
     component: ui
+  name: rhoai-ui
 spec:
-  to:
-    kind: Service
-    name: rhoai-ui
-    weight: 100
+  host: ''
+  path: /deployments/rhoai-ai-feature-sizing/ui
   port:
     targetPort: ui
-  path: /deployments/rhoai-ai-feature-sizing/ui
   tls:
-    termination: edge
     insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+  to:
+    kind: Service
+    name: rhoai-ai-feature-sizing
+    weight: 100
   wildcardPolicy: None

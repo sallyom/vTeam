@@ -1,81 +1,50 @@
-# Multi-stage build for RHOAI AI Feature Sizing with LlamaDeploy
-# For Apple Silicon Macs use: linux/arm64
-# For Intel Macs use: linux/amd64
-#FROM --platform=linux/amd64 python:3.11-slim AS base
-FROM python:3.13-slim AS base
+FROM registry.redhat.io/ubi9/python-311@sha256:ed423c14020369e28f1a9ecb6ea74eb1e23b521c9fd82e3690bb53300086c571
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV UV_NO_CACHE=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    curl \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install uv for dependency management
-RUN pip install --no-cache-dir uv
-
-# Create application directory
 WORKDIR /app
 
-# Copy dependency files
-COPY pyproject.toml uv.lock* README.md ./
+# Ensure proper permissions for the app directory
+USER root
+RUN dnf -y install nc && dnf clean all
+RUN chown -R 1001:0 /app && chmod -R g+rwX /app
+COPY startup.sh ./
 
-# Install Python dependencies
-RUN uv sync --no-dev --frozen && chmod -R g+w .venv
+RUN chmod +x startup.sh && chown 1001:0 startup.sh
 
-# Copy source code
-COPY src/ ./src/
+USER 1001
+
+# Set UV cache directory to app directory where we have permissions
+ENV UV_CACHE_DIR=/app/.cache/uv
+RUN mkdir -p /app/.cache/uv
+
+COPY pyproject.toml ./
+COPY uv.lock ./
+COPY README.md ./
+
+RUN pip install uv && uv sync --frozen
+
+COPY src ./src
+COPY ui ./ui
+COPY data ./data
 COPY deployment.yml ./
-COPY deploy.py ./
 
-# Create necessary directories
-RUN mkdir -p output/python-rag output/session-contexts
-
-# Install Node.js for UI build
-FROM base AS ui-builder
-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
-    && apt-get install -y nodejs
-
-# Copy UI source
-COPY ui/ ./ui/
+# Install UI dependencies
 WORKDIR /app/ui
 
-# Install UI dependencies and build
-RUN npm install
-RUN npm run build
+# Configure npm to use user directory for global installs
+RUN mkdir -p /app/.npm-global
+ENV NPM_CONFIG_PREFIX=/app/.npm-global
+ENV PATH=/app/.npm-global/bin:$PATH
 
-# Final production stage
-FROM base AS production
+RUN npm i -g pnpm
+WORKDIR /app
 
-# Copy built UI from ui-builder stage
-COPY --from=ui-builder /app/ui/dist ./ui/dist
-COPY --from=ui-builder /app/ui/package.json ./ui/
+RUN uv run generate
 
-# Copy Python application files (avoiding node_modules)
-COPY --from=ui-builder /app/src ./src
-COPY --from=ui-builder /app/output ./output
-COPY --from=ui-builder /app/deploy.py ./
-COPY --from=ui-builder /app/deployment.yml ./
-COPY --from=ui-builder /app/pyproject.toml ./
-COPY --from=ui-builder /app/uv.lock* ./
-COPY --from=ui-builder /app/README.md ./
+RUN chmod -R g+w .venv/
 
-# Set permissions for OpenShift (any user can access)
-# Include .venv directory for uv operations
-RUN chmod -R g+w /app/src /app/output /app/deploy.py /app/deployment.yml /app/.venv && \
-    chmod g+w /tmp
+ENV HOME=/app
+RUN mkdir -p /app/.config/llamactl && chmod -R 777 /app/.config
 
-# Expose ports
-EXPOSE 4501 8000
+EXPOSE 4501
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-# Start the application
-CMD ["uv", "run", "python", "deploy.py"]
+CMD ["./startup.sh"]
