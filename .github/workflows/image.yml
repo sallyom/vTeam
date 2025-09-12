@@ -43,7 +43,7 @@ jobs:
       with:
         context: demos/rfe-builder
         push: true
-        tags: quay.io/redhat-et/rhoai-feature-sizing
+        tags: quay.io/ambient_code/vteam
 
     - name: Build Docker image for pull requests but don't push
       if: github.ref != 'refs/heads/main'
@@ -51,4 +51,4 @@ jobs:
       with:
         context: demos/rfe-builder
         push: false
-        tags: quay.io/redhat-et/rhoai-feature-sizing:pr-${{ github.event.pull_request.number }}
+        tags: quay.io/ambient_code/vteam:pr-${{ github.event.pull_request.number }}
