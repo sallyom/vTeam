@@ -89,9 +89,6 @@ Before deploying the Ambient Agentic Runner, ensure you have:
 ### Required Accounts & API Keys
 - **Anthropic API Key** - Get one from [Anthropic Console](https://console.anthropic.com/)
 
-### System Requirements
-- **Kubernetes cluster**: Minimum 2 CPU cores, 4GB RAM, 10GB storage
-- **Local development**: 4 CPU cores, 8GB RAM, 20GB free disk space
 
 ## Quick Start
 

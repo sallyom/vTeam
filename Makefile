@@ -47,29 +47,29 @@ build-all: build-frontend build-backend build-operator build-runner ## Build all
 # Build individual components
 build-frontend: ## Build the frontend container image
 	@echo "Building frontend image with $(CONTAINER_ENGINE)..."
-	cd frontend && $(CONTAINER_ENGINE) build $(PLATFORM_FLAG) $(BUILD_FLAGS) -t $(FRONTEND_IMAGE) .
+	cd components/frontend && $(CONTAINER_ENGINE) build $(PLATFORM_FLAG) $(BUILD_FLAGS) -t $(FRONTEND_IMAGE) .
 
 build-backend: ## Build the backend API container image
 	@echo "Building backend image with $(CONTAINER_ENGINE)..."
-	cd backend && $(CONTAINER_ENGINE) build $(PLATFORM_FLAG) $(BUILD_FLAGS) -t $(BACKEND_IMAGE) .
+	cd components/backend && $(CONTAINER_ENGINE) build $(PLATFORM_FLAG) $(BUILD_FLAGS) -t $(BACKEND_IMAGE) .
 
 build-operator: ## Build the operator container image
 	@echo "Building operator image with $(CONTAINER_ENGINE)..."
-	cd operator && $(CONTAINER_ENGINE) build $(PLATFORM_FLAG) $(BUILD_FLAGS) -t $(OPERATOR_IMAGE) .
+	cd components/operator && $(CONTAINER_ENGINE) build $(PLATFORM_FLAG) $(BUILD_FLAGS) -t $(OPERATOR_IMAGE) .
 
 build-runner: ## Build the Claude Code runner container image
 	@echo "Building Claude Code runner image with $(CONTAINER_ENGINE)..."
-	cd runners/claude-code-runner && $(CONTAINER_ENGINE) build $(PLATFORM_FLAG) $(BUILD_FLAGS) -t $(RUNNER_IMAGE) .
+	cd components/runners/claude-code-runner && $(CONTAINER_ENGINE) build $(PLATFORM_FLAG) $(BUILD_FLAGS) -t $(RUNNER_IMAGE) .
 
 # Kubernetes deployment
 deploy: ## Deploy all components to Kubernetes
 	@echo "Deploying to Kubernetes..."
-	cd manifests && ./deploy.sh
+	cd components/manifests && ./deploy.sh
 
 # Cleanup
 clean: ## Clean up all Kubernetes resources
 	@echo "Cleaning up Kubernetes resources..."
-	cd manifests && ./deploy.sh clean
+	cd components/manifests && ./deploy.sh clean
 
 
 
