@@ -33,10 +33,10 @@ PLATFORM_FLAG :=
 endif
 
 # Docker image tags
-FRONTEND_IMAGE ?= frontend:latest
-BACKEND_IMAGE ?= backend:latest
-OPERATOR_IMAGE ?= operator:latest
-RUNNER_IMAGE ?= claude-code-runner:latest
+FRONTEND_IMAGE ?= vteam_frontend:latest
+BACKEND_IMAGE ?= vteam_backend:latest
+OPERATOR_IMAGE ?= vteam_operator:latest
+RUNNER_IMAGE ?= vteam_claude_runner:latest
 
 # Docker registry operations (customize REGISTRY as needed)
 REGISTRY ?= your-registry.com

@@ -51,13 +51,13 @@ func main() {
 	// API routes
 	api := r.Group("/api")
 	{
-		api.GET("/research-sessions", listResearchSessions)
-		api.GET("/research-sessions/:name", getResearchSession)
-		api.POST("/research-sessions", createResearchSession)
-		api.DELETE("/research-sessions/:name", deleteResearchSession)
-		api.PUT("/research-sessions/:name/status", updateResearchSessionStatus)
-		api.PUT("/research-sessions/:name/displayname", updateResearchSessionDisplayName)
-		api.POST("/research-sessions/:name/stop", stopResearchSession)
+		api.GET("/agentic-sessions", listAgenticSessions)
+		api.GET("/agentic-sessions/:name", getAgenticSession)
+		api.POST("/agentic-sessions", createAgenticSession)
+		api.DELETE("/agentic-sessions/:name", deleteAgenticSession)
+		api.PUT("/agentic-sessions/:name/status", updateAgenticSessionStatus)
+		api.PUT("/agentic-sessions/:name/displayname", updateAgenticSessionDisplayName)
+		api.POST("/agentic-sessions/:name/stop", stopAgenticSession)
 	}
 
 	// Health check endpoint
@@ -110,16 +110,16 @@ func initK8sClients() error {
 	return nil
 }
 
-// ResearchSession represents the structure of our custom resource
-type ResearchSession struct {
+// AgenticSession represents the structure of our custom resource
+type AgenticSession struct {
 	APIVersion string                 `json:"apiVersion"`
 	Kind       string                 `json:"kind"`
 	Metadata   map[string]interface{} `json:"metadata"`
-	Spec       ResearchSessionSpec    `json:"spec"`
-	Status     *ResearchSessionStatus `json:"status,omitempty"`
+	Spec       AgenticSessionSpec     `json:"spec"`
+	Status     *AgenticSessionStatus  `json:"status,omitempty"`
 }
 
-type ResearchSessionSpec struct {
+type AgenticSessionSpec struct {
 	Prompt      string      `json:"prompt" binding:"required"`
 	WebsiteURL  string      `json:"websiteURL" binding:"required,url"`
 	DisplayName string      `json:"displayName"`
@@ -141,7 +141,7 @@ type MessageObject struct {
 	ToolUseIsError *bool  `json:"tool_use_is_error,omitempty"`
 }
 
-type ResearchSessionStatus struct {
+type AgenticSessionStatus struct {
 	Phase          string          `json:"phase,omitempty"`
 	Message        string          `json:"message,omitempty"`
 	StartTime      *string         `json:"startTime,omitempty"`
@@ -152,7 +152,7 @@ type ResearchSessionStatus struct {
 	Messages       []MessageObject `json:"messages,omitempty"`
 }
 
-type CreateResearchSessionRequest struct {
+type CreateAgenticSessionRequest struct {
 	Prompt      string       `json:"prompt" binding:"required"`
 	WebsiteURL  string       `json:"websiteURL" binding:"required,url"`
 	DisplayName string       `json:"displayName,omitempty"`
@@ -160,28 +160,28 @@ type CreateResearchSessionRequest struct {
 	Timeout     *int         `json:"timeout,omitempty"`
 }
 
-// getResearchSessionResource returns the GroupVersionResource for ResearchSession
-func getResearchSessionResource() schema.GroupVersionResource {
+// getAgenticSessionResource returns the GroupVersionResource for AgenticSession
+func getAgenticSessionResource() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
-		Group:    "research.example.com",
+		Group:    "vteam.ambient-code",
 		Version:  "v1",
-		Resource: "researchsessions",
+		Resource: "agenticsessions",
 	}
 }
 
-func listResearchSessions(c *gin.Context) {
-	gvr := getResearchSessionResource()
+func listAgenticSessions(c *gin.Context) {
+	gvr := getAgenticSessionResource()
 
 	list, err := dynamicClient.Resource(gvr).Namespace(namespace).List(context.TODO(), v1.ListOptions{})
 	if err != nil {
-		log.Printf("Failed to list research sessions: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list research sessions"})
+		log.Printf("Failed to list agentic sessions: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list agentic sessions"})
 		return
 	}
 
-	var sessions []ResearchSession
+	var sessions []AgenticSession
 	for _, item := range list.Items {
-		session := ResearchSession{
+		session := AgenticSession{
 			APIVersion: item.GetAPIVersion(),
 			Kind:       item.GetKind(),
 			Metadata:   item.Object["metadata"].(map[string]interface{}),
@@ -201,22 +201,22 @@ func listResearchSessions(c *gin.Context) {
 	c.JSON(http.StatusOK, sessions)
 }
 
-func getResearchSession(c *gin.Context) {
+func getAgenticSession(c *gin.Context) {
 	name := c.Param("name")
-	gvr := getResearchSessionResource()
+	gvr := getAgenticSessionResource()
 
 	item, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(context.TODO(), name, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Research session not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Agentic session not found"})
 			return
 		}
-		log.Printf("Failed to get research session %s: %v", name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get research session"})
+		log.Printf("Failed to get agentic session %s: %v", name, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
 		return
 	}
 
-	session := ResearchSession{
+	session := AgenticSession{
 		APIVersion: item.GetAPIVersion(),
 		Kind:       item.GetKind(),
 		Metadata:   item.Object["metadata"].(map[string]interface{}),
@@ -233,8 +233,8 @@ func getResearchSession(c *gin.Context) {
 	c.JSON(http.StatusOK, session)
 }
 
-func createResearchSession(c *gin.Context) {
-	var req CreateResearchSessionRequest
+func createAgenticSession(c *gin.Context) {
+	var req CreateAgenticSessionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -265,12 +265,12 @@ func createResearchSession(c *gin.Context) {
 
 	// Generate unique name
 	timestamp := time.Now().Unix()
-	name := fmt.Sprintf("research-session-%d", timestamp)
+	name := fmt.Sprintf("agentic-session-%d", timestamp)
 
 	// Create the custom resource
 	session := map[string]interface{}{
-		"apiVersion": "research.example.com/v1",
-		"kind":       "ResearchSession",
+		"apiVersion": "vteam.ambient-code/v1",
+		"kind":       "AgenticSession",
 		"metadata": map[string]interface{}{
 			"name":      name,
 			"namespace": namespace,
@@ -291,42 +291,42 @@ func createResearchSession(c *gin.Context) {
 		},
 	}
 
-	gvr := getResearchSessionResource()
+	gvr := getAgenticSessionResource()
 	obj := &unstructured.Unstructured{Object: session}
 
 	created, err := dynamicClient.Resource(gvr).Namespace(namespace).Create(context.TODO(), obj, v1.CreateOptions{})
 	if err != nil {
-		log.Printf("Failed to create research session: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create research session"})
+		log.Printf("Failed to create agentic session: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create agentic session"})
 		return
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
-		"message": "Research session created successfully",
+		"message": "Agentic session created successfully",
 		"name":    name,
 		"uid":     created.GetUID(),
 	})
 }
 
-func deleteResearchSession(c *gin.Context) {
+func deleteAgenticSession(c *gin.Context) {
 	name := c.Param("name")
-	gvr := getResearchSessionResource()
+	gvr := getAgenticSessionResource()
 
 	err := dynamicClient.Resource(gvr).Namespace(namespace).Delete(context.TODO(), name, v1.DeleteOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Research session not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Agentic session not found"})
 			return
 		}
-		log.Printf("Failed to delete research session %s: %v", name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete research session"})
+		log.Printf("Failed to delete agentic session %s: %v", name, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete agentic session"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Research session deleted successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Agentic session deleted successfully"})
 }
 
-func updateResearchSessionStatus(c *gin.Context) {
+func updateAgenticSessionStatus(c *gin.Context) {
 	name := c.Param("name")
 
 	var statusUpdate map[string]interface{}
@@ -335,17 +335,17 @@ func updateResearchSessionStatus(c *gin.Context) {
 		return
 	}
 
-	gvr := getResearchSessionResource()
+	gvr := getAgenticSessionResource()
 
 	// Get current resource
 	item, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(context.TODO(), name, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Research session not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Agentic session not found"})
 			return
 		}
-		log.Printf("Failed to get research session %s: %v", name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get research session"})
+		log.Printf("Failed to get agentic session %s: %v", name, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
 		return
 	}
 
@@ -362,15 +362,15 @@ func updateResearchSessionStatus(c *gin.Context) {
 	// Update the resource
 	_, err = dynamicClient.Resource(gvr).Namespace(namespace).Update(context.TODO(), item, v1.UpdateOptions{})
 	if err != nil {
-		log.Printf("Failed to update research session status %s: %v", name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update research session status"})
+		log.Printf("Failed to update agentic session status %s: %v", name, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update agentic session status"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Research session status updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Agentic session status updated successfully"})
 }
 
-func updateResearchSessionDisplayName(c *gin.Context) {
+func updateAgenticSessionDisplayName(c *gin.Context) {
 	name := c.Param("name")
 
 	var displayNameUpdate struct {
@@ -381,17 +381,17 @@ func updateResearchSessionDisplayName(c *gin.Context) {
 		return
 	}
 
-	gvr := getResearchSessionResource()
+	gvr := getAgenticSessionResource()
 
 	// Get current resource
 	item, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(context.TODO(), name, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Research session not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Agentic session not found"})
 			return
 		}
-		log.Printf("Failed to get research session %s: %v", name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get research session"})
+		log.Printf("Failed to get agentic session %s: %v", name, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
 		return
 	}
 
@@ -406,27 +406,27 @@ func updateResearchSessionDisplayName(c *gin.Context) {
 	// Update the resource
 	_, err = dynamicClient.Resource(gvr).Namespace(namespace).Update(context.TODO(), item, v1.UpdateOptions{})
 	if err != nil {
-		log.Printf("Failed to update research session displayName %s: %v", name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update research session displayName"})
+		log.Printf("Failed to update agentic session displayName %s: %v", name, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update agentic session displayName"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Research session displayName updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Agentic session displayName updated successfully"})
 }
 
-func stopResearchSession(c *gin.Context) {
+func stopAgenticSession(c *gin.Context) {
 	name := c.Param("name")
-	gvr := getResearchSessionResource()
+	gvr := getAgenticSessionResource()
 
 	// Get current resource
 	item, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(context.TODO(), name, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Research session not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "Agentic session not found"})
 			return
 		}
-		log.Printf("Failed to get research session %s: %v", name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get research session"})
+		log.Printf("Failed to get agentic session %s: %v", name, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
 		return
 	}
 
@@ -443,7 +443,7 @@ func stopResearchSession(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Attempting to stop research session %s (current phase: %s)", name, currentPhase)
+	log.Printf("Attempting to stop agentic session %s (current phase: %s)", name, currentPhase)
 
 	// Get job name from status
 	jobName, jobExists := status["jobName"].(string)
@@ -455,16 +455,16 @@ func stopResearchSession(c *gin.Context) {
 			// Don't fail the request if job deletion fails - continue with status update
 			log.Printf("Continuing with status update despite job deletion failure")
 		} else {
-			log.Printf("Deleted job %s for research session %s", jobName, name)
+			log.Printf("Deleted job %s for agentic session %s", jobName, name)
 		}
 	} else {
 		// Handle case where job was never created or jobName is missing
-		log.Printf("No job found to delete for research session %s", name)
+		log.Printf("No job found to delete for agentic session %s", name)
 	}
 
 	// Update status to Stopped
 	status["phase"] = "Stopped"
-	status["message"] = "Research session stopped by user"
+	status["message"] = "Agentic session stopped by user"
 	status["completionTime"] = time.Now().Format(time.RFC3339)
 
 	// Update the resource
@@ -472,22 +472,22 @@ func stopResearchSession(c *gin.Context) {
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Session was deleted while we were trying to update it
-			log.Printf("Research session %s was deleted during stop operation", name)
-			c.JSON(http.StatusOK, gin.H{"message": "Research session no longer exists (already deleted)"})
+			log.Printf("Agentic session %s was deleted during stop operation", name)
+			c.JSON(http.StatusOK, gin.H{"message": "Agentic session no longer exists (already deleted)"})
 			return
 		}
-		log.Printf("Failed to update research session status %s: %v", name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update research session status"})
+		log.Printf("Failed to update agentic session status %s: %v", name, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update agentic session status"})
 		return
 	}
 
-	log.Printf("Successfully stopped research session %s", name)
-	c.JSON(http.StatusOK, gin.H{"message": "Research session stopped successfully"})
+	log.Printf("Successfully stopped agentic session %s", name)
+	c.JSON(http.StatusOK, gin.H{"message": "Agentic session stopped successfully"})
 }
 
 // Helper functions for parsing
-func parseSpec(spec map[string]interface{}) ResearchSessionSpec {
-	result := ResearchSessionSpec{}
+func parseSpec(spec map[string]interface{}) AgenticSessionSpec {
+	result := AgenticSessionSpec{}
 
 	if prompt, ok := spec["prompt"].(string); ok {
 		result.Prompt = prompt
@@ -520,8 +520,8 @@ func parseSpec(spec map[string]interface{}) ResearchSessionSpec {
 	return result
 }
 
-func parseStatus(status map[string]interface{}) *ResearchSessionStatus {
-	result := &ResearchSessionStatus{}
+func parseStatus(status map[string]interface{}) *AgenticSessionStatus {
+	result := &AgenticSessionStatus{}
 
 	if phase, ok := status["phase"].(string); ok {
 		result.Phase = phase

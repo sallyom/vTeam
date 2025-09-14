@@ -19,16 +19,16 @@ jobs:
         component:
           - name: frontend
             context: ./components/frontend
-            image: quay.io/ambient_code/vteam-frontend
+            image: quay.io/ambient_code/vteam_frontend
           - name: backend
             context: ./components/backend
-            image: quay.io/ambient_code/vteam-backend
+            image: quay.io/ambient_code/vteam_backend
           - name: operator
             context: ./components/operator
-            image: quay.io/ambient_code/vteam-operator
+            image: quay.io/ambient_code/vteam_operator
           - name: claude-code-runner
             context: ./components/runners/claude-code-runner
-            image: quay.io/ambient_code/vteam-claude-runner
+            image: quay.io/ambient_code/vteam_claude_runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

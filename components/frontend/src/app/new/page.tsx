@@ -34,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CreateResearchSessionRequest } from "@/types/research-session";
+import { CreateAgenticSessionRequest } from "@/types/agentic-session";
 
 import { getApiUrl } from "@/lib/config";
 
@@ -55,7 +55,7 @@ const models = [
   { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
 ];
 
-export default function NewResearchSessionPage() {
+export default function NewAgenticSessionPage() {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +77,7 @@ export default function NewResearchSessionPage() {
     setError(null);
 
     try {
-      const request: CreateResearchSessionRequest = {
+      const request: CreateAgenticSessionRequest = {
         prompt: values.prompt,
         websiteURL: values.websiteURL,
         llmSettings: {
@@ -89,7 +89,7 @@ export default function NewResearchSessionPage() {
       };
 
       const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/research-sessions`, {
+      const response = await fetch(`${apiUrl}/agentic-sessions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -102,7 +102,7 @@ export default function NewResearchSessionPage() {
           .json()
           .catch(() => ({ message: "Unknown error" }));
         throw new Error(
-          errorData.message || "Failed to create research session"
+          errorData.message || "Failed to create agentic session"
         );
       }
 
@@ -128,9 +128,9 @@ export default function NewResearchSessionPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>New Research Session</CardTitle>
+          <CardTitle>New Agentic Session</CardTitle>
           <CardDescription>
-            Create a new research session that will analyze a website
+            Create a new agentic session that will analyze a website
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -141,10 +141,10 @@ export default function NewResearchSessionPage() {
                 name="prompt"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Research Prompt</FormLabel>
+                    <FormLabel>Agentic Prompt</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="Describe what you want Claude to research on the website..."
+                        placeholder="Describe what you want Claude to analyze on the website..."
                         className="min-h-[100px]"
                         {...field}
                       />
@@ -292,7 +292,7 @@ export default function NewResearchSessionPage() {
                   )}
                   {isSubmitting
                     ? "Creating Session..."
-                    : "Create Research Session"}
+                    : "Create Agentic Session"}
                 </Button>
                 <Link href="/">
                   <Button type="button" variant="link" disabled={isSubmitting}>

@@ -43,14 +43,14 @@ func main() {
 	// Get ambient-code runner image from environment or use default
 	ambientCodeRunnerImage = os.Getenv("AMBIENT_CODE_RUNNER_IMAGE")
 	if ambientCodeRunnerImage == "" {
-		ambientCodeRunnerImage = "quay.io/ambient_code/vteam-claude-runner:latest"
+		ambientCodeRunnerImage = "quay.io/ambient_code/vteam_claude_runner:latest"
 	}
 
-	log.Printf("Research Session Operator starting in namespace: %s", namespace)
+	log.Printf("Agentic Session Operator starting in namespace: %s", namespace)
 	log.Printf("Using ambient-code runner image: %s", ambientCodeRunnerImage)
 
-	// Start watching ResearchSession resources
-	go watchResearchSessions()
+	// Start watching AgenticSession resources
+	go watchAgenticSessions()
 
 	// Keep the operator running
 	select {}
@@ -88,16 +88,16 @@ func initK8sClients() error {
 	return nil
 }
 
-func getResearchSessionResource() schema.GroupVersionResource {
+func getAgenticSessionResource() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
-		Group:    "research.example.com",
+		Group:    "vteam.ambient-code",
 		Version:  "v1",
-		Resource: "researchsessions",
+		Resource: "agenticsessions",
 	}
 }
 
-func watchResearchSessions() {
-	gvr := getResearchSessionResource()
+func watchAgenticSessions() {
+	gvr := getAgenticSessionResource()
 
 	for {
 		watcher, err := dynamicClient.Resource(gvr).Namespace(namespace).Watch(context.TODO(), v1.ListOptions{})
@@ -107,7 +107,7 @@ func watchResearchSessions() {
 			continue
 		}
 
-		log.Println("Watching for ResearchSession events...")
+		log.Println("Watching for AgenticSession events...")
 
 		for event := range watcher.ResultChan() {
 			switch event.Type {
@@ -117,19 +117,19 @@ func watchResearchSessions() {
 				// Add small delay to avoid race conditions with rapid create/delete cycles
 				time.Sleep(100 * time.Millisecond)
 
-				if err := handleResearchSessionEvent(obj); err != nil {
-					log.Printf("Error handling ResearchSession event: %v", err)
+				if err := handleAgenticSessionEvent(obj); err != nil {
+					log.Printf("Error handling AgenticSession event: %v", err)
 				}
 			case watch.Deleted:
 				obj := event.Object.(*unstructured.Unstructured)
 				sessionName := obj.GetName()
-				log.Printf("ResearchSession %s deleted", sessionName)
+				log.Printf("AgenticSession %s deleted", sessionName)
 
 				// Cancel any ongoing job monitoring for this session
 				// (We could implement this with a context cancellation if needed)
 			case watch.Error:
 				obj := event.Object.(*unstructured.Unstructured)
-				log.Printf("Watch error for ResearchSession: %v", obj)
+				log.Printf("Watch error for AgenticSession: %v", obj)
 			}
 		}
 
@@ -139,38 +139,38 @@ func watchResearchSessions() {
 	}
 }
 
-func handleResearchSessionEvent(obj *unstructured.Unstructured) error {
+func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	name := obj.GetName()
 
 	// Verify the resource still exists before processing
-	gvr := getResearchSessionResource()
+	gvr := getAgenticSessionResource()
 	currentObj, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(context.TODO(), name, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Printf("ResearchSession %s no longer exists, skipping processing", name)
+			log.Printf("AgenticSession %s no longer exists, skipping processing", name)
 			return nil
 		}
-		return fmt.Errorf("failed to verify ResearchSession %s exists: %v", name, err)
+		return fmt.Errorf("failed to verify AgenticSession %s exists: %v", name, err)
 	}
 
 	// Get the current status from the fresh object
 	status, _, _ := unstructured.NestedMap(currentObj.Object, "status")
 	phase, _, _ := unstructured.NestedString(status, "phase")
 
-	log.Printf("Processing ResearchSession %s with phase %s", name, phase)
+	log.Printf("Processing AgenticSession %s with phase %s", name, phase)
 
 	// Only process if status is Pending
 	if phase != "Pending" {
 		return nil
 	}
 
-	// Create a Kubernetes Job for this ResearchSession
+	// Create a Kubernetes Job for this AgenticSession
 	jobName := fmt.Sprintf("%s-job", name)
 
 	// Check if job already exists
 	_, err = k8sClient.BatchV1().Jobs(namespace).Get(context.TODO(), jobName, v1.GetOptions{})
 	if err == nil {
-		log.Printf("Job %s already exists for ResearchSession %s", jobName, name)
+		log.Printf("Job %s already exists for AgenticSession %s", jobName, name)
 		return nil
 	}
 
@@ -191,13 +191,13 @@ func handleResearchSessionEvent(obj *unstructured.Unstructured) error {
 			Name:      jobName,
 			Namespace: namespace,
 			Labels: map[string]string{
-				"research-session": name,
-				"app":              "ambient-code-runner",
+				"agentic-session": name,
+				"app":             "ambient-code-runner",
 			},
 			OwnerReferences: []v1.OwnerReference{
 				{
-					APIVersion: "research.example.com/v1",
-					Kind:       "ResearchSession",
+					APIVersion: "vteam.ambient-code/v1",
+					Kind:       "AgenticSession",
 					Name:       currentObj.GetName(),
 					UID:        currentObj.GetUID(),
 					Controller: boolPtr(true),
@@ -212,8 +212,8 @@ func handleResearchSessionEvent(obj *unstructured.Unstructured) error {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: v1.ObjectMeta{
 					Labels: map[string]string{
-						"research-session": name,
-						"app":              "ambient-code-runner",
+						"agentic-session": name,
+						"app":             "ambient-code-runner",
 					},
 					// If you run a service mesh that injects sidecars and causes egress issues for Jobs:
 					// Annotations: map[string]string{"sidecar.istio.io/inject": "false"},
@@ -256,8 +256,8 @@ func handleResearchSessionEvent(obj *unstructured.Unstructured) error {
 							},
 
 							Env: []corev1.EnvVar{
-								{Name: "RESEARCH_SESSION_NAME", Value: name},
-								{Name: "RESEARCH_SESSION_NAMESPACE", Value: namespace},
+								{Name: "AGENTIC_SESSION_NAME", Value: name},
+								{Name: "AGENTIC_SESSION_NAMESPACE", Value: namespace},
 								{Name: "PROMPT", Value: prompt},
 								{Name: "WEBSITE_URL", Value: websiteURL},
 								{Name: "LLM_MODEL", Value: model},
@@ -312,11 +312,11 @@ func handleResearchSessionEvent(obj *unstructured.Unstructured) error {
 	}
 
 	// Update status to Creating before attempting job creation
-	if err := updateResearchSessionStatus(name, map[string]interface{}{
+	if err := updateAgenticSessionStatus(name, map[string]interface{}{
 		"phase":   "Creating",
 		"message": "Creating Kubernetes job",
 	}); err != nil {
-		log.Printf("Failed to update ResearchSession status to Creating: %v", err)
+		log.Printf("Failed to update AgenticSession status to Creating: %v", err)
 		// Continue anyway - resource might have been deleted
 	}
 
@@ -325,23 +325,23 @@ func handleResearchSessionEvent(obj *unstructured.Unstructured) error {
 	if err != nil {
 		log.Printf("Failed to create job %s: %v", jobName, err)
 		// Update status to Error if job creation fails and resource still exists
-		updateResearchSessionStatus(name, map[string]interface{}{
+		updateAgenticSessionStatus(name, map[string]interface{}{
 			"phase":   "Error",
 			"message": fmt.Sprintf("Failed to create job: %v", err),
 		})
 		return fmt.Errorf("failed to create job: %v", err)
 	}
 
-	log.Printf("Created job %s for ResearchSession %s", jobName, name)
+	log.Printf("Created job %s for AgenticSession %s", jobName, name)
 
-	// Update ResearchSession status to Running
-	if err := updateResearchSessionStatus(name, map[string]interface{}{
+	// Update AgenticSession status to Running
+	if err := updateAgenticSessionStatus(name, map[string]interface{}{
 		"phase":     "Running",
 		"message":   "Job created and running",
 		"startTime": time.Now().Format(time.RFC3339),
 		"jobName":   jobName,
 	}); err != nil {
-		log.Printf("Failed to update ResearchSession status to Running: %v", err)
+		log.Printf("Failed to update AgenticSession status to Running: %v", err)
 		// Don't return error here - the job was created successfully
 		// The status update failure might be due to the resource being deleted
 	}
@@ -358,14 +358,14 @@ func monitorJob(jobName, sessionName string) {
 	for {
 		time.Sleep(10 * time.Second)
 
-		// First check if the ResearchSession still exists
-		gvr := getResearchSessionResource()
+		// First check if the AgenticSession still exists
+		gvr := getAgenticSessionResource()
 		if _, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(context.TODO(), sessionName, v1.GetOptions{}); err != nil {
 			if errors.IsNotFound(err) {
-				log.Printf("ResearchSession %s no longer exists, stopping job monitoring for %s", sessionName, jobName)
+				log.Printf("AgenticSession %s no longer exists, stopping job monitoring for %s", sessionName, jobName)
 				return
 			}
-			log.Printf("Error checking ResearchSession %s existence: %v", sessionName, err)
+			log.Printf("Error checking AgenticSession %s existence: %v", sessionName, err)
 			// Continue monitoring even if we can't check the session
 		}
 
@@ -383,8 +383,8 @@ func monitorJob(jobName, sessionName string) {
 		if job.Status.Succeeded > 0 {
 			log.Printf("Job %s completed successfully", jobName)
 
-			// Update ResearchSession status to Completed
-			updateResearchSessionStatus(sessionName, map[string]interface{}{
+			// Update AgenticSession status to Completed
+			updateAgenticSessionStatus(sessionName, map[string]interface{}{
 				"phase":          "Completed",
 				"message":        "Job completed successfully",
 				"completionTime": time.Now().Format(time.RFC3339),
@@ -410,8 +410,8 @@ func monitorJob(jobName, sessionName string) {
 				}
 			}
 
-			// Update ResearchSession status to Failed
-			updateResearchSessionStatus(sessionName, map[string]interface{}{
+			// Update AgenticSession status to Failed
+			updateAgenticSessionStatus(sessionName, map[string]interface{}{
 				"phase":          "Failed",
 				"message":        errorMessage,
 				"completionTime": time.Now().Format(time.RFC3339),
@@ -421,17 +421,17 @@ func monitorJob(jobName, sessionName string) {
 	}
 }
 
-func updateResearchSessionStatus(name string, statusUpdate map[string]interface{}) error {
-	gvr := getResearchSessionResource()
+func updateAgenticSessionStatus(name string, statusUpdate map[string]interface{}) error {
+	gvr := getAgenticSessionResource()
 
 	// Get current resource
 	obj, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(context.TODO(), name, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Printf("ResearchSession %s no longer exists, skipping status update", name)
+			log.Printf("AgenticSession %s no longer exists, skipping status update", name)
 			return nil // Don't treat this as an error - resource was deleted
 		}
-		return fmt.Errorf("failed to get ResearchSession %s: %v", name, err)
+		return fmt.Errorf("failed to get AgenticSession %s: %v", name, err)
 	}
 
 	// Update status
@@ -448,10 +448,10 @@ func updateResearchSessionStatus(name string, statusUpdate map[string]interface{
 	_, err = dynamicClient.Resource(gvr).Namespace(namespace).UpdateStatus(context.TODO(), obj, v1.UpdateOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Printf("ResearchSession %s was deleted during status update, skipping", name)
+			log.Printf("AgenticSession %s was deleted during status update, skipping", name)
 			return nil // Don't treat this as an error - resource was deleted
 		}
-		return fmt.Errorf("failed to update ResearchSession status: %v", err)
+		return fmt.Errorf("failed to update AgenticSession status: %v", err)
 	}
 
 	return nil

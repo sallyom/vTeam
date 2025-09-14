@@ -21,9 +21,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  ResearchSession,
-  ResearchSessionPhase,
-} from "@/types/research-session";
+  AgenticSession,
+  AgenticSessionPhase,
+} from "@/types/agentic-session";
 import {
   Plus,
   RefreshCw,
@@ -41,7 +41,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { getApiUrl } from "@/lib/config";
 
-const getPhaseColor = (phase: ResearchSessionPhase) => {
+const getPhaseColor = (phase: AgenticSessionPhase) => {
   switch (phase) {
     case "Pending":
       return "bg-yellow-100 text-yellow-800";
@@ -63,7 +63,7 @@ const getPhaseColor = (phase: ResearchSessionPhase) => {
 };
 
 export default function HomePage() {
-  const [sessions, setSessions] = useState<ResearchSession[]>([]);
+  const [sessions, setSessions] = useState<AgenticSession[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<{ [key: string]: string }>(
@@ -73,9 +73,9 @@ export default function HomePage() {
   const fetchSessions = async () => {
     try {
       const apiUrl = getApiUrl();
-      const response = await fetch(`${apiUrl}/research-sessions`);
+      const response = await fetch(`${apiUrl}/agentic-sessions`);
       if (!response.ok) {
-        throw new Error("Failed to fetch research sessions");
+        throw new Error("Failed to fetch agentic sessions");
       }
       const data = await response.json();
       setSessions(Array.isArray(data) ? data : []);
@@ -103,7 +103,7 @@ export default function HomePage() {
     try {
       const apiUrl = getApiUrl();
       const response = await fetch(
-        `${apiUrl}/research-sessions/${sessionName}/stop`,
+        `${apiUrl}/agentic-sessions/${sessionName}/stop`,
         {
           method: "POST",
         }
@@ -128,7 +128,7 @@ export default function HomePage() {
     try {
       const apiUrl = getApiUrl();
       const response = await fetch(
-        `${apiUrl}/research-sessions/${sessionName}/restart`,
+        `${apiUrl}/agentic-sessions/${sessionName}/restart`,
         {
           method: "POST",
         }
@@ -163,7 +163,7 @@ export default function HomePage() {
     try {
       const apiUrl = getApiUrl();
       const response = await fetch(
-        `${apiUrl}/research-sessions/${sessionName}/delete`,
+        `${apiUrl}/agentic-sessions/${sessionName}/delete`,
         {
           method: "DELETE",
         }
@@ -188,7 +188,7 @@ export default function HomePage() {
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="animate-spin h-8 w-8" />
-          <span className="ml-2">Loading research sessions...</span>
+          <span className="ml-2">Loading agentic sessions...</span>
         </div>
       </div>
     );

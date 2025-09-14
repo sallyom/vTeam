@@ -1,24 +1,24 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: research-operator
+  name: agentic-operator
   namespace: ambient-code
   labels:
-    app: research-operator
+    app: agentic-operator
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: research-operator
+      app: agentic-operator
   template:
     metadata:
       labels:
-        app: research-operator
+        app: agentic-operator
     spec:
-      serviceAccountName: research-operator
+      serviceAccountName: agentic-operator
       containers:
-      - name: research-operator
-        image: quay.io/ambient_code/vteam-operator:latest
+      - name: agentic-operator
+        image: quay.io/ambient_code/vteam_operator:latest
         env:
         - name: NAMESPACE
           valueFrom:
@@ -27,7 +27,7 @@ spec:
         - name: BACKEND_API_URL
           value: "http://backend-service:8080/api"
         - name: AMBIENT_CODE_RUNNER_IMAGE
-          value: "quay.io/ambient_code/vteam-claude-runner:latest"
+          value: "quay.io/ambient_code/vteam_claude_runner:latest"
         resources:
           requests:
             cpu: 50m

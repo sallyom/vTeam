@@ -1,4 +1,4 @@
-export type ResearchSessionPhase = "Pending" | "Creating" | "Running" | "Completed" | "Failed" | "Stopped" | "Error";
+export type AgenticSessionPhase = "Pending" | "Creating" | "Running" | "Completed" | "Failed" | "Stopped" | "Error";
 
 export type LLMSettings = {
 	model: string;
@@ -6,7 +6,7 @@ export type LLMSettings = {
 	maxTokens: number;
 };
 
-export type ResearchSessionSpec = {
+export type AgenticSessionSpec = {
 	prompt: string;
 	websiteURL: string;
 	llmSettings: LLMSettings;
@@ -22,8 +22,8 @@ export type MessageObject = {
 	tool_use_is_error?: boolean;
 };
 
-export type ResearchSessionStatus = {
-	phase: ResearchSessionPhase;
+export type AgenticSessionStatus = {
+	phase: AgenticSessionPhase;
 	message?: string;
 	startTime?: string;
 	completionTime?: string;
@@ -33,18 +33,18 @@ export type ResearchSessionStatus = {
 	messages?: MessageObject[];
 };
 
-export type ResearchSession = {
+export type AgenticSession = {
 	metadata: {
 		name: string;
 		namespace: string;
 		creationTimestamp: string;
 		uid: string;
 	};
-	spec: ResearchSessionSpec;
-	status?: ResearchSessionStatus;
+	spec: AgenticSessionSpec;
+	status?: AgenticSessionStatus;
 };
 
-export type CreateResearchSessionRequest = {
+export type CreateAgenticSessionRequest = {
 	prompt: string;
 	websiteURL: string;
 	llmSettings?: Partial<LLMSettings>;

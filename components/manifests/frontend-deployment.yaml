@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: quay.io/ambient_code/vteam-frontend:latest
+        image: quay.io/ambient_code/vteam_frontend:latest
         ports:
         - containerPort: 3000
           name: http

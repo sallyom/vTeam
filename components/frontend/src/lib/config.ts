@@ -1,11 +1,19 @@
-// Simple API configuration - no runtime complexity
-// Frontend calls its own API routes, which proxy to backend
+// API configuration for frontend
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080/api'
 
 /**
- * Gets the API base URL - always points to our own Next.js API routes
+ * Get the API base URL for frontend requests
  */
 export function getApiUrl(): string {
-  // Frontend always calls its own API routes (e.g., /api/research-sessions)
+  // Frontend always calls its own API routes (e.g., /api/agentic-sessions)
   // These routes proxy to the internal backend service
-  return '/api';
+  if (typeof window !== 'undefined') {
+    // Client-side: use relative URLs to hit our Next.js API routes
+    return '/api'
+  }
+  
+  // Server-side: directly call backend
+  return BACKEND_URL
 }
+
+export { BACKEND_URL }

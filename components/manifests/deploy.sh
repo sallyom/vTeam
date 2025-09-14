@@ -32,17 +32,25 @@ check_cluster() {
 # Function to build docker images (placeholder)
 build_images() {
     echo -e "${YELLOW}Building Docker images...${NC}"
+    
+    # Load environment variables to get registry info
+    load_env_vars
+    
     echo "Note: You need to build and push the following images:"
-    echo "- backend:latest"
-    echo "- frontend:latest"
-    echo "- operator:latest"
-    echo "- claude-code-runner:latest"
+    echo "- $CONTAINER_REGISTRY/vteam_backend:$IMAGE_TAG"
+    echo "- $CONTAINER_REGISTRY/vteam_frontend:$IMAGE_TAG"
+    echo "- $CONTAINER_REGISTRY/vteam_operator:$IMAGE_TAG"
+    echo "- $CONTAINER_REGISTRY/vteam_claude_runner:$IMAGE_TAG"
     echo ""
-    echo "Example build commands:"
-    echo "  docker build -t backend:latest ../backend/"
-    echo "  docker build -t frontend:latest ../frontend/"
-    echo "  docker build -t operator:latest ../operator/"
-    echo "  docker build -t claude-code-runner:latest ../runners/claude-code-runner/"
+    echo "Example build and push commands:"
+    echo "  docker build -t $CONTAINER_REGISTRY/vteam_backend:$IMAGE_TAG ../backend/"
+    echo "  docker push $CONTAINER_REGISTRY/vteam_backend:$IMAGE_TAG"
+    echo "  docker build -t $CONTAINER_REGISTRY/vteam_frontend:$IMAGE_TAG ../frontend/"
+    echo "  docker push $CONTAINER_REGISTRY/vteam_frontend:$IMAGE_TAG"
+    echo "  docker build -t $CONTAINER_REGISTRY/vteam_operator:$IMAGE_TAG ../operator/"
+    echo "  docker push $CONTAINER_REGISTRY/vteam_operator:$IMAGE_TAG"
+    echo "  docker build -t $CONTAINER_REGISTRY/vteam_claude_runner:$IMAGE_TAG ../runners/claude-code-runner/"
+    echo "  docker push $CONTAINER_REGISTRY/vteam_claude_runner:$IMAGE_TAG"
     echo ""
     read -p "Have you built and pushed all required images? (y/N): " confirm
     if [[ $confirm != [yY] && $confirm != [yY][eE][sS] ]]; then
@@ -94,7 +102,54 @@ load_env_vars() {
         exit 1
     fi
     
+    if [[ -z "$CONTAINER_REGISTRY" ]]; then
+        echo -e "${RED}Error: CONTAINER_REGISTRY not set in .env file${NC}"
+        exit 1
+    fi
+    
+    if [[ -z "$IMAGE_TAG" ]]; then
+        echo -e "${RED}Error: IMAGE_TAG not set in .env file${NC}"
+        exit 1
+    fi
+    
     echo -e "${GREEN}✓ Environment variables loaded from .env${NC}"
+}
+
+# Function to update deployment manifests with custom registry if different from default
+update_deployment_images() {
+    local default_registry="quay.io/ambient_code"
+    
+    # Only update if using a different registry than default
+    if [[ "$CONTAINER_REGISTRY" != "$default_registry" || "$IMAGE_TAG" != "latest" ]]; then
+        echo -e "${YELLOW}Updating deployment manifests with custom registry...${NC}"
+        
+        # Create backup of original files
+        cp backend-deployment.yaml backend-deployment.yaml.bak
+        cp frontend-deployment.yaml frontend-deployment.yaml.bak
+        cp operator-deployment.yaml operator-deployment.yaml.bak
+        
+        # Update image references in deployment files (using underscore format)
+        sed -i.tmp "s|${default_registry}/vteam_backend:latest|${CONTAINER_REGISTRY}/vteam_backend:${IMAGE_TAG}|g" backend-deployment.yaml
+        sed -i.tmp "s|${default_registry}/vteam_frontend:latest|${CONTAINER_REGISTRY}/vteam_frontend:${IMAGE_TAG}|g" frontend-deployment.yaml
+        sed -i.tmp "s|${default_registry}/vteam_operator:latest|${CONTAINER_REGISTRY}/vteam_operator:${IMAGE_TAG}|g" operator-deployment.yaml
+        sed -i.tmp "s|${default_registry}/vteam_claude_runner:latest|${CONTAINER_REGISTRY}/vteam_claude_runner:${IMAGE_TAG}|g" operator-deployment.yaml
+        
+        # Clean up temporary files
+        rm -f *.tmp
+        
+        echo -e "${GREEN}✓ Deployment manifests updated for registry: $CONTAINER_REGISTRY${NC}"
+    fi
+}
+
+# Function to restore original deployment manifests
+restore_deployment_manifests() {
+    if [[ -f "backend-deployment.yaml.bak" ]]; then
+        echo -e "${YELLOW}Restoring original deployment manifests...${NC}"
+        mv backend-deployment.yaml.bak backend-deployment.yaml
+        mv frontend-deployment.yaml.bak frontend-deployment.yaml
+        mv operator-deployment.yaml.bak operator-deployment.yaml
+        echo -e "${GREEN}✓ Original manifests restored${NC}"
+    fi
 }
 
 # Function to deploy secrets
@@ -166,10 +221,14 @@ main() {
     check_kubectl
     check_cluster
     
+    # Set up cleanup trap
+    trap 'restore_deployment_manifests' EXIT
+    
     create_namespace
     deploy_crd
     deploy_rbac
     deploy_secrets
+    update_deployment_images
     deploy_backend
     deploy_operator
     deploy_frontend
@@ -203,6 +262,9 @@ case "${1:-}" in
     "status")
         check_kubectl && check_cluster && show_status
         ;;
+    "build")
+        build_images
+        ;;
     "clean")
         echo -e "${YELLOW}Cleaning up resources...${NC}"
         kubectl delete -f frontend-deployment.yaml --ignore-not-found
@@ -212,6 +274,7 @@ case "${1:-}" in
         kubectl delete -f rbac.yaml --ignore-not-found
         kubectl delete -f crd.yaml --ignore-not-found
         kubectl delete -f namespace.yaml --ignore-not-found
+        restore_deployment_manifests
         echo -e "${GREEN}✓ Resources cleaned up${NC}"
         ;;
     *)

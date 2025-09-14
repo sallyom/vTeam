@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { MessageObject } from "@/types/research-session";
+import { MessageObject } from "@/types/agentic-session";
 import {
   ChevronDown,
   ChevronRight,

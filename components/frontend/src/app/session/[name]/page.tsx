@@ -35,13 +35,13 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  ResearchSession,
-  ResearchSessionPhase,
-} from "@/types/research-session";
+  AgenticSession,
+  AgenticSessionPhase,
+} from "@/types/agentic-session";
 
 import { getApiUrl } from "@/lib/config";
 
-const getPhaseColor = (phase: ResearchSessionPhase) => {
+const getPhaseColor = (phase: AgenticSessionPhase) => {
   switch (phase) {
     case "Pending":
       return "bg-yellow-100 text-yellow-800";
@@ -130,7 +130,7 @@ export default function SessionDetailPage() {
   const params = useParams();
   const sessionName = params.name as string;
 
-  const [session, setSession] = useState<ResearchSession | null>(null);
+  const [session, setSession] = useState<AgenticSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -138,13 +138,13 @@ export default function SessionDetailPage() {
   const fetchSession = useCallback(async () => {
     try {
       const response = await fetch(
-        `${getApiUrl()}/research-sessions/${sessionName}`
+        `${getApiUrl()}/agentic-sessions/${sessionName}`
       );
       if (!response.ok) {
         if (response.status === 404) {
-          throw new Error("Research session not found");
+          throw new Error("Agentic session not found");
         }
-        throw new Error("Failed to fetch research session");
+        throw new Error("Failed to fetch agentic session");
       }
       const data = await response.json();
       setSession(data);
@@ -182,7 +182,7 @@ export default function SessionDetailPage() {
     try {
       const apiUrl = getApiUrl();
       const response = await fetch(
-        `${apiUrl}/research-sessions/${sessionName}/stop`,
+        `${apiUrl}/agentic-sessions/${sessionName}/stop`,
         {
           method: "POST",
         }
@@ -204,7 +204,7 @@ export default function SessionDetailPage() {
     const displayName = session.spec.displayName || session.metadata.name;
     if (
       !confirm(
-        `Are you sure you want to delete research session "${displayName}"? This action cannot be undone.`
+        `Are you sure you want to delete agentic session "${displayName}"? This action cannot be undone.`
       )
     ) {
       return;
@@ -214,7 +214,7 @@ export default function SessionDetailPage() {
     try {
       const apiUrl = getApiUrl();
       const response = await fetch(
-        `${apiUrl}/research-sessions/${sessionName}/delete`,
+        `${apiUrl}/agentic-sessions/${sessionName}/delete`,
         {
           method: "DELETE",
         }
@@ -235,7 +235,7 @@ export default function SessionDetailPage() {
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="animate-spin h-8 w-8" />
-          <span className="ml-2">Loading research session...</span>
+          <span className="ml-2">Loading agentic session...</span>
         </div>
       </div>
     );
@@ -366,7 +366,7 @@ export default function SessionDetailPage() {
             <CardHeader>
               <CardTitle className="flex items-center">
                 <Brain className="w-5 h-5 mr-2" />
-                Research Prompt
+                Agentic Prompt
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -506,7 +506,7 @@ export default function SessionDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
-                <span>Research Progress</span>
+                <span>Agentic Progress</span>
                 <Badge variant="secondary">
                   {session.status?.messages?.length || 0} message
                   {(session.status?.messages?.length || 0) !== 1 ? "s" : ""}
@@ -550,9 +550,9 @@ export default function SessionDetailPage() {
                     role="bot"
                     content={
                       session.status?.phase === "Pending"
-                        ? "Research session is queued and waiting to start..."
+                        ? "Agentic session is queued and waiting to start..."
                         : session.status?.phase === "Creating"
-                        ? "Creating research environment..."
+                        ? "Creating agentic environment..."
                         : "Analyzing the website and generating insights..."
                     }
                     name="Claude AI"
@@ -576,11 +576,11 @@ export default function SessionDetailPage() {
           </Card>
         )}
 
-        {/* Research Results */}
+        {/* Agentic Results */}
         {session.status?.finalOutput && (
           <Card>
             <CardHeader>
-              <CardTitle>Research Results</CardTitle>
+              <CardTitle>Agentic Results</CardTitle>
               <CardDescription>
                 Claude&apos;s analysis of the target website
               </CardDescription>

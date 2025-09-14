@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 
 class ClaudeRunner:
     def __init__(self):
-        self.session_name = os.getenv("RESEARCH_SESSION_NAME", "")
-        self.session_namespace = os.getenv("RESEARCH_SESSION_NAMESPACE", "default")
+        self.session_name = os.getenv("AGENTIC_SESSION_NAME", "")
+        self.session_namespace = os.getenv("AGENTIC_SESSION_NAMESPACE", "default")
         self.prompt = os.getenv("PROMPT", "")
         self.website_url = os.getenv("WEBSITE_URL", "")
         self.timeout = int(os.getenv("TIMEOUT", "300"))
@@ -46,11 +46,11 @@ class ClaudeRunner:
         logger.info(f"Website URL: {self.website_url}")
         logger.info("Using Claude Code CLI with Playwright MCP")
 
-    async def run_research_session(self):
-        """Main method to run the research session"""
+    async def run_agentic_session(self):
+        """Main method to run the agentic session"""
         try:
             logger.info(
-                "Starting research session with Claude Code + Playwright MCP..."
+                "Starting agentic session with Claude Code + Playwright MCP..."
             )
 
             # Verify browser setup before starting
@@ -68,8 +68,8 @@ class ClaudeRunner:
                 }
             )
 
-            # Create comprehensive research prompt for Claude Code with MCP tools
-            research_prompt = self._create_research_prompt()
+            # Create comprehensive agentic prompt for Claude Code with MCP tools
+            agentic_prompt = self._create_agentic_prompt()
 
             # Update status
             await self.update_session_status(
@@ -79,28 +79,28 @@ class ClaudeRunner:
                 }
             )
 
-            # Run Claude Code with our research prompt
+            # Run Claude Code with our agentic prompt
             logger.info("Running Claude Code with MCP browser automation...")
 
-            result, cost, all_messages = await self._run_claude_code(research_prompt)
+            result, cost, all_messages = await self._run_claude_code(agentic_prompt)
 
-            logger.info("Received comprehensive research analysis from Claude Code")
+            logger.info("Received comprehensive agentic analysis from Claude Code")
 
-            # Log the complete research results to console
+            # Log the complete agentic results to console
             print("\n" + "=" * 80)
-            print("🔬 RESEARCH RESULTS")
+            print("🔬 AGENTIC ANALYSIS RESULTS")
             print("=" * 80)
             print(result)
             print("=" * 80 + "\n")
 
             # Also log to structured logging
-            logger.info(f"FINAL RESEARCH RESULTS:\n{result}")
+            logger.info(f"FINAL AGENTIC RESULTS:\n{result}")
 
             # Update the session with the final result
             await self.update_session_status(
                 {
                     "phase": "Completed",
-                    "message": "Research completed successfully using Claude Code + Playwright MCP",
+                    "message": "Agentic analysis completed successfully using Claude Code + Playwright MCP",
                     "completionTime": datetime.now(timezone.utc).isoformat(),
                     "finalOutput": result,
                     "cost": cost,
@@ -108,16 +108,16 @@ class ClaudeRunner:
                 }
             )
 
-            logger.info("Research session completed successfully")
+            logger.info("Agentic session completed successfully")
 
         except Exception as e:
-            logger.error(f"Research session failed: {str(e)}")
+            logger.error(f"Agentic session failed: {str(e)}")
 
             # Update status to indicate failure
             await self.update_session_status(
                 {
                     "phase": "Failed",
-                    "message": f"Research failed: {str(e)}",
+                    "message": f"Agentic analysis failed: {str(e)}",
                     "completionTime": datetime.now(timezone.utc).isoformat(),
                 }
             )
@@ -178,7 +178,7 @@ class ClaudeRunner:
     async def _generate_and_set_display_name(self):
         """Generate a display name using LLM and update it via backend API"""
         try:
-            logger.info("Generating display name for research session...")
+            logger.info("Generating display name for agentic session...")
 
             display_name = await self._generate_display_name()
             logger.info(f"Generated display name: {display_name}")
@@ -198,12 +198,12 @@ class ClaudeRunner:
 
             client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-            prompt = f"""Create a concise, descriptive display name (max 50 characters) for a research session with these details:
+            prompt = f"""Create a concise, descriptive display name (max 50 characters) for an agentic session with these details:
 
-Research Question: {self.prompt}
+Agentic Query: {self.prompt}
 Target Website: {self.website_url}
 
-The display name should capture the essence of what's being researched and where. Use format like:
+The display name should capture the essence of what's being analyzed and where. Use format like:
 - "Pricing Analysis - acme.com"  
 - "Feature Review - product-site.com"
 - "Company Info - startup.io"
@@ -232,12 +232,12 @@ Return only the display name, nothing else."""
                 .replace("https://", "")
                 .split("/")[0]
             )
-            return f"Research - {domain}"
+            return f"Analysis - {domain}"
 
     async def _update_display_name(self, display_name: str):
         """Update the display name via backend API"""
         try:
-            url = f"{self.backend_api_url}/research-sessions/{self.session_name}/displayname"
+            url = f"{self.backend_api_url}/agentic-sessions/{self.session_name}/displayname"
 
             payload = {"displayName": display_name}
 
@@ -276,7 +276,7 @@ Return only the display name, nothing else."""
 
             # Configure SDK with direct MCP server configuration
             options = ClaudeCodeOptions(
-                system_prompt="You are a research assistant with browser automation capabilities via Playwright MCP tools.",
+                system_prompt="You are an agentic assistant with browser automation capabilities via Playwright MCP tools.",
                 max_turns=25,
                 permission_mode="acceptEdits",
                 allowed_tools=["mcp__playwright"],
@@ -289,8 +289,8 @@ Return only the display name, nothing else."""
             async with ClaudeSDKClient(options=options) as client:
                 logger.info("SDK Client initialized successfully with MCP tools")
 
-                # Send the research prompt
-                logger.info("Sending research query to Claude Code SDK...")
+                # Send the agentic prompt
+                logger.info("Sending agentic query to Claude Code SDK...")
                 await client.query(prompt)
 
                 # Collect streaming response
@@ -443,7 +443,7 @@ Return only the display name, nothing else."""
                 if not result:
                     raise RuntimeError("Claude Code SDK returned empty result")
 
-                logger.info(f"Research completed successfully ({len(result)} chars)")
+                logger.info(f"Agentic analysis completed successfully ({len(result)} chars)")
                 logger.info(f"Cost: ${cost:.4f}, Duration: {duration}ms")
 
                 return result, cost, all_messages
@@ -452,11 +452,11 @@ Return only the display name, nothing else."""
             logger.error(f"Error running Claude Code SDK: {str(e)}")
             raise
 
-    def _create_research_prompt(self) -> str:
-        """Create a focused research prompt for Claude Code with MCP browser instructions"""
-        return f"""You are a research assistant with browser automation capabilities. 
+    def _create_agentic_prompt(self) -> str:
+        """Create a focused agentic prompt for Claude Code with MCP browser instructions"""
+        return f"""You are an agentic assistant with browser automation capabilities. 
 
-RESEARCH QUESTION: {self.prompt}
+AGENTIC QUERY: {self.prompt}
 
 TARGET WEBSITE: {self.website_url}
 
@@ -468,12 +468,12 @@ Use your browser automation tools to:
 3. Extract relevant information from the page
 4. Navigate to additional pages if necessary to find the answer
 
-Provide a clear, direct answer to the research question based on what you find on the website. Focus on answering the specific question rather than providing a comprehensive website analysis."""
+Provide a clear, direct answer to the agentic query based on what you find on the website. Focus on answering the specific question rather than providing a comprehensive website analysis."""
 
     async def update_session_status(self, status_update: Dict[str, Any]):
-        """Update the ResearchSession status via the backend API"""
+        """Update the AgenticSession status via the backend API"""
         try:
-            url = f"{self.backend_api_url}/research-sessions/{self.session_name}/status"
+            url = f"{self.backend_api_url}/agentic-sessions/{self.session_name}/status"
 
             logger.info(
                 f"Updating session status: {status_update.get('phase', 'unknown')}"
@@ -497,11 +497,11 @@ Provide a clear, direct answer to the research question based on what you find o
 
 async def main():
     """Main entry point"""
-    logger.info("Claude Research Runner with Claude Code + Playwright MCP starting...")
+    logger.info("Claude Agentic Runner with Claude Code + Playwright MCP starting...")
 
     # Validate required environment variables
     required_vars = [
-        "RESEARCH_SESSION_NAME",
+        "AGENTIC_SESSION_NAME",
         "PROMPT",
         "WEBSITE_URL",
         "ANTHROPIC_API_KEY",
@@ -516,10 +516,10 @@ async def main():
 
     try:
         runner = ClaudeRunner()
-        await runner.run_research_session()
+        await runner.run_agentic_session()
 
     except KeyboardInterrupt:
-        logger.info("Research session interrupted by user")
+        logger.info("Agentic session interrupted by user")
         sys.exit(0)
 
     except Exception as e:
