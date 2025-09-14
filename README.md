@@ -166,10 +166,10 @@ sed -i "s|quay.io/ambient_code|$REGISTRY|g" *.yaml
 
 ```bash
 # Check all pods are running
-kubectl get pods -n ambient-code-research
+kubectl get pods -n ambient-code
 
 # Check services are available
-kubectl get services -n ambient-code-research
+kubectl get services -n ambient-code
 
 # View deployment status
 ./deploy.sh status
@@ -179,12 +179,12 @@ kubectl get services -n ambient-code-research
 
 ```bash
 # Option 1: Port forward (for testing)
-kubectl port-forward svc/frontend-service 3000:3000 -n ambient-code-research
+kubectl port-forward svc/frontend-service 3000:3000 -n ambient-code
 
 # Option 2: Use ingress (for production)
-echo "127.0.0.1 ambient-code-research.local" | sudo tee -a /etc/hosts
+echo "127.0.0.1 ambient-code.local" | sudo tee -a /etc/hosts
 
-# Open browser to: http://localhost:3000 or http://ambient-code-research.local
+# Open browser to: http://localhost:3000 or http://ambient-code.local
 ```
 
 ## Usage
@@ -229,22 +229,22 @@ Once deployed, you can create and manage agentic sessions through the web interf
 #### Pods Not Starting
 ```bash
 # Check pod status and events
-kubectl describe pod <pod-name> -n ambient-code-research
+kubectl describe pod <pod-name> -n ambient-code
 
 # Check logs
-kubectl logs <pod-name> -n ambient-code-research
+kubectl logs <pod-name> -n ambient-code
 
 # Check resource constraints
-kubectl top pods -n ambient-code-research
+kubectl top pods -n ambient-code
 ```
 
 #### API Connection Issues
 ```bash
 # Check service endpoints
-kubectl get endpoints -n ambient-code-research
+kubectl get endpoints -n ambient-code
 
 # Test API connectivity
-kubectl exec -it <pod-name> -n ambient-code-research -- curl http://backend-service:8080/health
+kubectl exec -it <pod-name> -n ambient-code -- curl http://backend-service:8080/health
 ```
 
 #### Image Pull Errors
@@ -262,29 +262,29 @@ sed -i "s|old-registry|new-registry|g" manifests/*.yaml
 #### Job Failures
 ```bash
 # List jobs
-kubectl get jobs -n ambient-code-research
+kubectl get jobs -n ambient-code
 
 # Check job details
-kubectl describe job <job-name> -n ambient-code-research
+kubectl describe job <job-name> -n ambient-code
 
 # Check failed pod logs
-kubectl logs <failed-pod-name> -n ambient-code-research
+kubectl logs <failed-pod-name> -n ambient-code
 ```
 
 ### Verification Commands
 
 ```bash
 # Check all resources
-kubectl get all -l app=ambient-code-research -n ambient-code-research
+kubectl get all -l app=ambient-code -n ambient-code
 
 # View recent events
-kubectl get events --sort-by='.lastTimestamp' -n ambient-code-research
+kubectl get events --sort-by='.lastTimestamp' -n ambient-code
 
 # Test frontend access
 curl -f http://localhost:3000 || echo "Frontend not accessible"
 
 # Test backend API
-kubectl port-forward svc/backend-service 8080:8080 -n ambient-code-research &
+kubectl port-forward svc/backend-service 8080:8080 -n ambient-code &
 curl http://localhost:8080/health
 ```
 

@@ -74,7 +74,7 @@ deploy_rbac() {
 
 # Function to load environment variables from .env file
 load_env_vars() {
-    local env_file="../.env"
+    local env_file=".env"
     if [[ ! -f "$env_file" ]]; then
         echo -e "${RED}Error: .env file not found at $env_file${NC}"
         echo -e "${YELLOW}Please create .env file from env.example:${NC}"
@@ -105,10 +105,10 @@ deploy_secrets() {
     load_env_vars
     
     # Delete existing secret if it exists (ignore errors)
-    kubectl delete secret ambient-code-research-secrets -n ambient-code-research --ignore-not-found=true
+    kubectl delete secret ambient-code-secrets -n ambient-code --ignore-not-found=true
     
     # Create secret from environment variable
-    kubectl create secret generic ambient-code-research-secrets -n ambient-code-research \
+    kubectl create secret generic ambient-code-secrets -n ambient-code \
         --from-literal=anthropic-api-key="$ANTHROPIC_API_KEY"
     
     # Apply the ConfigMap
@@ -141,9 +141,9 @@ deploy_frontend() {
 # Function to wait for deployments
 wait_for_deployments() {
     echo -e "${YELLOW}Waiting for deployments to be ready...${NC}"
-    kubectl wait --for=condition=available --timeout=300s deployment/backend-api -n ambient-code-research
-    kubectl wait --for=condition=available --timeout=300s deployment/research-operator -n ambient-code-research
-    kubectl wait --for=condition=available --timeout=300s deployment/frontend -n ambient-code-research
+    kubectl wait --for=condition=available --timeout=300s deployment/backend-api -n ambient-code
+    kubectl wait --for=condition=available --timeout=300s deployment/research-operator -n ambient-code
+    kubectl wait --for=condition=available --timeout=300s deployment/frontend -n ambient-code
     echo -e "${GREEN}✓ All deployments are ready${NC}"
 }
 
@@ -151,12 +151,12 @@ wait_for_deployments() {
 show_status() {
     echo -e "${BLUE}Deployment Status:${NC}"
     echo "=================="
-    kubectl get pods -l 'app in (backend-api,research-operator,frontend)' -n ambient-code-research
+    kubectl get pods -l 'app in (backend-api,research-operator,frontend)' -n ambient-code
     echo ""
-    kubectl get services -l 'app in (backend-api,frontend)' -n ambient-code-research
+    kubectl get services -l 'app in (backend-api,frontend)' -n ambient-code
     echo ""
-    echo -e "${GREEN}Frontend URL: http://ambient-code-research.local (add to /etc/hosts)${NC}"
-    echo -e "${GREEN}Or use: kubectl port-forward svc/frontend-service 3000:3000 -n ambient-code-research${NC}"
+    echo -e "${GREEN}Frontend URL: http://ambient-code.local (add to /etc/hosts)${NC}"
+    echo -e "${GREEN}Or use: kubectl port-forward svc/frontend-service 3000:3000 -n ambient-code${NC}"
 }
 
 # Main deployment process

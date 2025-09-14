@@ -85,9 +85,9 @@ cd manifests
 kubectl port-forward svc/frontend-service 3000:3000
 
 # Option 2: Add to /etc/hosts (for ingress)
-echo "127.0.0.1 ambient-code-research.local" | sudo tee -a /etc/hosts
+echo "127.0.0.1 ambient-code.local" | sudo tee -a /etc/hosts
 
-# Then access: http://localhost:3000 or http://ambient-code-research.local
+# Then access: http://localhost:3000 or http://ambient-code.local
 ```
 
 ## Detailed Setup
@@ -204,7 +204,7 @@ The application uses Kubernetes secrets for sensitive data:
 apiVersion: v1
 kind: Secret
 metadata:
-  name: ambient-code-research-secrets
+  name: ambient-code-secrets
 type: Opaque
 data:
   anthropic-api-key: <base64-encoded-key>
@@ -257,7 +257,7 @@ kubectl logs <job-pod-name>
 
 ```bash
 # Get all resources
-kubectl get all -l app=ambient-code-research
+kubectl get all -l app=ambient-code
 
 # Check events
 kubectl get events --sort-by='.lastTimestamp'
@@ -291,13 +291,13 @@ go run main.go
 
 ```bash
 # Create local cluster
-kind create cluster --name ambient-code-research
+kind create cluster --name ambient-code
 
 # Load images into kind
-kind load docker-image backend:latest --name ambient-code-research
-kind load docker-image frontend:latest --name ambient-code-research
-kind load docker-image operator:latest --name ambient-code-research
-kind load docker-image claude-code-runner:latest --name ambient-code-research
+kind load docker-image backend:latest --name ambient-code
+kind load docker-image frontend:latest --name ambient-code
+kind load docker-image operator:latest --name ambient-code
+kind load docker-image claude-code-runner:latest --name ambient-code
 
 # Deploy
 cd manifests

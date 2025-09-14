@@ -271,7 +271,7 @@ func handleResearchSessionEvent(obj *unstructured.Unstructured) error {
 									Name: "ANTHROPIC_API_KEY",
 									ValueFrom: &corev1.EnvVarSource{
 										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-code-research-secrets"},
+											LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-code-secrets"},
 											Key:                  "anthropic-api-key",
 										},
 									},

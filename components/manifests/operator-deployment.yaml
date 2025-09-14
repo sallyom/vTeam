@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: research-operator
-  namespace: ambient-code-research
+  namespace: ambient-code
   labels:
     app: research-operator
 spec:
