@@ -70,33 +70,18 @@ spec:
               jobName:
                 type: string
                 description: "Name of the Kubernetes job created for this session"
-              finalOutput:
-                type: string
-                description: "The final agentic output from Claude (last message)"
               cost:
                 type: number
                 description: "Total cost of the agentic session in USD"
-              messages:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    content:
-                      type: string
-                      description: "Message content - populated for TextBlock and ToolResultBlock"
-                    tool_use_id:
-                      type: string
-                      description: "Tool use identifier - populated for ToolUseBlock and ToolResultBlock"
-                    tool_use_name:
-                      type: string
-                      description: "Tool name - populated for ToolUseBlock and ToolResultBlock"
-                    tool_use_input:
-                      type: string
-                      description: "Tool input parameters as JSON string - populated for ToolUseBlock"
-                    tool_use_is_error:
-                      type: boolean
-                      description: "Whether tool result is an error - populated for ToolResultBlock"
-                description: "Array of message objects during the agentic session"
+              stateDir:
+                type: string
+                description: "Directory path where session state files are stored"
+              artifactsCount:
+                type: integer
+                description: "Number of artifacts (screenshots, files) generated"
+              messagesCount:
+                type: integer
+                description: "Number of messages in the conversation"
     additionalPrinterColumns:
     - name: Phase
       type: string

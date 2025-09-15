@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vteam-state-storage
+  labels:
+    app: vteam
+    component: state-storage
+spec:
+  accessModes:
+    - ReadWriteMany  # Prefer RWX if available
+    - ReadWriteOnce   # Fallback to RWO
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: ""  # Use default storage class
