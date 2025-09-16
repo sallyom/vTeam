@@ -76,116 +76,98 @@ The system implements a 7-step refinement process with specialized AI agents:
 
 ## Prerequisites
 
-Before deploying the Ambient Agentic Runner, ensure you have:
+### For Using Pre-built Images (Recommended)
+- **Kubernetes cluster** (local with minikube/kind or cloud-based) or **OpenShift**
+- **kubectl** v1.28+ configured to access your cluster
+- **Anthropic API Key** - Get one from [Anthropic Console](https://console.anthropic.com/)
 
-### Required Tools
-- **Kubernetes cluster** (local with minikube/kind or cloud-based like EKS/GKE/AKS)
-- **kubectl** v1.28+ configured to access your cluster  
+### For Building Images from Source (Advanced)
 - **Docker or Podman** for building container images
 - **Container registry access** (Docker Hub, Quay.io, ECR, etc.)
-- **Go 1.24+** for building backend services (if building from source)
-- **Node.js 18+** and **npm/pnpm** for the frontend (if building from source)
-
-### Required Accounts & API Keys
-- **Anthropic API Key** - Get one from [Anthropic Console](https://console.anthropic.com/)
+- **Go 1.24+** for building backend services
+- **Node.js 18+** and **npm/pnpm** for the frontend
 
 
 ## Quick Start
 
-### 1. Verify Prerequisites
+### **Common Setup (All Deployment Options)**
+
+1. **Clone and Setup**
+   ```bash
+   git clone https://github.com/your-org/vTeam.git
+   cd vTeam
+   ```
+
+2. **Configure Environment**
+   ```bash
+   cd components/manifests
+   cp env.example .env
+   # Edit .env and add: ANTHROPIC_API_KEY=your-actual-key-here
+   ```
+
+Now choose your deployment path:
+
+### 🚀 **Option A: OpenShift Deployment (Recommended)**
+
+For complete OpenShift deployment with pre-built images and HTTPS routes:
 
 ```bash
-# Check required tools
-kubectl version --client
-docker --version  # or podman --version
-git --version
-
-# Verify cluster access
-kubectl cluster-info
-kubectl get nodes
-```
-
-### 2. Clone and Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/your-org/vTeam.git
-cd vTeam
-
-# Navigate to components directory
-cd components
-```
-
-### 3. Configure Container Registry
-
-```bash
-# Set your container registry (replace with your registry)
-export REGISTRY="your-registry.com"  # e.g., "quay.io/your-username"
-
-# Login to your container registry
-docker login $REGISTRY
-```
-
-### 4. Build and Push Images
-
-```bash
-# Build all container images
-make build-all REGISTRY=$REGISTRY
-
-# Push images to registry
-make push-all REGISTRY=$REGISTRY
-```
-
-### 5. Configure Environment
-
-```bash
-# Create environment configuration
-cp manifests/env.example .env
-
-# Edit .env file and add your API key
-# ANTHROPIC_API_KEY=your-actual-anthropic-api-key-here
-nano .env  # or your preferred editor
-```
-
-### 6. Update Deployment Manifests
-
-```bash
-# Update manifests to use your container registry
-cd manifests
-sed -i "s|quay.io/ambient_code|$REGISTRY|g" *.yaml
-```
-
-### 7. Deploy to Kubernetes
-
-```bash
-# Deploy all components
+# Deploy (includes route with automatic HTTPS)
 ./deploy.sh
+
+# Get the HTTPS route URL
+oc get route frontend-route -n ambient-code -o jsonpath='{.spec.host}'
+# Open browser to the displayed URL
 ```
 
-### 8. Verify Deployment
+### ⚡ **Option B: Kubernetes Deployment**
+
+For basic Kubernetes deployment with pre-built images:
 
 ```bash
-# Check all pods are running
-kubectl get pods -n ambient-code
+# Comment out route.yaml in kustomization.yaml (not needed for regular K8s)
+sed -i 's/^- route.yaml$/# - route.yaml/' kustomization.yaml
 
-# Check services are available
-kubectl get services -n ambient-code
+# Deploy with kubectl and kustomize
+kubectl apply -k .
 
-# View deployment status
-./deploy.sh status
-```
-
-### 9. Access the Application
-
-```bash
-# Option 1: Port forward (for testing)
+# Access via port forward
 kubectl port-forward svc/frontend-service 3000:3000 -n ambient-code
-
-# Option 2: Use ingress (for production)
-echo "127.0.0.1 ambient-code.local" | sudo tee -a /etc/hosts
-
-# Open browser to: http://localhost:3000 or http://ambient-code.local
+# Open browser to: http://localhost:3000
 ```
+
+### 🔧 **Option C: Build from Source**
+
+For custom images or development:
+
+1. **Build All Images**
+   ```bash
+   # Using Docker
+   make build-all
+
+   # Using Podman
+   make build-all CONTAINER_ENGINE=podman
+
+   # For specific platform
+   make build-all PLATFORM=linux/amd64
+   ```
+
+2. **Push to Registry (if using custom registry)**
+   ```bash
+   make push-all REGISTRY=your-registry.com
+   ```
+
+3. **Update Image References**
+   ```bash
+   # Edit components/manifests/kustomization.yaml
+   # Uncomment and modify the images: section
+   ```
+
+4. **Deploy**
+   ```bash
+   cd components/manifests
+   ./deploy.sh
+   ```
 
 ## Usage
 

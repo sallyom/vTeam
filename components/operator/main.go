@@ -224,7 +224,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 					// ⚠️ Let OpenShift SCC choose UID/GID dynamically (restricted-v2 compatible)
 					// SecurityContext omitted to allow SCC assignment
 
-					// 🔧 Optional: Shared memory volume (may need to be removed if SCC restricts it)
+					// 🔧 Shared memory volume for browser
 					Volumes: []corev1.Volume{
 						{
 							Name: "dshm",
@@ -250,7 +250,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 								},
 							},
 
-							// 📦 Mount shared memory volume
+							// 📦 Mount shared memory volume only
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "dshm", MountPath: "/dev/shm"},
 							},

@@ -4,5 +4,8 @@ metadata:
   name: ambient-code
   labels:
     name: ambient-code
-    app.kubernetes.io/name: ambient-code
-    app.kubernetes.io/part-of: ambient-code
+    app: vteam
+    openshift.io/cluster-monitoring: "true"
+  annotations:
+    openshift.io/description: "vTeam Ambient Agentic Runner - AI-powered automation system"
+    openshift.io/display-name: "vTeam Ambient Runner"
