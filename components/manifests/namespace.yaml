@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: sallyom-vteam
+  name: ambient-code
   labels:
-    name: sallyom-vteam
+    name: ambient-code
     app: vteam
     openshift.io/cluster-monitoring: "true"
   annotations:

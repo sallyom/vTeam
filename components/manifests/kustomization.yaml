@@ -22,16 +22,17 @@ resources:
 
 # Images to replace (for different environments)
 # Override with: kustomize edit set image quay.io/ambient_code/vteam_backend=quay.io/sallyom/vteam:backend
-images:
-- name: quay.io/ambient_code/vteam_backend
-  newName: quay.io/sallyom/vteam
-  newTag: backend
-- name: quay.io/ambient_code/vteam_frontend
-  newName: quay.io/sallyom/vteam
-  newTag: frontend
-- name: quay.io/ambient_code/vteam_operator
-  newName: quay.io/sallyom/vteam
-  newTag: operator
-- name: quay.io/ambient_code/vteam_claude_runner
-  newName: quay.io/sallyom/vteam
-  newTag: claude-runner
+# Uncomment and modify the images section below to override default images:
+#images:
+#- name: quay.io/ambient_code/vteam_backend
+#  newName: quay.io/sallyom/vteam
+#  newTag: backend
+#- name: quay.io/ambient_code/vteam_frontend
+#  newName: quay.io/sallyom/vteam
+#  newTag: frontend
+#- name: quay.io/ambient_code/vteam_operator
+#  newName: quay.io/sallyom/vteam
+#  newTag: operator
+#- name: quay.io/ambient_code/vteam_claude_runner
+#  newName: quay.io/sallyom/vteam
+#  newTag: claude-runner

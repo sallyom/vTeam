@@ -20,11 +20,11 @@ command_exists() {
 }
 
 # Configuration
-NAMESPACE="${NAMESPACE:-sallyom-vteam}"
-DEFAULT_BACKEND_IMAGE="quay.io/sallyom/vteam:backend"
-DEFAULT_FRONTEND_IMAGE="quay.io/sallyom/vteam:frontend"
-DEFAULT_OPERATOR_IMAGE="quay.io/sallyom/vteam:operator"
-DEFAULT_RUNNER_IMAGE="quay.io/sallyom/vteam:claude-runner"
+NAMESPACE="${NAMESPACE:-ambient-code}"
+DEFAULT_BACKEND_IMAGE="quay.io/ambient_code/vteam_backend:latest"
+DEFAULT_FRONTEND_IMAGE="quay.io/ambient_code/vteam_frontend:latest"
+DEFAULT_OPERATOR_IMAGE="quay.io/ambient_code/vteam_operator:latest"
+DEFAULT_RUNNER_IMAGE="quay.io/ambient_code/vteam_claude_runner:latest"
 
 # Handle uninstall command early
 if [ "${1:-}" = "uninstall" ]; then
@@ -48,15 +48,15 @@ if [ "${1:-}" = "uninstall" ]; then
     fi
 
     # Delete using kustomize
-    if [ "$NAMESPACE" != "sallyom-vteam" ]; then
+    if [ "$NAMESPACE" != "ambient-code" ]; then
         kustomize edit set namespace "$NAMESPACE"
     fi
 
     kustomize build . | oc delete -f - --ignore-not-found=true
 
     # Restore kustomization if we modified it
-    if [ "$NAMESPACE" != "sallyom-vteam" ]; then
-        kustomize edit set namespace sallyom-vteam
+    if [ "$NAMESPACE" != "ambient-code" ]; then
+        kustomize edit set namespace ambient-code
     fi
 
     echo -e "${GREEN}✅ vTeam uninstalled from namespace ${NAMESPACE}${NC}"
@@ -125,7 +125,7 @@ echo ""
 echo -e "${YELLOW}Deploying to OpenShift using Kustomize...${NC}"
 
 # Set namespace if different from default
-if [ "$NAMESPACE" != "sallyom-vteam" ]; then
+if [ "$NAMESPACE" != "ambient-code" ]; then
     echo -e "${BLUE}Setting custom namespace: ${NAMESPACE}${NC}"
     kustomize edit set namespace "$NAMESPACE"
 fi
@@ -190,9 +190,9 @@ echo -e "   ${BLUE}oc logs -f deployment/agentic-operator -n ${NAMESPACE}${NC}"
 echo ""
 
 # Restore kustomization if we modified it
-if [ "$NAMESPACE" != "sallyom-vteam" ]; then
+if [ "$NAMESPACE" != "ambient-code" ]; then
     echo -e "${BLUE}Restoring default namespace in kustomization...${NC}"
-    kustomize edit set namespace sallyom-vteam
+    kustomize edit set namespace ambient-code
 fi
 
 echo -e "${GREEN}🎯 Ready to create agentic sessions!${NC}"
