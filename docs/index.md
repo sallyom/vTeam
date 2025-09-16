@@ -2,6 +2,13 @@
 
 > AI-powered automation system to reduce engineering refinement time and improve ticket quality
 
+## Components
+
+### Ambient Agentic Runner
+- [Setup Guide](ambient-runner/SETUP.md) - Complete setup and deployment guide
+- [API Documentation](ambient-runner/API.md) - REST API reference  
+- [Enhancement Proposals](ambient-runner/proposals/README.md) - Feature proposals and architectural changes
+
 ## Overview
 
 The **vTeam** repository contains a dual-purpose AI automation platform:

@@ -7,7 +7,8 @@
 - **Detailed ARCHITECTURE.md**: Production-ready LlamaDeploy architecture documentation  
 - **Comprehensive Agent Framework**: Complete agent personas in `rhoai-ux-agents-vTeam.md`
 - **Individual Agent Specs**: Detailed agent definitions in `agents/` directory
-- **Technical Depth**: Strong coverage of RAT system and vTeam shared configs
+- **Technical Depth**: Strong coverage of RAT system, Ambient Agentic Runner, and vTeam tools
+- **Component Documentation**: Detailed setup guides for ambient-runner platform
 
 ### Gaps Identified
 - No structured documentation hierarchy for different audiences
@@ -26,8 +27,14 @@ docs/
 │   ├── getting-started.md  # Quick 5-minute setup
 │   ├── creating-rfes.md    # RFE creation walkthrough
 │   ├── agent-framework.md  # Working with AI agents
+│   ├── agentic-runner.md   # Using Ambient Agentic Runner
 │   ├── configuration.md    # Settings and customization
 │   └── troubleshooting.md  # Common issues and solutions
+├── components/             # Component-specific documentation
+│   ├── ambient-runner/     # Ambient Agentic Runner docs
+│   │   ├── setup.md        # Kubernetes deployment guide
+│   │   ├── api.md         # REST API reference
+│   │   └── proposals/      # Enhancement proposals (CREPs)
 ├── developer-guide/        # Developer/contributor documentation
 │   ├── index.md           # Developer guide overview
 │   ├── setup.md           # Development environment setup

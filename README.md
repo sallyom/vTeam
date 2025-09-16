@@ -1,13 +1,12 @@
-# vTeam: Refinement Agent Team System
+# vTeam: Ambient Agentic Runner
 
 > AI-powered automation system to reduce engineering refinement time and improve ticket quality
 
 ## Overview
 
-The **vTeam** repository contains a dual-purpose AI automation platform:
+**vTeam** is a comprehensive AI automation platform centered around the **Ambient Agentic Runner** - a production-ready Kubernetes system that revolutionizes how teams handle complex analysis and automation tasks. The platform enables users to create and manage intelligent agentic sessions through a modern web interface, leveraging AI with integrated browser automation capabilities.
 
-1. **Refinement Agent Team System** - A Streamlit-based AI automation solution that dramatically reduces the time engineering teams spend in refinement meetings through a 7-step agent council workflow
-2. **vTeam Shared Configs** - A Python package for managing shared Claude Code configuration across development teams
+### Key Capabilities
 
 The Refinement Agent Team system transforms Request for Enhancement (RFE) submissions into well-refined, implementation-ready tickets through intelligent AI agent collaboration, enabling engineering teams to start work immediately with comprehensive context and clear acceptance criteria.
 
@@ -35,14 +34,9 @@ The Refinement Agent Team system addresses these challenges through intelligent 
 - 🚀 **25% improvement** in engineering velocity
 - 📊 **Measurable time savings** in refinement hours per ticket
 
-## System Architecture
+## Architecture
 
-### Technology Stack
-- **Web Framework**: Streamlit for interactive UI
-- **AI Integration**: Anthropic Claude API with Google Vertex AI support
-- **Data Models**: Pydantic for type-safe RFE workflow management
-- **Language**: Python 3.13+
-- **Development Tools**: pre-commit hooks with black, isort, flake8, mypy
+The platform consists of multiple containerized services orchestrated via Kubernetes:
 
 ### Agent Council Workflow
 The system implements a 7-step refinement process with specialized AI agents:
@@ -70,171 +64,363 @@ The system implements a 7-step refinement process with specialized AI agents:
 - **Jira Integration**: Automated Epic creation from refined RFEs
 - **Agent Dashboard**: Role-specific views for different team members
 
-## Getting Started
+### Components
 
-### Prerequisites
-- Python 3.13+ (or Python 3.12+)
-- Git
-- Anthropic Claude API key (for AI features)
+| Component | Technology | Description |
+|-----------|------------|-------------|
+| **Frontend** | NextJS + Shadcn | User interface for managing agentic sessions |
+| **Backend API** | Go + Gin | REST API for managing Kubernetes Custom Resources |
+| **Agentic Operator** | Go | Kubernetes operator that watches CRs and creates Jobs |
+| **Ambient Runner** | Python + AI CLI | Pod that executes AI with Playwright MCP server |
+| **Playwright MCP** | MCP Server | Provides browser automation capabilities to AI |
 
-### Installation
+## Prerequisites
 
-#### 1. Clone the Repository
+Before deploying the Ambient Agentic Runner, ensure you have:
+
+### Required Tools
+- **Kubernetes cluster** (local with minikube/kind or cloud-based like EKS/GKE/AKS)
+- **kubectl** v1.28+ configured to access your cluster  
+- **Docker or Podman** for building container images
+- **Container registry access** (Docker Hub, Quay.io, ECR, etc.)
+- **Go 1.24+** for building backend services (if building from source)
+- **Node.js 18+** and **npm/pnpm** for the frontend (if building from source)
+
+### Required Accounts & API Keys
+- **Anthropic API Key** - Get one from [Anthropic Console](https://console.anthropic.com/)
+
+
+## Quick Start
+
+### 1. Verify Prerequisites
+
 ```bash
-git clone https://github.com/red-hat-data-services/vTeam.git
+# Check required tools
+kubectl version --client
+docker --version  # or podman --version
+git --version
+
+# Verify cluster access
+kubectl cluster-info
+kubectl get nodes
+```
+
+### 2. Clone and Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/your-org/vTeam.git
 cd vTeam
+
+# Navigate to components directory
+cd components
 ```
 
-#### 2. Set Up Python Environment
+### 3. Configure Container Registry
+
 ```bash
-# Create virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Set your container registry (replace with your registry)
+export REGISTRY="your-registry.com"  # e.g., "quay.io/your-username"
 
-# Install dependencies using uv (preferred) or pip
-cd demos/rfe-builder
-uv pip install -r requirements.txt
-# OR: pip install -r requirements.txt
+# Login to your container registry
+docker login $REGISTRY
 ```
 
-#### 3. Configure AI API Access
-Create a `.streamlit/secrets.toml` file in the `demos/rfe-builder/` directory:
-```toml
-[anthropic]
-api_key = "your-anthropic-api-key-here"
+### 4. Build and Push Images
 
-[vertex]
-project_id = "your-gcp-project-id"  # Optional, for Vertex AI
-location = "us-central1"            # Optional, for Vertex AI
-
-[jira]  # Optional, for Jira integration
-base_url = "https://your-domain.atlassian.net"
-username = "your-email@company.com"
-api_token = "your-jira-api-token"
-project_key = "PROJECT"
-```
-
-#### 4. Run the Application
 ```bash
-cd demos/rfe-builder
-streamlit run app.py
+# Build all container images
+make build-all REGISTRY=$REGISTRY
+
+# Push images to registry
+make push-all REGISTRY=$REGISTRY
 ```
 
-The application will open in your browser at `http://localhost:8501`.
+### 5. Configure Environment
 
-### Development Setup
-
-#### Install Development Tools
 ```bash
-# Install pre-commit hooks
-cd demos/rfe-builder
-pre-commit install
+# Create environment configuration
+cp manifests/env.example .env
 
-# Run all pre-commit checks
-pre-commit run --all-files
+# Edit .env file and add your API key
+# ANTHROPIC_API_KEY=your-actual-anthropic-api-key-here
+nano .env  # or your preferred editor
 ```
 
-#### Linting and Testing
+### 6. Update Deployment Manifests
+
 ```bash
-# Format code
-black .
-isort --profile black .
+# Update manifests to use your container registry
+cd manifests
+sed -i "s|quay.io/ambient_code|$REGISTRY|g" *.yaml
+```
 
-# Lint code
-flake8 --max-line-length=88 --extend-ignore=E203,W503 .
+### 7. Deploy to Kubernetes
 
-# Type checking
-mypy --ignore-missing-imports .
+```bash
+# Deploy all components
+./deploy.sh
+```
 
-# Run tests
-python -m pytest
+### 8. Verify Deployment
+
+```bash
+# Check all pods are running
+kubectl get pods -n ambient-code
+
+# Check services are available
+kubectl get services -n ambient-code
+
+# View deployment status
+./deploy.sh status
+```
+
+### 9. Access the Application
+
+```bash
+# Option 1: Port forward (for testing)
+kubectl port-forward svc/frontend-service 3000:3000 -n ambient-code
+
+# Option 2: Use ingress (for production)
+echo "127.0.0.1 ambient-code.local" | sudo tee -a /etc/hosts
+
+# Open browser to: http://localhost:3000 or http://ambient-code.local
+```
+
+## Usage
+
+Once deployed, you can create and manage agentic sessions through the web interface:
+
+### Creating an Agentic Session
+
+1. **Access the Web Interface**
+   - Navigate to `http://localhost:3000` (if using port forwarding)
+   - Or your configured domain/ingress endpoint
+
+2. **Create New Session**
+   - Click "New Agentic Session"
+   - Fill out the form with:
+     - **Prompt**: Task description for the AI (e.g., "Analyze this website's user experience")
+     - **Website URL**: Target website to analyze
+     - **Model**: Choose AI model (Ambient AI v1, etc.)
+     - **Settings**: Adjust temperature, token limits as needed
+
+3. **Monitor Progress**
+   - View real-time status updates
+   - Monitor job execution logs
+   - Track completion status
+
+4. **Review Results**
+   - Download analysis results
+   - View structured output
+   - Export findings
+
+### Example Use Cases
+
+- **Website Analysis**: Analyze user experience, accessibility, performance
+- **Competitive Research**: Compare features across competitor websites  
+- **Content Auditing**: Review content quality and SEO optimization
+- **Automation Testing**: Verify functionality across different scenarios
+
+## Troubleshooting
+
+### Common Issues
+
+#### Pods Not Starting
+```bash
+# Check pod status and events
+kubectl describe pod <pod-name> -n ambient-code
+
+# Check logs
+kubectl logs <pod-name> -n ambient-code
+
+# Check resource constraints
+kubectl top pods -n ambient-code
+```
+
+#### API Connection Issues
+```bash
+# Check service endpoints
+kubectl get endpoints -n ambient-code
+
+# Test API connectivity
+kubectl exec -it <pod-name> -n ambient-code -- curl http://backend-service:8080/health
+```
+
+#### Image Pull Errors
+```bash
+# Verify registry access
+docker pull $REGISTRY/backend:latest
+
+# Check image references in manifests
+grep "image:" manifests/*.yaml
+
+# Update registry references if needed
+sed -i "s|old-registry|new-registry|g" manifests/*.yaml
+```
+
+#### Job Failures
+```bash
+# List jobs
+kubectl get jobs -n ambient-code
+
+# Check job details
+kubectl describe job <job-name> -n ambient-code
+
+# Check failed pod logs
+kubectl logs <failed-pod-name> -n ambient-code
+```
+
+### Verification Commands
+
+```bash
+# Check all resources
+kubectl get all -l app=ambient-code -n ambient-code
+
+# View recent events
+kubectl get events --sort-by='.lastTimestamp' -n ambient-code
+
+# Test frontend access
+curl -f http://localhost:3000 || echo "Frontend not accessible"
+
+# Test backend API
+kubectl port-forward svc/backend-service 8080:8080 -n ambient-code &
+curl http://localhost:8080/health
+```
+
+## Production Considerations
+
+### Security
+- **API Key Management**: Store Anthropic API keys securely in Kubernetes secrets
+- **RBAC**: Configure appropriate role-based access controls
+- **Network Policies**: Implement network isolation between components
+- **Image Scanning**: Scan container images for vulnerabilities before deployment
+
+### Monitoring
+- **Prometheus Metrics**: Configure metrics collection for all components
+- **Log Aggregation**: Set up centralized logging (ELK, Loki, etc.)
+- **Alerting**: Configure alerts for pod failures, resource exhaustion
+- **Health Checks**: Implement comprehensive health endpoints
+
+### Scaling
+- **Horizontal Pod Autoscaling**: Configure HPA based on CPU/memory usage
+- **Resource Limits**: Set appropriate resource requests and limits
+- **Node Affinity**: Configure pod placement for optimal resource usage
+
+## Development
+
+### Local Development
+```bash
+# Frontend development
+cd components/frontend
+npm install
+npm run dev
+
+# Backend development
+cd components/backend
+export KUBECONFIG=~/.kube/config
+go run main.go
+
+# Testing with Kind
+kind create cluster --name ambient-agentic
+kind load docker-image backend:latest --name ambient-agentic
+kind load docker-image frontend:latest --name ambient-agentic
+```
+
+### Building from Source
+```bash
+# Build all images locally
+make build-all
+
+# Build specific components
+make build-frontend
+make build-backend
+make build-operator
+make build-runner
 ```
 
 ## File Structure
 
 ```
 vTeam/
-├── demos/rfe-builder/              # Refinement Agent Team demo application
-│   ├── app.py                      # Main Streamlit application
-│   ├── components/                 # UI components and integrations
-│   │   ├── chat_interface.py       # Conversational AI interface
-│   │   ├── jira_integration.py     # Jira Epic creation
-│   │   └── workflow.py             # Workflow management UI
-│   ├── data/                       # Data models and state management
-│   │   └── rfe_models.py           # Pydantic models for RFE workflow
-│   ├── ai_models/                  # AI integration modules
-│   │   ├── anthropic_client.py     # Claude API client
-│   │   ├── cost_tracker.py         # Usage monitoring
-│   │   └── prompt_manager.py       # Prompt templates
-│   ├── prompts/                    # AI prompt templates
-│   ├── tests/                      # Test suite
-│   └── requirements.txt            # Python dependencies
-├── src/vteam_shared_configs/       # Shared configuration package
-│   ├── cli.py                      # Command-line interface
-│   └── installer.py                # Configuration management
-├── pyproject.toml                  # Package configuration
-├── rhoai-ux-agents-vTeam.md        # Complete agent framework docs
-└── CLAUDE.md                       # Claude Code guidance
+├── components/                     # 🚀 Ambient Agentic Runner (Main Platform)
+│   ├── frontend/                   # NextJS web interface
+│   ├── backend/                    # Go API service
+│   ├── operator/                   # Kubernetes operator
+│   ├── runners/                   # AI runner services
+│   │   └── claude-code-runner/    # Python Claude Code CLI service
+│   ├── manifests/                  # Kubernetes deployment files
+│   └── README.md                   # Detailed setup documentation
+├── docs/                           # Documentation (MkDocs)
+│   └── ambient-runner/             # Platform-specific documentation
+├── diagrams/                       # Architecture diagrams
+└── Makefile                        # Build and deployment automation
 ```
 
-## Usage
+## Other vTeam Components
 
-### Creating RFEs
+This repository also contains additional tools and demonstrations that complement the main Ambient Agentic Runner platform:
 
-1. **Conversational Creation** (💬 AI Chat RFE)
-   - Describe your enhancement idea in natural language
-   - AI assistant guides you through the process
-   - Structured data extracted automatically
+### 📊 RFE Builder Demo
+A Streamlit-based demonstration of multi-agent RFE (Request for Enhancement) analysis system.
 
-2. **Form-Based Creation** (📝 Create RFE)
-   - Traditional form interface
-   - Manual field completion
-   - Immediate workflow assignment
+- **Location**: `demos/rfe-builder/`
+- **Technology**: Python, Streamlit, LlamaIndex, LlamaDeploy
+- **Purpose**: Showcase AI-powered feature analysis with 7 specialized agent roles
 
-### Agent Council Workflow
-
-Once an RFE is created, it flows through the 7-step agent council:
-
-1. **Parker (PM)** prioritizes the RFE for business value
-2. **Archie (Architect)** reviews technical feasibility
-3. **Stella (Staff Engineer)** validates completeness
-4. **Archie (Architect)** ensures acceptance criteria are clear
-5. **Stella (Staff Engineer)** makes final accept/reject decision
-6. **Parker (PM)** communicates results to stakeholders
-7. **Derek (Delivery Owner)** creates implementation tickets
-
-### Agent Framework
-
-The system uses a sophisticated multi-agent framework with different seniority levels and specializations. Each agent has:
-- **Distinct personality** and communication style
-- **Technical competency levels** matching real software teams
-- **Domain expertise** in their area of responsibility
-- **Realistic interaction patterns** with other agents
-
-See `rhoai-ux-agents-vTeam.md` for complete agent specifications and interaction protocols.
-
-## Shared Configuration
-
-This repository includes shared Claude Code configuration for team development standards and workflows.
-
-### vTeam Shared-Configs
-
-Automated team configuration management via Python package:
-
-- **🔄 Automatic enforcement** - Hooks ensure team standards on every Git operation
-- **⚙️ Developer flexibility** - Personal overrides via `.claude/settings.local.json`
-- **📊 Visual documentation** - Mermaid workflow diagrams show configuration hierarchy
-- **🛠️ Project templates** - Python, JavaScript, Shell development templates
-
-**Quick Setup:**
+**Quick Start:**
 ```bash
-uv pip install -e .  # Install from source
-vteam-config install  # Set up configuration
+cd demos/rfe-builder
+uv sync && uv run generate
+uv run -m llama_deploy.apiserver
+# See demos/rfe-builder/README.md for complete setup
+```
+
+[📖 View RFE Builder Documentation](demos/rfe-builder/README.md)
+
+### 🔧 vTeam Shared Configurations
+Automated team configuration management for development standards.
+
+- **Location**: `tools/vteam_shared_configs/`
+- **Technology**: Python CLI, Git hooks
+- **Purpose**: Enforce consistent development workflows and Claude Code configurations
+
+**Quick Start:**
+```bash
+cd tools/vteam_shared_configs
+uv pip install -e .
+vteam-config install
 ```
 
 **Available Commands:**
-```bash
-vteam-config status      # Show current configuration
-vteam-config update      # Update to latest version
-vteam-config uninstall   # Remove configuration
-```
+- `vteam-config status` - Show current configuration
+- `vteam-config update` - Update to latest version  
+- `vteam-config uninstall` - Remove configuration
+
+### 🔌 MCP Client Integration
+Library for integrating with Model Context Protocol servers.
+
+- **Location**: `tools/mcp_client_integration/`
+- **Technology**: Python, asyncio
+- **Purpose**: Simplify MCP server communication in AI applications
+
+[📖 View MCP Client Documentation](tools/mcp_client_integration/README.md)
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Add tests if applicable
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+
+

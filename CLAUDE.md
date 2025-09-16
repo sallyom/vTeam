@@ -4,10 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**vTeam** is a dual-purpose repository containing:
+**vTeam** is a comprehensive AI automation platform containing:
 
-1. **RAT (Refinement Agent Team) System**: An AI-powered automation system to reduce engineering refinement time and improve ticket quality through intelligent Jira ticket preparation
-2. **vTeam Shared Configs**: A Python package providing shared Claude Code configuration for team development standards
+1. **RAT (Refinement Agent Team) System**: An AI-powered automation system to reduce engineering refinement time and improve ticket quality
+2. **Ambient Agentic Runner**: A Kubernetes-native platform for running automated agentic sessions with AI and MCP capabilities
+3. **vTeam Tools**: Supporting tools including shared configurations and MCP client integration
 
 ## Architecture
 
@@ -17,10 +18,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Data Models**: Pydantic models for RFE workflow management (7-step council review process)
 - **Agent System**: Multi-agent workflow with specialized roles (PM, Architect, Staff Engineer, PO, Team Lead, Team Member, Delivery Owner)
 
-### vTeam Shared Configs (`src/vteam_shared_configs/`)
-- **Purpose**: Manages Claude Code configuration across team projects
-- **Installation**: CLI tool (`vteam-config`) for setup and maintenance
-- **Configuration**: Global settings, project templates, and team hooks via symlinks
+### Ambient Agentic Runner (`components/`)
+- **Technology Stack**: Kubernetes-native with Go backend, NextJS frontend, Python AI service
+- **AI Integration**: Ambient Code AI with MCP server capabilities for browser automation
+- **Architecture**: Microservices with Custom Resources, Operators, and Job execution
+- **Capabilities**: Generic agentic task execution including website analysis, automation, and data processing
+
+### vTeam Tools (`tools/`)
+- **vTeam Shared Configs**: CLI tool (`vteam-config`) for Claude Code configuration management
+- **MCP Client Integration**: Python library for Model Context Protocol client integration
+- **Installation**: Individual tools with separate setup and maintenance
 
 ## Development Commands
 
@@ -40,21 +47,20 @@ cd demos/rfe-builder
 streamlit run app.py
 ```
 
-### Package Development (vTeam Shared Configs)
+### Tool Development (vTeam Tools)
 ```bash
-# Install development dependencies
+# vTeam Shared Configs
+cd tools/vteam_shared_configs
 uv pip install -e ".[dev]"
-
-# Run linting workflow
 black .
 isort --profile black .
 flake8 --max-line-length=88 --extend-ignore=E203,W503 .
-
-# Run tests
 python -m pytest
 
-# Run mypy type checking
-mypy --ignore-missing-imports src/
+# MCP Client Integration
+cd tools/mcp_client_integration
+uv pip install -e .
+python -m pytest tests/
 ```
 
 ### Pre-commit Hooks
@@ -98,17 +104,22 @@ pre-commit run --all-files
 
 ```
 vTeam/
-├── src/vteam_shared_configs/     # Installable package for team configuration
-│   ├── cli.py                    # Command-line interface (vteam-config)
-│   └── installer.py              # Configuration management logic
+├── components/                   # Ambient Agentic Runner services  
+│   ├── frontend/                 # NextJS web interface
+│   ├── backend/                  # Go API service
+│   ├── operator/                 # Kubernetes operator
+│   ├── runners/                 # AI runner services
+│   │   └── claude-code-runner/  # Python Claude Code CLI service
+│   └── manifests/                # Kubernetes deployment files
+├── tools/                        # Supporting tools and utilities
+│   ├── vteam_shared_configs/     # Team configuration package
+│   │   ├── cli.py                # Command-line interface (vteam-config)
+│   │   ├── installer.py          # Configuration management logic
+│   │   └── pyproject.toml        # Package configuration
+│   └── mcp_client_integration/   # MCP client library
 ├── demos/rfe-builder/            # RAT system demonstration
 │   ├── app.py                    # Main Streamlit application
-│   ├── components/               # UI components and integrations
-│   │   ├── chat_interface.py     # Conversational AI interface
-│   │   └── jira_integration.py   # (Future) Jira API integration
-│   └── data/                     # Data models and state management
-│       └── rfe_models.py         # Pydantic models for RFE workflow
-├── pyproject.toml               # Package configuration
+│   └── src/                      # Demo source code
 └── rhoai-ux-agents-vTeam.md     # Complete agent framework documentation
 ```
 
