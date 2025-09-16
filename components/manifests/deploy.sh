@@ -148,7 +148,11 @@ oc project ${NAMESPACE}
 
 # Create API key secret (kustomize creates empty secret, we populate it)
 echo -e "${BLUE}Creating API key secret...${NC}"
-oc patch secret ambient-code-secrets -p "{\"stringData\":{\"anthropic-api-key\":\"$ANTHROPIC_API_KEY\"}}"
+oc patch secret ambient-code-secrets -n ${NAMESPACE} -p "{\"stringData\":{\"anthropic-api-key\":\"$ANTHROPIC_API_KEY\"}}" || {
+    echo -e "${YELLOW}Secret patch failed, ensuring secret exists and retrying...${NC}"
+    sleep 1
+    oc patch secret ambient-code-secrets -n ${NAMESPACE} -p "{\"stringData\":{\"anthropic-api-key\":\"$ANTHROPIC_API_KEY\"}}"
+}
 
 echo ""
 echo -e "${GREEN}✅ Deployment completed!${NC}"
