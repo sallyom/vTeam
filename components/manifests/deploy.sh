@@ -28,7 +28,7 @@ DEFAULT_RUNNER_IMAGE="quay.io/sallyom/vteam:claude-runner"
 
 # Handle uninstall command early
 if [ "${1:-}" = "uninstall" ]; then
-    echo -e "${YELLOW}🗑️ Uninstalling vTeam from namespace ${NAMESPACE}...${NC}"
+    echo -e "${YELLOW}Uninstalling vTeam from namespace ${NAMESPACE}...${NC}"
 
     # Check prerequisites for uninstall
     if ! command_exists oc; then
@@ -60,7 +60,7 @@ if [ "${1:-}" = "uninstall" ]; then
     fi
 
     echo -e "${GREEN}✅ vTeam uninstalled from namespace ${NAMESPACE}${NC}"
-    echo -e "${YELLOW}💡 Note: Namespace ${NAMESPACE} still exists. Delete manually if needed:${NC}"
+    echo -e "${YELLOW}Note: Namespace ${NAMESPACE} still exists. Delete manually if needed:${NC}"
     echo -e "   ${BLUE}oc delete namespace ${NAMESPACE}${NC}"
     exit 0
 fi
@@ -75,7 +75,7 @@ echo -e "Runner Image: ${GREEN}${DEFAULT_RUNNER_IMAGE}${NC}"
 echo ""
 
 # Check prerequisites
-echo -e "${YELLOW}🔍 Checking prerequisites...${NC}"
+echo -e "${YELLOW}Checking prerequisites...${NC}"
 if ! command_exists oc; then
     echo -e "${RED}❌ OpenShift CLI (oc) not found. Please install it first.${NC}"
     exit 1
@@ -90,7 +90,7 @@ echo -e "${GREEN}✅ Prerequisites check passed${NC}"
 echo ""
 
 # Check if logged in to OpenShift
-echo -e "${YELLOW}🔐 Checking OpenShift authentication...${NC}"
+echo -e "${YELLOW}Checking OpenShift authentication...${NC}"
 if ! oc whoami >/dev/null 2>&1; then
     echo -e "${RED}❌ Not logged in to OpenShift. Please run 'oc login' first.${NC}"
     exit 1
@@ -100,11 +100,11 @@ echo -e "${GREEN}✅ Authenticated as: $(oc whoami)${NC}"
 echo ""
 
 # Check environment file
-echo -e "${YELLOW}🔍 Checking environment configuration...${NC}"
+echo -e "${YELLOW}Checking environment configuration...${NC}"
 ENV_FILE=".env"
 if [[ ! -f "$ENV_FILE" ]]; then
     echo -e "${RED}❌ .env file not found${NC}"
-    echo -e "${YELLOW}💡 Please create .env file from env.example:${NC}"
+    echo -e "${YELLOW}Please create .env file from env.example:${NC}"
     echo "  cp env.example .env"
     echo "  # Edit .env and add your actual API key"
     exit 1
@@ -122,20 +122,20 @@ echo -e "${GREEN}✅ Environment configuration loaded${NC}"
 echo ""
 
 # Deploy using kustomize
-echo -e "${YELLOW}🚀 Deploying to OpenShift using Kustomize...${NC}"
+echo -e "${YELLOW}Deploying to OpenShift using Kustomize...${NC}"
 
 # Set namespace if different from default
 if [ "$NAMESPACE" != "sallyom-vteam" ]; then
-    echo -e "${BLUE}📝 Setting custom namespace: ${NAMESPACE}${NC}"
+    echo -e "${BLUE}Setting custom namespace: ${NAMESPACE}${NC}"
     kustomize edit set namespace "$NAMESPACE"
 fi
 
 # Build and apply manifests
-echo -e "${BLUE}📋 Building and applying manifests...${NC}"
+echo -e "${BLUE}Building and applying manifests...${NC}"
 kustomize build . | oc apply -f -
 
 # Wait for namespace to be ready
-echo -e "${YELLOW}⏳ Waiting for namespace to be ready...${NC}"
+echo -e "${YELLOW}Waiting for namespace to be ready...${NC}"
 oc wait --for=condition=Active namespace/${NAMESPACE} --timeout=300s || {
     echo -e "${RED}❌ Namespace creation timed out. Checking status...${NC}"
     oc describe namespace ${NAMESPACE}
@@ -143,11 +143,11 @@ oc wait --for=condition=Active namespace/${NAMESPACE} --timeout=300s || {
 }
 
 # Switch to the target namespace
-echo -e "${BLUE}🔄 Switching to namespace ${NAMESPACE}...${NC}"
+echo -e "${BLUE}Switching to namespace ${NAMESPACE}...${NC}"
 oc project ${NAMESPACE}
 
 # Create API key secret (kustomize creates empty secret, we populate it)
-echo -e "${BLUE}🔐 Creating API key secret...${NC}"
+echo -e "${BLUE}Creating API key secret...${NC}"
 oc patch secret ambient-code-secrets -p "{\"stringData\":{\"anthropic-api-key\":\"$ANTHROPIC_API_KEY\"}}"
 
 echo ""
@@ -155,13 +155,13 @@ echo -e "${GREEN}✅ Deployment completed!${NC}"
 echo ""
 
 # Wait for deployments to be ready
-echo -e "${YELLOW}⏳ Waiting for deployments to be ready...${NC}"
+echo -e "${YELLOW}Waiting for deployments to be ready...${NC}"
 oc rollout status deployment/backend-api --namespace=${NAMESPACE} --timeout=300s
 oc rollout status deployment/agentic-operator --namespace=${NAMESPACE} --timeout=300s
 oc rollout status deployment/frontend --namespace=${NAMESPACE} --timeout=300s
 
 # Get service information
-echo -e "${BLUE}🌐 Getting service information...${NC}"
+echo -e "${BLUE}Getting service information...${NC}"
 echo ""
 echo -e "${GREEN}🎉 Deployment successful!${NC}"
 echo -e "${GREEN}========================${NC}"
@@ -169,16 +169,16 @@ echo -e "Namespace: ${BLUE}${NAMESPACE}${NC}"
 echo ""
 
 # Show pod status
-echo -e "${BLUE}📊 Pod Status:${NC}"
+echo -e "${BLUE}Pod Status:${NC}"
 oc get pods -n ${NAMESPACE}
 echo ""
 
 # Show services
-echo -e "${BLUE}🔗 Services:${NC}"
+echo -e "${BLUE}Services:${NC}"
 oc get services -n ${NAMESPACE}
 echo ""
 
-echo -e "${YELLOW}📝 Next steps:${NC}"
+echo -e "${YELLOW}Next steps:${NC}"
 echo -e "1. Access the frontend:"
 echo -e "   ${BLUE}oc port-forward svc/frontend-service 3000:3000 -n ${NAMESPACE}${NC}"
 echo -e "   Then open: http://localhost:3000"
@@ -191,7 +191,7 @@ echo ""
 
 # Restore kustomization if we modified it
 if [ "$NAMESPACE" != "sallyom-vteam" ]; then
-    echo -e "${BLUE}🔄 Restoring default namespace in kustomization...${NC}"
+    echo -e "${BLUE}Restoring default namespace in kustomization...${NC}"
     kustomize edit set namespace sallyom-vteam
 fi
 
