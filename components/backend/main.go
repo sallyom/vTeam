@@ -203,6 +203,11 @@ func listAgenticSessions(c *gin.Context) {
 
 		if status, ok := item.Object["status"].(map[string]interface{}); ok {
 			session.Status = parseStatus(status)
+			// Read additional data from files
+			if session.Status != nil {
+				sessionName := item.GetName()
+				readDataFromFiles(sessionName, session.Status)
+			}
 		}
 
 		sessions = append(sessions, session)
@@ -238,6 +243,10 @@ func getAgenticSession(c *gin.Context) {
 
 	if status, ok := item.Object["status"].(map[string]interface{}); ok {
 		session.Status = parseStatus(status)
+		// Read additional data from files
+		if session.Status != nil {
+			readDataFromFiles(name, session.Status)
+		}
 	}
 
 	c.JSON(http.StatusOK, session)
@@ -566,6 +575,28 @@ func writeDataToFiles(sessionName string, statusUpdate map[string]interface{}) {
 				// Remove from status update to avoid storing in CR
 				delete(statusUpdate, "messages")
 			}
+		}
+	}
+}
+
+// Read session data from persistent files and populate status
+func readDataFromFiles(sessionName string, status *AgenticSessionStatus) {
+	sessionDir := filepath.Join(stateBaseDir, sessionName)
+
+	// Read final output from file if it exists
+	finalOutputFile := filepath.Join(sessionDir, "final-output.txt")
+	if finalOutputBytes, err := ioutil.ReadFile(finalOutputFile); err == nil {
+		status.FinalOutput = string(finalOutputBytes)
+	}
+
+	// Read messages from file if it exists
+	messagesFile := filepath.Join(sessionDir, "messages.json")
+	if messagesBytes, err := ioutil.ReadFile(messagesFile); err == nil {
+		var messages []MessageObject
+		if err := json.Unmarshal(messagesBytes, &messages); err == nil {
+			status.Messages = messages
+		} else {
+			log.Printf("Warning: failed to unmarshal messages for %s: %v", sessionName, err)
 		}
 	}
 }
