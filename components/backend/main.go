@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -24,6 +27,7 @@ var (
 	k8sClient     *kubernetes.Clientset
 	dynamicClient dynamic.Interface
 	namespace     string
+	stateBaseDir  string
 )
 
 func main() {
@@ -36,6 +40,12 @@ func main() {
 	namespace = os.Getenv("NAMESPACE")
 	if namespace == "" {
 		namespace = "default"
+	}
+
+	// Get state storage base directory
+	stateBaseDir = os.Getenv("STATE_BASE_DIR")
+	if stateBaseDir == "" {
+		stateBaseDir = "/data/state"
 	}
 
 	// Setup Gin router
@@ -355,6 +365,10 @@ func updateAgenticSessionStatus(c *gin.Context) {
 	}
 
 	status := item.Object["status"].(map[string]interface{})
+
+	// Write data to files before updating CR
+	writeDataToFiles(name, statusUpdate)
+
 	for key, value := range statusUpdate {
 		status[key] = value
 	}
@@ -520,6 +534,42 @@ func parseSpec(spec map[string]interface{}) AgenticSessionSpec {
 	return result
 }
 
+// Write session data to persistent files
+func writeDataToFiles(sessionName string, statusUpdate map[string]interface{}) {
+	// Create session directory
+	sessionDir := filepath.Join(stateBaseDir, sessionName)
+	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+		log.Printf("Warning: failed to create session directory %s: %v", sessionDir, err)
+		return
+	}
+
+	// Write final output to file if present
+	if finalOutput, ok := statusUpdate["finalOutput"].(string); ok && finalOutput != "" {
+		finalOutputFile := filepath.Join(sessionDir, "final-output.txt")
+		if err := ioutil.WriteFile(finalOutputFile, []byte(finalOutput), 0644); err != nil {
+			log.Printf("Warning: failed to write final output for %s: %v", sessionName, err)
+		} else {
+			log.Printf("Wrote final output to file for session %s (%d chars)", sessionName, len(finalOutput))
+			// Remove from status update to avoid storing in CR
+			delete(statusUpdate, "finalOutput")
+		}
+	}
+
+	// Write messages to file if present
+	if messages, ok := statusUpdate["messages"].([]interface{}); ok && len(messages) > 0 {
+		messagesFile := filepath.Join(sessionDir, "messages.json")
+		if messagesBytes, err := json.MarshalIndent(messages, "", "  "); err == nil {
+			if err := ioutil.WriteFile(messagesFile, messagesBytes, 0644); err != nil {
+				log.Printf("Warning: failed to write messages for %s: %v", sessionName, err)
+			} else {
+				log.Printf("Wrote %d messages to file for session %s", len(messages), sessionName)
+				// Remove from status update to avoid storing in CR
+				delete(statusUpdate, "messages")
+			}
+		}
+	}
+}
+
 func parseStatus(status map[string]interface{}) *AgenticSessionStatus {
 	result := &AgenticSessionStatus{}
 
@@ -584,3 +634,4 @@ func parseStatus(status map[string]interface{}) *AgenticSessionStatus {
 
 	return result
 }
+
