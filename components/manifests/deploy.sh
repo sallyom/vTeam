@@ -21,10 +21,10 @@ command_exists() {
 
 # Configuration
 NAMESPACE="${NAMESPACE:-ambient-code}"
-DEFAULT_BACKEND_IMAGE="quay.io/ambient_code/vteam_backend:latest"
-DEFAULT_FRONTEND_IMAGE="quay.io/ambient_code/vteam_frontend:latest"
-DEFAULT_OPERATOR_IMAGE="quay.io/ambient_code/vteam_operator:latest"
-DEFAULT_RUNNER_IMAGE="quay.io/ambient_code/vteam_claude_runner:latest"
+DEFAULT_BACKEND_IMAGE="${DEFAULT_BACKEND_IMAGE:-quay.io/ambient_code/vteam_backend:latest}"
+DEFAULT_FRONTEND_IMAGE="${DEFAULT_FRONTEND_IMAGE:-quay.io/ambient_code/vteam_frontend:latest}"
+DEFAULT_OPERATOR_IMAGE="${DEFAULT_OPERATOR_IMAGE:-quay.io/ambient_code/vteam_operator:latest}"
+DEFAULT_RUNNER_IMAGE="${DEFAULT_RUNNER_IMAGE:-quay.io/ambient_code/vteam_claude_runner:latest}"
 
 # Handle uninstall command early
 if [ "${1:-}" = "uninstall" ]; then
@@ -130,17 +130,31 @@ if [ "$NAMESPACE" != "ambient-code" ]; then
     kustomize edit set namespace "$NAMESPACE"
 fi
 
+# Set custom images if different from defaults
+echo -e "${BLUE}Setting custom images...${NC}"
+kustomize edit set image quay.io/ambient_code/vteam_backend:latest=${DEFAULT_BACKEND_IMAGE}
+kustomize edit set image quay.io/ambient_code/vteam_frontend:latest=${DEFAULT_FRONTEND_IMAGE}
+kustomize edit set image quay.io/ambient_code/vteam_operator:latest=${DEFAULT_OPERATOR_IMAGE}
+kustomize edit set image quay.io/ambient_code/vteam_claude_runner:latest=${DEFAULT_RUNNER_IMAGE}
+
 # Build and apply manifests
 echo -e "${BLUE}Building and applying manifests...${NC}"
 kustomize build . | oc apply -f -
 
-# Wait for namespace to be ready
-echo -e "${YELLOW}Waiting for namespace to be ready...${NC}"
-oc wait --for=condition=Active namespace/${NAMESPACE} --timeout=300s || {
-    echo -e "${RED}❌ Namespace creation timed out. Checking status...${NC}"
-    oc describe namespace ${NAMESPACE}
+# Check if namespace exists and is active
+echo -e "${YELLOW}Checking namespace status...${NC}"
+if ! oc get namespace ${NAMESPACE} >/dev/null 2>&1; then
+    echo -e "${RED}❌ Namespace ${NAMESPACE} does not exist${NC}"
     exit 1
-}
+fi
+
+# Check if namespace is active
+NAMESPACE_PHASE=$(oc get namespace ${NAMESPACE} -o jsonpath='{.status.phase}')
+if [ "$NAMESPACE_PHASE" != "Active" ]; then
+    echo -e "${RED}❌ Namespace ${NAMESPACE} is not active (phase: ${NAMESPACE_PHASE})${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✅ Namespace ${NAMESPACE} is active${NC}"
 
 # Switch to the target namespace
 echo -e "${BLUE}Switching to namespace ${NAMESPACE}...${NC}"
@@ -153,6 +167,10 @@ oc patch secret ambient-code-secrets -n ${NAMESPACE} -p "{\"stringData\":{\"anth
     sleep 1
     oc patch secret ambient-code-secrets -n ${NAMESPACE} -p "{\"stringData\":{\"anthropic-api-key\":\"$ANTHROPIC_API_KEY\"}}"
 }
+
+# Update operator deployment with custom runner image
+echo -e "${BLUE}Updating operator with custom runner image...${NC}"
+oc patch deployment agentic-operator -n ${NAMESPACE} -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"agentic-operator\",\"env\":[{\"name\":\"AMBIENT_CODE_RUNNER_IMAGE\",\"value\":\"${DEFAULT_RUNNER_IMAGE}\"}]}]}}}}" --type=strategic
 
 echo ""
 echo -e "${GREEN}✅ Deployment completed!${NC}"
@@ -194,9 +212,14 @@ echo -e "   ${BLUE}oc logs -f deployment/agentic-operator -n ${NAMESPACE}${NC}"
 echo ""
 
 # Restore kustomization if we modified it
+echo -e "${BLUE}Restoring kustomization defaults...${NC}"
 if [ "$NAMESPACE" != "ambient-code" ]; then
-    echo -e "${BLUE}Restoring default namespace in kustomization...${NC}"
     kustomize edit set namespace ambient-code
 fi
+# Restore default images
+kustomize edit set image quay.io/ambient_code/vteam_backend:latest=quay.io/ambient_code/vteam_backend:latest
+kustomize edit set image quay.io/ambient_code/vteam_frontend:latest=quay.io/ambient_code/vteam_frontend:latest
+kustomize edit set image quay.io/ambient_code/vteam_operator:latest=quay.io/ambient_code/vteam_operator:latest
+kustomize edit set image quay.io/ambient_code/vteam_claude_runner:latest=quay.io/ambient_code/vteam_claude_runner:latest
 
 echo -e "${GREEN}🎯 Ready to create agentic sessions!${NC}"
