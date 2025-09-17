@@ -15,6 +15,7 @@ resources:
 - crd.yaml
 - rbac.yaml
 - secrets.yaml
+- git-configmap.yaml
 - backend-deployment.yaml
 - frontend-deployment.yaml
 - operator-deployment.yaml

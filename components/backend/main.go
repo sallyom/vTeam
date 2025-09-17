@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -130,17 +131,40 @@ type AgenticSession struct {
 }
 
 type AgenticSessionSpec struct {
-	Prompt      string      `json:"prompt" binding:"required"`
-	WebsiteURL  string      `json:"websiteURL" binding:"required,url"`
-	DisplayName string      `json:"displayName"`
+	Prompt      string     `json:"prompt" binding:"required"`
+	WebsiteURL  string     `json:"websiteURL" binding:"required,url"`
+	DisplayName string     `json:"displayName"`
 	LLMSettings LLMSettings `json:"llmSettings"`
-	Timeout     int         `json:"timeout"`
+	Timeout     int        `json:"timeout"`
+	GitConfig   *GitConfig `json:"gitConfig,omitempty"`
 }
 
 type LLMSettings struct {
 	Model       string  `json:"model"`
 	Temperature float64 `json:"temperature"`
 	MaxTokens   int     `json:"maxTokens"`
+}
+
+type GitUser struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type GitAuthentication struct {
+	SSHKeySecret *string `json:"sshKeySecret,omitempty"`
+	TokenSecret  *string `json:"tokenSecret,omitempty"`
+}
+
+type GitRepository struct {
+	URL       string  `json:"url"`
+	Branch    *string `json:"branch,omitempty"`
+	ClonePath *string `json:"clonePath,omitempty"`
+}
+
+type GitConfig struct {
+	User           *GitUser           `json:"user,omitempty"`
+	Authentication *GitAuthentication `json:"authentication,omitempty"`
+	Repositories   []GitRepository    `json:"repositories,omitempty"`
 }
 
 type MessageObject struct {
@@ -168,6 +192,126 @@ type CreateAgenticSessionRequest struct {
 	DisplayName string       `json:"displayName,omitempty"`
 	LLMSettings *LLMSettings `json:"llmSettings,omitempty"`
 	Timeout     *int         `json:"timeout,omitempty"`
+	GitConfig   *GitConfig   `json:"gitConfig,omitempty"`
+}
+
+// Helper function to create string pointer
+func stringPtr(s string) *string {
+	return &s
+}
+
+// loadGitConfigFromConfigMap reads Git configuration from the git-config ConfigMap
+func loadGitConfigFromConfigMap() (*GitConfig, error) {
+	configMap, err := k8sClient.CoreV1().ConfigMaps(namespace).Get(context.TODO(), "git-config", v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Println("git-config ConfigMap not found, skipping default Git configuration")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get git-config ConfigMap: %v", err)
+	}
+
+	gitConfig := &GitConfig{}
+
+	// Load user configuration
+	if name := configMap.Data["git-user-name"]; name != "" {
+		if gitConfig.User == nil {
+			gitConfig.User = &GitUser{}
+		}
+		gitConfig.User.Name = name
+	}
+	if email := configMap.Data["git-user-email"]; email != "" {
+		if gitConfig.User == nil {
+			gitConfig.User = &GitUser{}
+		}
+		gitConfig.User.Email = email
+	}
+
+	// Load authentication configuration
+	if sshKeySecret := configMap.Data["git-ssh-key-secret"]; sshKeySecret != "" {
+		if gitConfig.Authentication == nil {
+			gitConfig.Authentication = &GitAuthentication{}
+		}
+		gitConfig.Authentication.SSHKeySecret = &sshKeySecret
+	}
+	if tokenSecret := configMap.Data["git-token-secret"]; tokenSecret != "" {
+		if gitConfig.Authentication == nil {
+			gitConfig.Authentication = &GitAuthentication{}
+		}
+		gitConfig.Authentication.TokenSecret = &tokenSecret
+	}
+
+	// Load repositories configuration (simple list format)
+	if reposList := configMap.Data["git-repositories"]; reposList != "" {
+		lines := strings.Split(strings.TrimSpace(reposList), "\n")
+		var repos []GitRepository
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				repos = append(repos, GitRepository{
+					URL:    line,
+					Branch: stringPtr("main"), // Default branch
+				})
+			}
+		}
+		if len(repos) > 0 {
+			gitConfig.Repositories = repos
+		}
+	}
+
+	return gitConfig, nil
+}
+
+// mergeGitConfigs merges user-provided GitConfig with ConfigMap defaults
+// User-provided config takes precedence over ConfigMap defaults
+func mergeGitConfigs(userConfig, defaultConfig *GitConfig) *GitConfig {
+	if userConfig == nil && defaultConfig == nil {
+		return nil
+	}
+	if userConfig == nil {
+		return defaultConfig
+	}
+	if defaultConfig == nil {
+		return userConfig
+	}
+
+	merged := &GitConfig{}
+
+	// Merge user configuration (user config takes precedence)
+	if userConfig.User != nil {
+		merged.User = userConfig.User
+	} else if defaultConfig.User != nil {
+		merged.User = defaultConfig.User
+	}
+
+	// Merge authentication configuration (user config takes precedence)
+	if userConfig.Authentication != nil {
+		merged.Authentication = userConfig.Authentication
+	} else if defaultConfig.Authentication != nil {
+		merged.Authentication = defaultConfig.Authentication
+	}
+
+	// Merge repositories (combine both, user repos first)
+	if len(userConfig.Repositories) > 0 || len(defaultConfig.Repositories) > 0 {
+		merged.Repositories = make([]GitRepository, 0, len(userConfig.Repositories)+len(defaultConfig.Repositories))
+		merged.Repositories = append(merged.Repositories, userConfig.Repositories...)
+
+		// Add default repos that don't conflict with user repos
+		for _, defaultRepo := range defaultConfig.Repositories {
+			hasConflict := false
+			for _, userRepo := range userConfig.Repositories {
+				if userRepo.URL == defaultRepo.URL {
+					hasConflict = true
+					break
+				}
+			}
+			if !hasConflict {
+				merged.Repositories = append(merged.Repositories, defaultRepo)
+			}
+		}
+	}
+
+	return merged
 }
 
 // getAgenticSessionResource returns the GroupVersionResource for AgenticSession
@@ -286,6 +430,75 @@ func createAgenticSession(c *gin.Context) {
 	timestamp := time.Now().Unix()
 	name := fmt.Sprintf("agentic-session-%d", timestamp)
 
+	// Create the custom resource spec
+	spec := map[string]interface{}{
+		"prompt":      req.Prompt,
+		"websiteURL":  req.WebsiteURL,
+		"displayName": req.DisplayName,
+		"llmSettings": map[string]interface{}{
+			"model":       llmSettings.Model,
+			"temperature": llmSettings.Temperature,
+			"maxTokens":   llmSettings.MaxTokens,
+		},
+		"timeout": timeout,
+	}
+
+	// Load Git configuration from ConfigMap and merge with user-provided config
+	defaultGitConfig, err := loadGitConfigFromConfigMap()
+	if err != nil {
+		log.Printf("Warning: failed to load Git config from ConfigMap: %v", err)
+		// Continue without default config
+	}
+
+	// Merge user-provided config with defaults
+	mergedGitConfig := mergeGitConfigs(req.GitConfig, defaultGitConfig)
+
+	// Add Git configuration if available (either from user or ConfigMap)
+	if mergedGitConfig != nil {
+		gitConfig := map[string]interface{}{}
+
+		if mergedGitConfig.User != nil {
+			gitConfig["user"] = map[string]interface{}{
+				"name":  mergedGitConfig.User.Name,
+				"email": mergedGitConfig.User.Email,
+			}
+		}
+
+		if mergedGitConfig.Authentication != nil {
+			auth := map[string]interface{}{}
+			if mergedGitConfig.Authentication.SSHKeySecret != nil {
+				auth["sshKeySecret"] = *mergedGitConfig.Authentication.SSHKeySecret
+			}
+			if mergedGitConfig.Authentication.TokenSecret != nil {
+				auth["tokenSecret"] = *mergedGitConfig.Authentication.TokenSecret
+			}
+			if len(auth) > 0 {
+				gitConfig["authentication"] = auth
+			}
+		}
+
+		if len(mergedGitConfig.Repositories) > 0 {
+			repos := make([]map[string]interface{}, len(mergedGitConfig.Repositories))
+			for i, repo := range mergedGitConfig.Repositories {
+				repoMap := map[string]interface{}{
+					"url": repo.URL,
+				}
+				if repo.Branch != nil {
+					repoMap["branch"] = *repo.Branch
+				}
+				if repo.ClonePath != nil {
+					repoMap["clonePath"] = *repo.ClonePath
+				}
+				repos[i] = repoMap
+			}
+			gitConfig["repositories"] = repos
+		}
+
+		if len(gitConfig) > 0 {
+			spec["gitConfig"] = gitConfig
+		}
+	}
+
 	// Create the custom resource
 	session := map[string]interface{}{
 		"apiVersion": "vteam.ambient-code/v1",
@@ -294,17 +507,7 @@ func createAgenticSession(c *gin.Context) {
 			"name":      name,
 			"namespace": namespace,
 		},
-		"spec": map[string]interface{}{
-			"prompt":      req.Prompt,
-			"websiteURL":  req.WebsiteURL,
-			"displayName": req.DisplayName,
-			"llmSettings": map[string]interface{}{
-				"model":       llmSettings.Model,
-				"temperature": llmSettings.Temperature,
-				"maxTokens":   llmSettings.MaxTokens,
-			},
-			"timeout": timeout,
-		},
+		"spec": spec,
 		"status": map[string]interface{}{
 			"phase": "Pending",
 		},
@@ -537,6 +740,53 @@ func parseSpec(spec map[string]interface{}) AgenticSessionSpec {
 		}
 		if maxTokens, ok := llmSettings["maxTokens"].(float64); ok {
 			result.LLMSettings.MaxTokens = int(maxTokens)
+		}
+	}
+
+	// Parse Git configuration
+	if gitConfig, ok := spec["gitConfig"].(map[string]interface{}); ok {
+		result.GitConfig = &GitConfig{}
+
+		// Parse user
+		if user, ok := gitConfig["user"].(map[string]interface{}); ok {
+			result.GitConfig.User = &GitUser{}
+			if name, ok := user["name"].(string); ok {
+				result.GitConfig.User.Name = name
+			}
+			if email, ok := user["email"].(string); ok {
+				result.GitConfig.User.Email = email
+			}
+		}
+
+		// Parse authentication
+		if auth, ok := gitConfig["authentication"].(map[string]interface{}); ok {
+			result.GitConfig.Authentication = &GitAuthentication{}
+			if sshKeySecret, ok := auth["sshKeySecret"].(string); ok {
+				result.GitConfig.Authentication.SSHKeySecret = &sshKeySecret
+			}
+			if tokenSecret, ok := auth["tokenSecret"].(string); ok {
+				result.GitConfig.Authentication.TokenSecret = &tokenSecret
+			}
+		}
+
+		// Parse repositories
+		if repos, ok := gitConfig["repositories"].([]interface{}); ok {
+			result.GitConfig.Repositories = make([]GitRepository, len(repos))
+			for i, repo := range repos {
+				if repoMap, ok := repo.(map[string]interface{}); ok {
+					gitRepo := GitRepository{}
+					if url, ok := repoMap["url"].(string); ok {
+						gitRepo.URL = url
+					}
+					if branch, ok := repoMap["branch"].(string); ok {
+						gitRepo.Branch = &branch
+					}
+					if clonePath, ok := repoMap["clonePath"].(string); ok {
+						gitRepo.ClonePath = &clonePath
+					}
+					result.GitConfig.Repositories[i] = gitRepo
+				}
+			}
 		}
 	}
 

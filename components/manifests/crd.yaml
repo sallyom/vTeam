@@ -44,6 +44,46 @@ spec:
                 type: integer
                 default: 300
                 description: "Timeout in seconds for the agentic session"
+              gitConfig:
+                type: object
+                description: "Git configuration for repository operations"
+                properties:
+                  user:
+                    type: object
+                    description: "Git user configuration"
+                    properties:
+                      name:
+                        type: string
+                        description: "Git user name for commits"
+                      email:
+                        type: string
+                        description: "Git user email for commits"
+                  authentication:
+                    type: object
+                    description: "Git authentication configuration"
+                    properties:
+                      sshKeySecret:
+                        type: string
+                        description: "Name of Kubernetes secret containing SSH private key"
+                      tokenSecret:
+                        type: string
+                        description: "Name of Kubernetes secret containing Git access token"
+                  repositories:
+                    type: array
+                    description: "List of Git repositories to clone"
+                    items:
+                      type: object
+                      properties:
+                        url:
+                          type: string
+                          description: "Git repository URL"
+                        branch:
+                          type: string
+                          default: "main"
+                          description: "Branch to checkout"
+                        clonePath:
+                          type: string
+                          description: "Relative path where to clone the repository"
           status:
             type: object
             properties:
