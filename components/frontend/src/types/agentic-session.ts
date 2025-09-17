@@ -6,12 +6,35 @@ export type LLMSettings = {
 	maxTokens: number;
 };
 
+export type GitUser = {
+	name: string;
+	email: string;
+};
+
+export type GitAuthentication = {
+	sshKeySecret?: string;
+	tokenSecret?: string;
+};
+
+export type GitRepository = {
+	url: string;
+	branch?: string;
+	clonePath?: string;
+};
+
+export type GitConfig = {
+	user?: GitUser;
+	authentication?: GitAuthentication;
+	repositories?: GitRepository[];
+};
+
 export type AgenticSessionSpec = {
 	prompt: string;
 	websiteURL: string;
 	llmSettings: LLMSettings;
 	timeout: number;
 	displayName?: string;
+	gitConfig?: GitConfig;
 };
 
 export type MessageObject = {
@@ -49,4 +72,5 @@ export type CreateAgenticSessionRequest = {
 	websiteURL: string;
 	llmSettings?: Partial<LLMSettings>;
 	timeout?: number;
+	gitConfig?: GitConfig;
 };

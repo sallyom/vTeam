@@ -45,6 +45,10 @@ const formSchema = z.object({
   temperature: z.number().min(0).max(2),
   maxTokens: z.number().min(100).max(8000),
   timeout: z.number().min(60).max(1800),
+  // Git configuration fields
+  gitUserName: z.string().optional(),
+  gitUserEmail: z.string().email().optional().or(z.literal("")),
+  gitRepoUrl: z.string().url().optional().or(z.literal("")),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -69,6 +73,9 @@ export default function NewAgenticSessionPage() {
       temperature: 0.7,
       maxTokens: 4000,
       timeout: 300,
+      gitUserName: "",
+      gitUserEmail: "",
+      gitRepoUrl: "",
     },
   });
 
@@ -87,6 +94,27 @@ export default function NewAgenticSessionPage() {
         },
         timeout: values.timeout,
       };
+
+      // Add Git configuration if provided
+      if (values.gitUserName || values.gitUserEmail || values.gitRepoUrl) {
+        request.gitConfig = {};
+
+        if (values.gitUserName && values.gitUserEmail) {
+          request.gitConfig.user = {
+            name: values.gitUserName,
+            email: values.gitUserEmail,
+          };
+        }
+
+        if (values.gitRepoUrl) {
+          request.gitConfig.repositories = [
+            {
+              url: values.gitRepoUrl,
+              branch: "main",
+            },
+          ];
+        }
+      }
 
       const apiUrl = getApiUrl();
       const response = await fetch(`${apiUrl}/agentic-sessions`, {
@@ -273,6 +301,65 @@ export default function NewAgenticSessionPage() {
                         />
                       </FormControl>
                       <FormDescription>Maximum execution time</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Git Configuration Section */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium">Git Configuration (Optional)</h3>
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="gitUserName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Git User Name</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="Your Name"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>Name for Git commits</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="gitUserEmail"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Git User Email</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="your.email@example.com"
+                            type="email"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>Email for Git commits</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="gitRepoUrl"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Git Repository URL</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="https://github.com/username/repo.git"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>Git repository to clone and work with</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -185,6 +186,26 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	temperature, _, _ := unstructured.NestedFloat64(llmSettings, "temperature")
 	maxTokens, _, _ := unstructured.NestedInt64(llmSettings, "maxTokens")
 
+	// Extract Git configuration
+	gitConfig, gitConfigExists, _ := unstructured.NestedMap(spec, "gitConfig")
+	var gitUserName, gitUserEmail string
+	var gitRepositoriesJSON string
+
+	if gitConfigExists {
+		// Get Git user configuration
+		gitUser, _, _ := unstructured.NestedMap(gitConfig, "user")
+		gitUserName, _, _ = unstructured.NestedString(gitUser, "name")
+		gitUserEmail, _, _ = unstructured.NestedString(gitUser, "email")
+
+		// Get Git repositories and serialize to JSON for environment variable
+		gitRepositories, _, _ := unstructured.NestedSlice(gitConfig, "repositories")
+		if len(gitRepositories) > 0 {
+			if reposBytes, err := json.Marshal(gitRepositories); err == nil {
+				gitRepositoriesJSON = string(reposBytes)
+			}
+		}
+	}
+
 	// Create the Job
 	job := &batchv1.Job{
 		ObjectMeta: v1.ObjectMeta{
@@ -276,6 +297,11 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 										},
 									},
 								},
+
+								// 🔧 Git configuration environment variables
+								{Name: "GIT_USER_NAME", Value: gitUserName},
+								{Name: "GIT_USER_EMAIL", Value: gitUserEmail},
+								{Name: "GIT_REPOSITORIES", Value: gitRepositoriesJSON},
 
 								// ✅ Use /tmp for SCC-assigned random UID (OpenShift compatible)
 								{Name: "HOME", Value: "/tmp"},

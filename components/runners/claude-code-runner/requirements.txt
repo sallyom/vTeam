@@ -1,3 +1,7 @@
 requests>=2.31.0
 claude-code-sdk>=0.0.21
 anthropic>=0.40.0
+
+# Git integration dependencies
+truststore>=0.10.4
+platformdirs>=3.0.0

@@ -130,17 +130,40 @@ type AgenticSession struct {
 }
 
 type AgenticSessionSpec struct {
-	Prompt      string      `json:"prompt" binding:"required"`
-	WebsiteURL  string      `json:"websiteURL" binding:"required,url"`
-	DisplayName string      `json:"displayName"`
+	Prompt      string     `json:"prompt" binding:"required"`
+	WebsiteURL  string     `json:"websiteURL" binding:"required,url"`
+	DisplayName string     `json:"displayName"`
 	LLMSettings LLMSettings `json:"llmSettings"`
-	Timeout     int         `json:"timeout"`
+	Timeout     int        `json:"timeout"`
+	GitConfig   *GitConfig `json:"gitConfig,omitempty"`
 }
 
 type LLMSettings struct {
 	Model       string  `json:"model"`
 	Temperature float64 `json:"temperature"`
 	MaxTokens   int     `json:"maxTokens"`
+}
+
+type GitUser struct {
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type GitAuthentication struct {
+	SSHKeySecret *string `json:"sshKeySecret,omitempty"`
+	TokenSecret  *string `json:"tokenSecret,omitempty"`
+}
+
+type GitRepository struct {
+	URL       string  `json:"url"`
+	Branch    *string `json:"branch,omitempty"`
+	ClonePath *string `json:"clonePath,omitempty"`
+}
+
+type GitConfig struct {
+	User           *GitUser           `json:"user,omitempty"`
+	Authentication *GitAuthentication `json:"authentication,omitempty"`
+	Repositories   []GitRepository    `json:"repositories,omitempty"`
 }
 
 type MessageObject struct {
@@ -168,6 +191,7 @@ type CreateAgenticSessionRequest struct {
 	DisplayName string       `json:"displayName,omitempty"`
 	LLMSettings *LLMSettings `json:"llmSettings,omitempty"`
 	Timeout     *int         `json:"timeout,omitempty"`
+	GitConfig   *GitConfig   `json:"gitConfig,omitempty"`
 }
 
 // getAgenticSessionResource returns the GroupVersionResource for AgenticSession
@@ -286,6 +310,65 @@ func createAgenticSession(c *gin.Context) {
 	timestamp := time.Now().Unix()
 	name := fmt.Sprintf("agentic-session-%d", timestamp)
 
+	// Create the custom resource spec
+	spec := map[string]interface{}{
+		"prompt":      req.Prompt,
+		"websiteURL":  req.WebsiteURL,
+		"displayName": req.DisplayName,
+		"llmSettings": map[string]interface{}{
+			"model":       llmSettings.Model,
+			"temperature": llmSettings.Temperature,
+			"maxTokens":   llmSettings.MaxTokens,
+		},
+		"timeout": timeout,
+	}
+
+	// Add Git configuration if provided
+	if req.GitConfig != nil {
+		gitConfig := map[string]interface{}{}
+
+		if req.GitConfig.User != nil {
+			gitConfig["user"] = map[string]interface{}{
+				"name":  req.GitConfig.User.Name,
+				"email": req.GitConfig.User.Email,
+			}
+		}
+
+		if req.GitConfig.Authentication != nil {
+			auth := map[string]interface{}{}
+			if req.GitConfig.Authentication.SSHKeySecret != nil {
+				auth["sshKeySecret"] = *req.GitConfig.Authentication.SSHKeySecret
+			}
+			if req.GitConfig.Authentication.TokenSecret != nil {
+				auth["tokenSecret"] = *req.GitConfig.Authentication.TokenSecret
+			}
+			if len(auth) > 0 {
+				gitConfig["authentication"] = auth
+			}
+		}
+
+		if len(req.GitConfig.Repositories) > 0 {
+			repos := make([]map[string]interface{}, len(req.GitConfig.Repositories))
+			for i, repo := range req.GitConfig.Repositories {
+				repoMap := map[string]interface{}{
+					"url": repo.URL,
+				}
+				if repo.Branch != nil {
+					repoMap["branch"] = *repo.Branch
+				}
+				if repo.ClonePath != nil {
+					repoMap["clonePath"] = *repo.ClonePath
+				}
+				repos[i] = repoMap
+			}
+			gitConfig["repositories"] = repos
+		}
+
+		if len(gitConfig) > 0 {
+			spec["gitConfig"] = gitConfig
+		}
+	}
+
 	// Create the custom resource
 	session := map[string]interface{}{
 		"apiVersion": "vteam.ambient-code/v1",
@@ -294,17 +377,7 @@ func createAgenticSession(c *gin.Context) {
 			"name":      name,
 			"namespace": namespace,
 		},
-		"spec": map[string]interface{}{
-			"prompt":      req.Prompt,
-			"websiteURL":  req.WebsiteURL,
-			"displayName": req.DisplayName,
-			"llmSettings": map[string]interface{}{
-				"model":       llmSettings.Model,
-				"temperature": llmSettings.Temperature,
-				"maxTokens":   llmSettings.MaxTokens,
-			},
-			"timeout": timeout,
-		},
+		"spec": spec,
 		"status": map[string]interface{}{
 			"phase": "Pending",
 		},
@@ -537,6 +610,53 @@ func parseSpec(spec map[string]interface{}) AgenticSessionSpec {
 		}
 		if maxTokens, ok := llmSettings["maxTokens"].(float64); ok {
 			result.LLMSettings.MaxTokens = int(maxTokens)
+		}
+	}
+
+	// Parse Git configuration
+	if gitConfig, ok := spec["gitConfig"].(map[string]interface{}); ok {
+		result.GitConfig = &GitConfig{}
+
+		// Parse user
+		if user, ok := gitConfig["user"].(map[string]interface{}); ok {
+			result.GitConfig.User = &GitUser{}
+			if name, ok := user["name"].(string); ok {
+				result.GitConfig.User.Name = name
+			}
+			if email, ok := user["email"].(string); ok {
+				result.GitConfig.User.Email = email
+			}
+		}
+
+		// Parse authentication
+		if auth, ok := gitConfig["authentication"].(map[string]interface{}); ok {
+			result.GitConfig.Authentication = &GitAuthentication{}
+			if sshKeySecret, ok := auth["sshKeySecret"].(string); ok {
+				result.GitConfig.Authentication.SSHKeySecret = &sshKeySecret
+			}
+			if tokenSecret, ok := auth["tokenSecret"].(string); ok {
+				result.GitConfig.Authentication.TokenSecret = &tokenSecret
+			}
+		}
+
+		// Parse repositories
+		if repos, ok := gitConfig["repositories"].([]interface{}); ok {
+			result.GitConfig.Repositories = make([]GitRepository, len(repos))
+			for i, repo := range repos {
+				if repoMap, ok := repo.(map[string]interface{}); ok {
+					gitRepo := GitRepository{}
+					if url, ok := repoMap["url"].(string); ok {
+						gitRepo.URL = url
+					}
+					if branch, ok := repoMap["branch"].(string); ok {
+						gitRepo.Branch = &branch
+					}
+					if clonePath, ok := repoMap["clonePath"].(string); ok {
+						gitRepo.ClonePath = &clonePath
+					}
+					result.GitConfig.Repositories[i] = gitRepo
+				}
+			}
 		}
 	}
 
