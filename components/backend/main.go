@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -194,6 +195,125 @@ type CreateAgenticSessionRequest struct {
 	GitConfig   *GitConfig   `json:"gitConfig,omitempty"`
 }
 
+// Helper function to create string pointer
+func stringPtr(s string) *string {
+	return &s
+}
+
+// loadGitConfigFromConfigMap reads Git configuration from the git-config ConfigMap
+func loadGitConfigFromConfigMap() (*GitConfig, error) {
+	configMap, err := k8sClient.CoreV1().ConfigMaps(namespace).Get(context.TODO(), "git-config", v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Println("git-config ConfigMap not found, skipping default Git configuration")
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get git-config ConfigMap: %v", err)
+	}
+
+	gitConfig := &GitConfig{}
+
+	// Load user configuration
+	if name := configMap.Data["git-user-name"]; name != "" {
+		if gitConfig.User == nil {
+			gitConfig.User = &GitUser{}
+		}
+		gitConfig.User.Name = name
+	}
+	if email := configMap.Data["git-user-email"]; email != "" {
+		if gitConfig.User == nil {
+			gitConfig.User = &GitUser{}
+		}
+		gitConfig.User.Email = email
+	}
+
+	// Load authentication configuration
+	if sshKeySecret := configMap.Data["git-ssh-key-secret"]; sshKeySecret != "" {
+		if gitConfig.Authentication == nil {
+			gitConfig.Authentication = &GitAuthentication{}
+		}
+		gitConfig.Authentication.SSHKeySecret = &sshKeySecret
+	}
+	if tokenSecret := configMap.Data["git-token-secret"]; tokenSecret != "" {
+		if gitConfig.Authentication == nil {
+			gitConfig.Authentication = &GitAuthentication{}
+		}
+		gitConfig.Authentication.TokenSecret = &tokenSecret
+	}
+
+	// Load repositories configuration (simple list format)
+	if reposList := configMap.Data["git-repositories"]; reposList != "" {
+		lines := strings.Split(strings.TrimSpace(reposList), "\n")
+		var repos []GitRepository
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.HasPrefix(line, "#") {
+				repos = append(repos, GitRepository{
+					URL:    line,
+					Branch: stringPtr("main"), // Default branch
+				})
+			}
+		}
+		if len(repos) > 0 {
+			gitConfig.Repositories = repos
+		}
+	}
+
+	return gitConfig, nil
+}
+
+// mergeGitConfigs merges user-provided GitConfig with ConfigMap defaults
+// User-provided config takes precedence over ConfigMap defaults
+func mergeGitConfigs(userConfig, defaultConfig *GitConfig) *GitConfig {
+	if userConfig == nil && defaultConfig == nil {
+		return nil
+	}
+	if userConfig == nil {
+		return defaultConfig
+	}
+	if defaultConfig == nil {
+		return userConfig
+	}
+
+	merged := &GitConfig{}
+
+	// Merge user configuration (user config takes precedence)
+	if userConfig.User != nil {
+		merged.User = userConfig.User
+	} else if defaultConfig.User != nil {
+		merged.User = defaultConfig.User
+	}
+
+	// Merge authentication configuration (user config takes precedence)
+	if userConfig.Authentication != nil {
+		merged.Authentication = userConfig.Authentication
+	} else if defaultConfig.Authentication != nil {
+		merged.Authentication = defaultConfig.Authentication
+	}
+
+	// Merge repositories (combine both, user repos first)
+	if len(userConfig.Repositories) > 0 || len(defaultConfig.Repositories) > 0 {
+		merged.Repositories = make([]GitRepository, 0, len(userConfig.Repositories)+len(defaultConfig.Repositories))
+		merged.Repositories = append(merged.Repositories, userConfig.Repositories...)
+
+		// Add default repos that don't conflict with user repos
+		for _, defaultRepo := range defaultConfig.Repositories {
+			hasConflict := false
+			for _, userRepo := range userConfig.Repositories {
+				if userRepo.URL == defaultRepo.URL {
+					hasConflict = true
+					break
+				}
+			}
+			if !hasConflict {
+				merged.Repositories = append(merged.Repositories, defaultRepo)
+			}
+		}
+	}
+
+	return merged
+}
+
 // getAgenticSessionResource returns the GroupVersionResource for AgenticSession
 func getAgenticSessionResource() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
@@ -323,33 +443,43 @@ func createAgenticSession(c *gin.Context) {
 		"timeout": timeout,
 	}
 
-	// Add Git configuration if provided
-	if req.GitConfig != nil {
+	// Load Git configuration from ConfigMap and merge with user-provided config
+	defaultGitConfig, err := loadGitConfigFromConfigMap()
+	if err != nil {
+		log.Printf("Warning: failed to load Git config from ConfigMap: %v", err)
+		// Continue without default config
+	}
+
+	// Merge user-provided config with defaults
+	mergedGitConfig := mergeGitConfigs(req.GitConfig, defaultGitConfig)
+
+	// Add Git configuration if available (either from user or ConfigMap)
+	if mergedGitConfig != nil {
 		gitConfig := map[string]interface{}{}
 
-		if req.GitConfig.User != nil {
+		if mergedGitConfig.User != nil {
 			gitConfig["user"] = map[string]interface{}{
-				"name":  req.GitConfig.User.Name,
-				"email": req.GitConfig.User.Email,
+				"name":  mergedGitConfig.User.Name,
+				"email": mergedGitConfig.User.Email,
 			}
 		}
 
-		if req.GitConfig.Authentication != nil {
+		if mergedGitConfig.Authentication != nil {
 			auth := map[string]interface{}{}
-			if req.GitConfig.Authentication.SSHKeySecret != nil {
-				auth["sshKeySecret"] = *req.GitConfig.Authentication.SSHKeySecret
+			if mergedGitConfig.Authentication.SSHKeySecret != nil {
+				auth["sshKeySecret"] = *mergedGitConfig.Authentication.SSHKeySecret
 			}
-			if req.GitConfig.Authentication.TokenSecret != nil {
-				auth["tokenSecret"] = *req.GitConfig.Authentication.TokenSecret
+			if mergedGitConfig.Authentication.TokenSecret != nil {
+				auth["tokenSecret"] = *mergedGitConfig.Authentication.TokenSecret
 			}
 			if len(auth) > 0 {
 				gitConfig["authentication"] = auth
 			}
 		}
 
-		if len(req.GitConfig.Repositories) > 0 {
-			repos := make([]map[string]interface{}, len(req.GitConfig.Repositories))
-			for i, repo := range req.GitConfig.Repositories {
+		if len(mergedGitConfig.Repositories) > 0 {
+			repos := make([]map[string]interface{}, len(mergedGitConfig.Repositories))
+			for i, repo := range mergedGitConfig.Repositories {
 				repoMap := map[string]interface{}{
 					"url": repo.URL,
 				}
