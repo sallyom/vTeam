@@ -27,6 +27,7 @@ var (
 	dynamicClient          dynamic.Interface
 	namespace              string
 	ambientCodeRunnerImage string
+	imagePullPolicy        corev1.PullPolicy
 )
 
 func main() {
@@ -46,6 +47,13 @@ func main() {
 	if ambientCodeRunnerImage == "" {
 		ambientCodeRunnerImage = "quay.io/ambient_code/vteam_claude_runner:latest"
 	}
+
+	// Get image pull policy from environment or use default
+	imagePullPolicyStr := os.Getenv("IMAGE_PULL_POLICY")
+	if imagePullPolicyStr == "" {
+		imagePullPolicyStr = "Always"
+	}
+	imagePullPolicy = corev1.PullPolicy(imagePullPolicyStr)
 
 	log.Printf("Agentic Session Operator starting in namespace: %s", namespace)
 	log.Printf("Using ambient-code runner image: %s", ambientCodeRunnerImage)
@@ -260,8 +268,9 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 
 					Containers: []corev1.Container{
 						{
-							Name:  "ambient-code-runner",
-							Image: ambientCodeRunnerImage,
+							Name:            "ambient-code-runner",
+							Image:           ambientCodeRunnerImage,
+							ImagePullPolicy: imagePullPolicy,
 							// 🔒 Container-level security (SCC-compatible, no privileged capabilities)
 							SecurityContext: &corev1.SecurityContext{
 								AllowPrivilegeEscalation: boolPtr(false),
