@@ -90,7 +90,7 @@ jobs:
 
       - name: Log in to OpenShift Cluster
         run: |
-          oc login --token=${{ secrets.OPENSHIFT_TOKEN }}
+          oc login ${{ secrets.OPENSHIFT_SERVER }} --token=${{ secrets.OPENSHIFT_TOKEN }} --insecure-skip-tls-verify
 
       - name: Deploy updated components to OpenShift
         run: |
