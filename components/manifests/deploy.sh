@@ -106,7 +106,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
     echo -e "${RED}❌ .env file not found${NC}"
     echo -e "${YELLOW}Please create .env file from env.example:${NC}"
     echo "  cp env.example .env"
-    echo "  # Edit .env and add your actual API key"
+    echo "  # Edit .env and add your actual API key and Git configuration"
     exit 1
 fi
 
@@ -119,6 +119,33 @@ if [[ -z "$ANTHROPIC_API_KEY" ]]; then
 fi
 
 echo -e "${GREEN}✅ Environment configuration loaded${NC}"
+echo ""
+
+# Update git-configmap with environment variables if they exist
+echo -e "${YELLOW}Updating Git configuration...${NC}"
+if [[ -n "$GIT_USER_NAME" ]] || [[ -n "$GIT_USER_EMAIL" ]]; then
+    echo -e "${BLUE}Found Git configuration in .env, updating git-configmap...${NC}"
+
+    # Create temporary configmap patch
+    cat > /tmp/git-config-patch.yaml << EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: git-config
+  namespace: $NAMESPACE
+data:
+  git-user-name: "${GIT_USER_NAME:-}"
+  git-user-email: "${GIT_USER_EMAIL:-}"
+  git-ssh-key-secret: "${GIT_SSH_KEY_SECRET:-}"
+  git-token-secret: "${GIT_TOKEN_SECRET:-}"
+  git-repositories: |
+    ${GIT_REPOSITORIES:-}
+  git-clone-on-startup: "${GIT_CLONE_ON_STARTUP:-false}"
+  git-workspace-path: "/workspace/git-repos"
+EOF
+else
+    echo -e "${YELLOW}No Git configuration found in .env, using defaults${NC}"
+fi
 echo ""
 
 # Deploy using kustomize
@@ -168,6 +195,13 @@ oc patch secret ambient-code-secrets -n ${NAMESPACE} -p "{\"stringData\":{\"anth
     oc patch secret ambient-code-secrets -n ${NAMESPACE} -p "{\"stringData\":{\"anthropic-api-key\":\"$ANTHROPIC_API_KEY\"}}"
 }
 
+# Apply git configuration if we created a patch
+if [[ -f "/tmp/git-config-patch.yaml" ]]; then
+    echo -e "${BLUE}Applying Git configuration...${NC}"
+    oc apply -f /tmp/git-config-patch.yaml
+    rm -f /tmp/git-config-patch.yaml
+fi
+
 # Update operator deployment with custom runner image
 echo -e "${BLUE}Updating operator with custom runner image...${NC}"
 oc patch deployment agentic-operator -n ${NAMESPACE} -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"agentic-operator\",\"env\":[{\"name\":\"AMBIENT_CODE_RUNNER_IMAGE\",\"value\":\"${DEFAULT_RUNNER_IMAGE}\"}]}]}}}}" --type=strategic
@@ -201,14 +235,17 @@ oc get services -n ${NAMESPACE}
 echo ""
 
 echo -e "${YELLOW}Next steps:${NC}"
-echo -e "1. Access the frontend:"
+echo -e "1. Access the RFE workflow frontend:"
 echo -e "   ${BLUE}oc port-forward svc/frontend-service 3000:3000 -n ${NAMESPACE}${NC}"
 echo -e "   Then open: http://localhost:3000"
+echo -e "   Create new RFE workflows at: http://localhost:3000/rfe/new"
 echo -e "2. Monitor the deployment:"
 echo -e "   ${BLUE}oc get pods -n ${NAMESPACE} -w${NC}"
 echo -e "3. View logs:"
 echo -e "   ${BLUE}oc logs -f deployment/backend-api -n ${NAMESPACE}${NC}"
 echo -e "   ${BLUE}oc logs -f deployment/agentic-operator -n ${NAMESPACE}${NC}"
+echo -e "4. Monitor RFE workflows:"
+echo -e "   ${BLUE}oc get agenticsessions -n ${NAMESPACE}${NC}"
 echo ""
 
 # Restore kustomization if we modified it
@@ -222,4 +259,4 @@ kustomize edit set image quay.io/ambient_code/vteam_frontend:latest=quay.io/ambi
 kustomize edit set image quay.io/ambient_code/vteam_operator:latest=quay.io/ambient_code/vteam_operator:latest
 kustomize edit set image quay.io/ambient_code/vteam_claude_runner:latest=quay.io/ambient_code/vteam_claude_runner:latest
 
-echo -e "${GREEN}🎯 Ready to create agentic sessions!${NC}"
+echo -e "${GREEN}🎯 Ready to create RFE workflows with multi-agent collaboration!${NC}"
