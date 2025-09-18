@@ -36,7 +36,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { getApiUrl } from "@/lib/config";
-import { WORKFLOW_PHASE_LABELS, WORKFLOW_PHASE_DESCRIPTIONS } from "@/lib/agents";
+import { WORKFLOW_PHASE_LABELS } from "@/lib/agents";
 import { Progress } from "@/components/ui/progress";
 
 const getPhaseColor = (phase: WorkflowPhase) => {
@@ -79,13 +79,14 @@ function calculateProgress(workflow: RFEWorkflow): number {
   if (currentIndex === -1) return 0;
 
   // Calculate progress within current phase based on agent completion
-  const agentProgress = workflow.sessions
+  const safeSessions = workflow.agentSessions || [];
+  const agentProgress = safeSessions
     .filter(s => s.phase === workflow.currentPhase)
     .reduce((completed, session) => {
       return completed + (session.status === "Completed" ? 1 : 0);
     }, 0);
 
-  const totalAgentsInPhase = workflow.sessions.filter(s => s.phase === workflow.currentPhase).length;
+  const totalAgentsInPhase = safeSessions.filter(s => s.phase === workflow.currentPhase).length;
   const phaseProgress = totalAgentsInPhase > 0 ? agentProgress / totalAgentsInPhase : 0;
 
   // Each phase is 25% of total progress
@@ -275,7 +276,7 @@ interface RFEWorkflowCardProps {
 
 function RFEWorkflowCard({ workflow, onDelete, onPause, onResume }: RFEWorkflowCardProps) {
   const progress = calculateProgress(workflow);
-  const completedSessions = workflow.sessions.filter(s => s.status === "Completed").length;
+  const completedSessions = (workflow.agentSessions || []).filter(s => s.status === "Completed").length;
 
   return (
     <Card className="hover:shadow-lg transition-shadow">
@@ -356,7 +357,7 @@ function RFEWorkflowCard({ workflow, onDelete, onPause, onResume }: RFEWorkflowC
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">
-            {completedSessions}/{workflow.sessions.length} agent sessions completed
+            {completedSessions}/{workflow.agentSessions.length} agent sessions completed
           </span>
         </div>
 
@@ -364,7 +365,7 @@ function RFEWorkflowCard({ workflow, onDelete, onPause, onResume }: RFEWorkflowC
         <div className="flex items-center gap-2">
           <GitBranch className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground truncate">
-            {workflow.targetRepository.url.replace(/^https?:\/\//, "")}
+            {workflow.targetRepoUrl.replace(/^https?:\/\//, "")}
           </span>
         </div>
 

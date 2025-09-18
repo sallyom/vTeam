@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -25,7 +25,6 @@ import {
   Users,
   FileText,
   Play,
-  Pause,
   Edit,
   Upload,
   Clock,
@@ -70,7 +69,8 @@ const getSessionStatusColor = (status: AgenticSessionPhase) => {
 };
 
 function calculatePhaseProgress(workflow: RFEWorkflow, phase: WorkflowPhase): number {
-  const phaseSessions = workflow.sessions.filter(s => s.phase === phase);
+  const safeSessions = workflow.agentSessions || [];
+  const phaseSessions = safeSessions.filter(s => s.phase === phase);
   if (phaseSessions.length === 0) return 0;
 
   const completedSessions = phaseSessions.filter(s => s.status === "Completed").length;
@@ -79,7 +79,6 @@ function calculatePhaseProgress(workflow: RFEWorkflow, phase: WorkflowPhase): nu
 
 export default function RFEWorkflowDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const workflowId = params.id as string;
 
   const [workflow, setWorkflow] = useState<RFEWorkflow | null>(null);
@@ -87,7 +86,7 @@ export default function RFEWorkflowDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [isStartingPhase, setIsStartingPhase] = useState(false);
 
-  const fetchWorkflow = async () => {
+  const fetchWorkflow = useCallback(async () => {
     try {
       setIsLoading(true);
       const response = await fetch(`${getApiUrl()}/rfe-workflows/${workflowId}`);
@@ -110,14 +109,14 @@ export default function RFEWorkflowDetailPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [workflowId]);
 
   useEffect(() => {
     fetchWorkflow();
     // Set up polling for real-time updates
     const interval = setInterval(fetchWorkflow, 5000);
     return () => clearInterval(interval);
-  }, [workflowId]);
+  }, [workflowId, fetchWorkflow]);
 
   const handleStartNextPhase = async () => {
     if (!workflow) return;
@@ -272,7 +271,7 @@ export default function RFEWorkflowDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {workflow.sessions.filter(s => s.status === "Completed").length}/{workflow.sessions.length}
+                {(workflow.agentSessions || []).filter(s => s.status === "Completed").length}/{(workflow.agentSessions || []).length}
               </div>
               <p className="text-xs text-muted-foreground">
                 Sessions completed across all phases
@@ -305,13 +304,13 @@ export default function RFEWorkflowDetailPage() {
           <CardContent>
             <div className="flex items-center justify-between">
               <div>
-                <p className="font-medium">{workflow.targetRepository.url}</p>
+                <p className="font-medium">{workflow.targetRepoUrl}</p>
                 <p className="text-sm text-muted-foreground">
-                  Branch: {workflow.targetRepository.branch || "main"}
+                  Branch: {workflow.targetRepoBranch || "main"}
                 </p>
               </div>
               <a
-                href={workflow.targetRepository.url}
+                href={workflow.targetRepoUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-blue-600 hover:text-blue-800"
@@ -341,11 +340,10 @@ export default function RFEWorkflowDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {phases.map((phase, index) => {
+              {phases.map((phase) => {
                 const progress = calculatePhaseProgress(workflow, phase);
                 const isCurrent = phase === workflow.currentPhase;
-                const isCompleted = workflow.completedPhases.includes(phase);
-                const isPending = index > currentPhaseIndex;
+                const isCompleted = false; // TODO: Implement phase completion tracking
 
                 return (
                   <div key={phase} className={`p-4 rounded-lg border ${
@@ -395,7 +393,7 @@ export default function RFEWorkflowDetailPage() {
               {phases.map(phase => (
                 <TabsContent key={phase} value={phase} className="space-y-4">
                   <div className="grid gap-4">
-                    {workflow.sessions
+                    {(workflow.agentSessions || [])
                       .filter(session => session.phase === phase)
                       .map(session => {
                         const agent = getAgentByPersona(session.agent.persona);
@@ -430,7 +428,7 @@ export default function RFEWorkflowDetailPage() {
                         );
                       })}
 
-                    {workflow.sessions.filter(s => s.phase === phase).length === 0 && (
+                    {(workflow.agentSessions || []).filter(s => s.phase === phase).length === 0 && (
                       <div className="text-center py-8 text-muted-foreground">
                         No agent sessions for this phase yet
                       </div>

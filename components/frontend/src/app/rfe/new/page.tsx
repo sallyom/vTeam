@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -52,6 +52,7 @@ export default function NewRFEWorkflowPage() {
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
+    mode: "onBlur", // Only validate on blur, not on every change
     defaultValues: {
       title: "",
       description: "",
@@ -63,7 +64,30 @@ export default function NewRFEWorkflowPage() {
     },
   });
 
-  const selectedAgents = form.watch("selectedAgents");
+  // Stable callback for agent selection changes
+  const handleAgentSelectionChange = useCallback((agents: string[]) => {
+    try {
+      console.log('handleAgentSelectionChange called with:', agents);
+
+      // Validate that agents is an array
+      if (!Array.isArray(agents)) {
+        console.error('agents parameter is not an array:', agents);
+        return;
+      }
+
+      // Validate that all agents are strings
+      const invalidAgents = agents.filter(agent => typeof agent !== 'string');
+      if (invalidAgents.length > 0) {
+        console.error('Some agents are not strings:', invalidAgents);
+        return;
+      }
+
+      form.setValue("selectedAgents", agents, { shouldValidate: false, shouldDirty: true });
+      console.log('Successfully set form value for selectedAgents');
+    } catch (error) {
+      console.error('Error in handleAgentSelectionChange:', error);
+    }
+  }, [form]);
 
   const onSubmit = async (values: FormValues) => {
     setIsSubmitting(true);
@@ -73,23 +97,15 @@ export default function NewRFEWorkflowPage() {
       const request: CreateRFEWorkflowRequest = {
         title: values.title,
         description: values.description,
-        targetRepository: {
-          url: values.targetRepoUrl,
-          branch: values.targetRepoBranch,
-          clonePath: "target-repo",
-        },
+        targetRepoUrl: values.targetRepoUrl,
+        targetRepoBranch: values.targetRepoBranch,
         selectedAgents: values.selectedAgents,
+        gitUserName: values.gitUserName || undefined,
+        gitUserEmail: values.gitUserEmail || undefined,
       };
 
-      // Add Git configuration if provided
-      if (values.gitUserName || values.gitUserEmail) {
-        request.gitConfig = {
-          user: {
-            name: values.gitUserName || "vTeam Agent",
-            email: values.gitUserEmail || "agent@vteam.local",
-          },
-        };
-      }
+      console.log("Creating RFE workflow with request:", request);
+      console.log("Selected agents:", values.selectedAgents);
 
       const response = await fetch(`${getApiUrl()}/rfe-workflows`, {
         method: "POST",
@@ -261,16 +277,19 @@ export default function NewRFEWorkflowPage() {
                 <FormField
                   control={form.control}
                   name="selectedAgents"
-                  render={({ field }) => (
+                  render={({ fieldState }) => (
                     <FormItem>
                       <FormControl>
                         <AgentSelection
-                          selectedAgents={field.value}
-                          onSelectionChange={field.onChange}
+                          selectedAgents={Array.isArray(form.getValues("selectedAgents")) ? form.getValues("selectedAgents") : []}
+                          onSelectionChange={handleAgentSelectionChange}
                           maxAgents={8}
+                          disabled={isSubmitting}
                         />
                       </FormControl>
-                      <FormMessage />
+                      {fieldState.error && (
+                        <FormMessage>{fieldState.error.message}</FormMessage>
+                      )}
                     </FormItem>
                   )}
                 />

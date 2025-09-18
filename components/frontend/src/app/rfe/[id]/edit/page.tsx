@@ -1,15 +1,12 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -31,13 +28,11 @@ import {
   Download,
   RefreshCw,
   Loader2,
-  CheckCircle,
   AlertCircle,
 } from "lucide-react";
 import { getApiUrl } from "@/lib/config";
 import { getAgentByPersona } from "@/lib/agents";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 
 interface FileTreeNode {
@@ -54,7 +49,7 @@ function buildFileTree(artifacts: ArtifactFile[]): FileTreeNode[] {
   const nodeMap = new Map<string, FileTreeNode>();
 
   // Create root folders
-  const phases = new Set(artifacts.map(a => a.phase).filter(Boolean));
+  const phases = new Set((artifacts || []).map(a => a.phase).filter(Boolean));
   phases.forEach(phase => {
     if (phase) {
       const node: FileTreeNode = {
@@ -90,7 +85,6 @@ function buildFileTree(artifacts: ArtifactFile[]): FileTreeNode[] {
 
 export default function ArtifactEditPage() {
   const params = useParams();
-  const router = useRouter();
   const { toast } = useToast();
   const workflowId = params.id as string;
 
@@ -106,7 +100,7 @@ export default function ArtifactEditPage() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const fetchWorkflow = async () => {
+  const fetchWorkflow = useCallback(async () => {
     try {
       const response = await fetch(`${getApiUrl()}/rfe-workflows/${workflowId}`);
       if (!response.ok) throw new Error("Failed to fetch workflow");
@@ -114,19 +108,14 @@ export default function ArtifactEditPage() {
       const data = await response.json();
       setWorkflow(data);
       setFileTree(buildFileTree(data.artifacts));
-
-      // Auto-select first file if none selected
-      if (!selectedFile && data.artifacts.length > 0) {
-        await selectFile(data.artifacts[0]);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workflow");
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [workflowId]);
 
-  const selectFile = async (artifact: ArtifactFile) => {
+  const selectFile = useCallback(async (artifact: ArtifactFile) => {
     if (isDirty) {
       const confirm = window.confirm("You have unsaved changes. Do you want to continue without saving?");
       if (!confirm) return;
@@ -141,16 +130,16 @@ export default function ArtifactEditPage() {
       setSelectedFile(artifact);
       setFileContent(content);
       setIsDirty(false);
-    } catch (err) {
+    } catch {
       toast({
         title: "Error",
         description: "Failed to load file content",
         variant: "destructive",
       });
     }
-  };
+  }, [isDirty, workflowId, toast]);
 
-  const saveFile = async () => {
+  const saveFile = useCallback(async () => {
     if (!selectedFile || !isDirty) return;
 
     setIsSaving(true);
@@ -173,7 +162,7 @@ export default function ArtifactEditPage() {
 
       // Refresh workflow to update artifact info
       fetchWorkflow();
-    } catch (err) {
+    } catch {
       toast({
         title: "Error",
         description: "Failed to save file",
@@ -182,7 +171,7 @@ export default function ArtifactEditPage() {
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [selectedFile, isDirty, workflowId, fileContent, toast, fetchWorkflow]);
 
   const pushToGit = async () => {
     try {
@@ -198,7 +187,7 @@ export default function ArtifactEditPage() {
       });
 
       fetchWorkflow();
-    } catch (err) {
+    } catch {
       toast({
         title: "Error",
         description: "Failed to push to Git",
@@ -223,7 +212,14 @@ export default function ArtifactEditPage() {
 
   useEffect(() => {
     fetchWorkflow();
-  }, [workflowId]);
+  }, [fetchWorkflow]);
+
+  // Auto-select first file when workflow loads
+  useEffect(() => {
+    if (workflow && !selectedFile && workflow.artifacts && workflow.artifacts.length > 0) {
+      selectFile(workflow.artifacts[0]);
+    }
+  }, [workflow, selectedFile, selectFile]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -235,7 +231,7 @@ export default function ArtifactEditPage() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [selectedFile, isDirty, fileContent]);
+  }, [saveFile]);
 
   if (isLoading) {
     return (

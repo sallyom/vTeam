@@ -119,22 +119,35 @@ export type RFEWorkflow = {
 	description: string;
 	currentPhase: WorkflowPhase;
 	status: "active" | "completed" | "failed" | "paused";
-	targetRepository: GitRepository;
-	selectedAgents: AgentPersona[];
-	sessions: RFESession[];
+	targetRepoUrl: string;
+	targetRepoBranch: string;
+	selectedAgents: string[]; // Backend sends array of persona strings
+	agentSessions: RFESession[]; // Backend uses 'agentSessions' not 'sessions'
 	artifacts: ArtifactFile[];
-	pvcName: string;
 	createdAt: string;
 	updatedAt: string;
-	completedPhases: WorkflowPhase[];
+	phaseResults: { [phase: string]: PhaseResult }; // Backend uses 'phaseResults'
 };
 
 export type CreateRFEWorkflowRequest = {
 	title: string;
 	description: string;
-	targetRepository: GitRepository;
+	targetRepoUrl: string;
+	targetRepoBranch: string;
 	selectedAgents: string[]; // Agent persona keys
-	gitConfig?: GitConfig;
+	gitUserName?: string;
+	gitUserEmail?: string;
+};
+
+export type PhaseResult = {
+	phase: string;
+	status: string; // "completed", "in_progress", "failed"
+	agents: string[]; // agents that worked on this phase
+	artifacts: string[]; // artifact paths created in this phase
+	summary: string;
+	startedAt: string;
+	completedAt?: string;
+	metadata?: { [key: string]: unknown };
 };
 
 export type RFEWorkflowStatus = {

@@ -7,15 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Users, Zap, Target, Palette, FileText, Settings } from "lucide-react";
 
 interface AgentSelectionProps {
@@ -41,35 +33,77 @@ export function AgentSelection({
 }: AgentSelectionProps) {
   const [presetType, setPresetType] = useState<keyof typeof DEFAULT_AGENT_SELECTIONS>("BALANCED");
 
+  // Ensure selectedAgents is always an array to prevent filter errors
+  const safeSelectedAgents = selectedAgents || [];
+
   const agentGroups = groupAgentsByRole();
 
   const handleAgentToggle = (persona: string) => {
     if (disabled) return;
 
-    const isSelected = selectedAgents.includes(persona);
+    try {
+      const isSelected = safeSelectedAgents.includes(persona);
 
-    if (isSelected) {
-      onSelectionChange(selectedAgents.filter(p => p !== persona));
-    } else if (selectedAgents.length < maxAgents) {
-      onSelectionChange([...selectedAgents, persona]);
+      if (isSelected) {
+        onSelectionChange(safeSelectedAgents.filter(p => p !== persona));
+      } else if (safeSelectedAgents.length < maxAgents) {
+        onSelectionChange([...safeSelectedAgents, persona]);
+      }
+    } catch (error) {
+      console.error('Error toggling agent selection:', error);
     }
   };
 
   const applyPreset = (type: keyof typeof DEFAULT_AGENT_SELECTIONS) => {
     if (disabled) return;
-    setPresetType(type);
-    onSelectionChange(DEFAULT_AGENT_SELECTIONS[type]);
+
+    try {
+      setPresetType(type);
+
+      // Filter out any invalid persona IDs that don't exist in AVAILABLE_AGENTS
+      const validAgents = DEFAULT_AGENT_SELECTIONS[type].filter(persona =>
+        AVAILABLE_AGENTS.some(agent => agent.persona === persona)
+      );
+
+      console.log(`Applying preset ${type}:`, DEFAULT_AGENT_SELECTIONS[type]);
+      console.log(`Filtered to valid agents:`, validAgents);
+      console.log(`Available agents count:`, AVAILABLE_AGENTS.length);
+
+      // Validate that validAgents is an array and contains strings
+      if (!Array.isArray(validAgents)) {
+        console.error('validAgents is not an array:', validAgents);
+        return;
+      }
+
+      if (validAgents.length === 0) {
+        console.warn(`No valid agents found for preset ${type}`);
+      }
+
+      onSelectionChange(validAgents);
+    } catch (error) {
+      console.error('Error in applyPreset:', error);
+      console.error('Preset type:', type);
+      console.error('Default selections:', DEFAULT_AGENT_SELECTIONS[type]);
+    }
   };
 
   const clearSelection = () => {
     if (disabled) return;
-    onSelectionChange([]);
+    try {
+      onSelectionChange([]);
+    } catch (error) {
+      console.error('Error clearing agent selection:', error);
+    }
   };
 
   const selectAll = () => {
     if (disabled) return;
-    const allAgents = AVAILABLE_AGENTS.slice(0, maxAgents).map(a => a.persona);
-    onSelectionChange(allAgents);
+    try {
+      const allAgents = AVAILABLE_AGENTS.slice(0, maxAgents).map(a => a.persona);
+      onSelectionChange(allAgents);
+    } catch (error) {
+      console.error('Error selecting all agents:', error);
+    }
   };
 
   return (
@@ -79,7 +113,7 @@ export function AgentSelection({
         <div>
           <h3 className="text-lg font-semibold">Select Agents</h3>
           <p className="text-sm text-muted-foreground">
-            Choose agents to participate in this RFE workflow ({selectedAgents.length}/{maxAgents} selected)
+            Choose agents to participate in this RFE workflow ({safeSelectedAgents.length}/{maxAgents} selected)
           </p>
         </div>
         <div className="flex gap-2">
@@ -139,9 +173,9 @@ export function AgentSelection({
               <AgentCard
                 key={agent.persona}
                 agent={agent}
-                selected={selectedAgents.includes(agent.persona)}
+                selected={safeSelectedAgents.includes(agent.persona)}
                 onToggle={() => handleAgentToggle(agent.persona)}
-                disabled={disabled || (selectedAgents.length >= maxAgents && !selectedAgents.includes(agent.persona))}
+                disabled={disabled || (safeSelectedAgents.length >= maxAgents && !safeSelectedAgents.includes(agent.persona))}
               />
             ))}
           </div>
@@ -167,9 +201,9 @@ export function AgentSelection({
                 <AgentCard
                   key={agent.persona}
                   agent={agent}
-                  selected={selectedAgents.includes(agent.persona)}
+                  selected={safeSelectedAgents.includes(agent.persona)}
                   onToggle={() => handleAgentToggle(agent.persona)}
-                  disabled={disabled || (selectedAgents.length >= maxAgents && !selectedAgents.includes(agent.persona))}
+                  disabled={disabled || (safeSelectedAgents.length >= maxAgents && !safeSelectedAgents.includes(agent.persona))}
                 />
               ))}
             </div>
@@ -178,14 +212,14 @@ export function AgentSelection({
       </Tabs>
 
       {/* Selected Agents Summary */}
-      {selectedAgents.length > 0 && (
+      {safeSelectedAgents.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Selected Agents ({selectedAgents.length})</CardTitle>
+            <CardTitle>Selected Agents ({safeSelectedAgents.length})</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              {selectedAgents.map(persona => {
+              {safeSelectedAgents.map(persona => {
                 const agent = AVAILABLE_AGENTS.find(a => a.persona === persona);
                 return agent ? (
                   <Badge
