@@ -62,6 +62,7 @@ func main() {
 	// API routes
 	api := r.Group("/api")
 	{
+		// Legacy agentic sessions (keep for backwards compatibility)
 		api.GET("/agentic-sessions", listAgenticSessions)
 		api.GET("/agentic-sessions/:name", getAgenticSession)
 		api.POST("/agentic-sessions", createAgenticSession)
@@ -69,6 +70,18 @@ func main() {
 		api.PUT("/agentic-sessions/:name/status", updateAgenticSessionStatus)
 		api.PUT("/agentic-sessions/:name/displayname", updateAgenticSessionDisplayName)
 		api.POST("/agentic-sessions/:name/stop", stopAgenticSession)
+
+		// RFE workflow endpoints
+		api.GET("/rfe-workflows", listRFEWorkflows)
+		api.POST("/rfe-workflows", createRFEWorkflow)
+		api.GET("/rfe-workflows/:id", getRFEWorkflow)
+		api.DELETE("/rfe-workflows/:id", deleteRFEWorkflow)
+		api.POST("/rfe-workflows/:id/pause", pauseRFEWorkflow)
+		api.POST("/rfe-workflows/:id/resume", resumeRFEWorkflow)
+		api.POST("/rfe-workflows/:id/advance-phase", advanceRFEWorkflowPhase)
+		api.POST("/rfe-workflows/:id/push-to-git", pushRFEWorkflowToGit)
+		api.GET("/rfe-workflows/:id/artifacts/*path", getRFEWorkflowArtifact)
+		api.PUT("/rfe-workflows/:id/artifacts/*path", updateRFEWorkflowArtifact)
 	}
 
 	// Health check endpoint
@@ -193,6 +206,70 @@ type CreateAgenticSessionRequest struct {
 	LLMSettings *LLMSettings `json:"llmSettings,omitempty"`
 	Timeout     *int         `json:"timeout,omitempty"`
 	GitConfig   *GitConfig   `json:"gitConfig,omitempty"`
+}
+
+// RFE Workflow Data Structures
+type RFEWorkflow struct {
+	ID                 string                  `json:"id"`
+	Title              string                  `json:"title"`
+	Description        string                  `json:"description"`
+	Status             string                  `json:"status"` // "draft", "in_progress", "completed", "failed"
+	CurrentPhase       string                  `json:"currentPhase"` // "specify", "plan", "tasks", "completed"
+	SelectedAgents     []string                `json:"selectedAgents"`
+	TargetRepoUrl      string                  `json:"targetRepoUrl"`
+	TargetRepoBranch   string                  `json:"targetRepoBranch"`
+	GitUserName        *string                 `json:"gitUserName,omitempty"`
+	GitUserEmail       *string                 `json:"gitUserEmail,omitempty"`
+	CreatedAt          string                  `json:"createdAt"`
+	UpdatedAt          string                  `json:"updatedAt"`
+	AgentSessions      []RFEAgentSession       `json:"agentSessions"`
+	Artifacts          []RFEArtifact          `json:"artifacts"`
+	PhaseResults       map[string]PhaseResult  `json:"phaseResults"` // "specify" -> result, "plan" -> result, etc.
+}
+
+type RFEAgentSession struct {
+	ID           string    `json:"id"`
+	AgentPersona string    `json:"agentPersona"` // e.g., "ENGINEERING_MANAGER"
+	Phase        string    `json:"phase"`        // "specify", "plan", "tasks"
+	Status       string    `json:"status"`       // "pending", "running", "completed", "failed"
+	StartedAt    *string   `json:"startedAt,omitempty"`
+	CompletedAt  *string   `json:"completedAt,omitempty"`
+	Result       *string   `json:"result,omitempty"`
+	Cost         *float64  `json:"cost,omitempty"`
+}
+
+type RFEArtifact struct {
+	Path        string `json:"path"`
+	Type        string `json:"type"` // "specification", "plan", "tasks", "code", "docs"
+	Phase       string `json:"phase"` // which phase created this artifact
+	CreatedBy   string `json:"createdBy"` // which agent created this
+	Size        int64  `json:"size"`
+	ModifiedAt  string `json:"modifiedAt"`
+}
+
+type PhaseResult struct {
+	Phase       string                 `json:"phase"`
+	Status      string                 `json:"status"` // "completed", "in_progress", "failed"
+	Agents      []string               `json:"agents"` // agents that worked on this phase
+	Artifacts   []string               `json:"artifacts"` // artifact paths created in this phase
+	Summary     string                 `json:"summary"`
+	StartedAt   string                 `json:"startedAt"`
+	CompletedAt *string                `json:"completedAt,omitempty"`
+	Metadata    map[string]interface{} `json:"metadata,omitempty"`
+}
+
+type CreateRFEWorkflowRequest struct {
+	Title              string   `json:"title" binding:"required"`
+	Description        string   `json:"description" binding:"required"`
+	TargetRepoUrl      string   `json:"targetRepoUrl" binding:"required,url"`
+	TargetRepoBranch   string   `json:"targetRepoBranch" binding:"required"`
+	SelectedAgents     []string `json:"selectedAgents" binding:"required,min=1"`
+	GitUserName        *string  `json:"gitUserName,omitempty"`
+	GitUserEmail       *string  `json:"gitUserEmail,omitempty"`
+}
+
+type AdvancePhaseRequest struct {
+	Force bool `json:"force,omitempty"` // Force advance even if current phase isn't complete
 }
 
 // Helper function to create string pointer
@@ -914,5 +991,248 @@ func parseStatus(status map[string]interface{}) *AgenticSessionStatus {
 	}
 
 	return result
+}
+
+// RFE Workflow API Handlers
+
+// In-memory storage for RFE workflows (replace with persistent storage later)
+var rfeWorkflows = make(map[string]*RFEWorkflow)
+
+func listRFEWorkflows(c *gin.Context) {
+	var workflows []RFEWorkflow
+	for _, workflow := range rfeWorkflows {
+		workflows = append(workflows, *workflow)
+	}
+
+	if workflows == nil {
+		workflows = []RFEWorkflow{}
+	}
+
+	c.JSON(http.StatusOK, workflows)
+}
+
+func createRFEWorkflow(c *gin.Context) {
+	var req CreateRFEWorkflowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Generate unique ID for the workflow
+	workflowID := fmt.Sprintf("rfe-%d", time.Now().Unix())
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	workflow := &RFEWorkflow{
+		ID:               workflowID,
+		Title:            req.Title,
+		Description:      req.Description,
+		Status:           "draft",
+		CurrentPhase:     "specify",
+		SelectedAgents:   req.SelectedAgents,
+		TargetRepoUrl:    req.TargetRepoUrl,
+		TargetRepoBranch: req.TargetRepoBranch,
+		GitUserName:      req.GitUserName,
+		GitUserEmail:     req.GitUserEmail,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		AgentSessions:    []RFEAgentSession{},
+		Artifacts:        []RFEArtifact{},
+		PhaseResults:     make(map[string]PhaseResult),
+	}
+
+	// Store workflow in memory
+	rfeWorkflows[workflowID] = workflow
+
+	// TODO: Create initial AgenticSessions for the specify phase
+	log.Printf("Created RFE workflow %s with agents: %v", workflowID, req.SelectedAgents)
+
+	c.JSON(http.StatusCreated, workflow)
+}
+
+func getRFEWorkflow(c *gin.Context) {
+	id := c.Param("id")
+
+	workflow, exists := rfeWorkflows[id]
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, workflow)
+}
+
+func deleteRFEWorkflow(c *gin.Context) {
+	id := c.Param("id")
+
+	_, exists := rfeWorkflows[id]
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// TODO: Clean up associated AgenticSessions and PVC data
+	delete(rfeWorkflows, id)
+
+	c.JSON(http.StatusOK, gin.H{"message": "Workflow deleted successfully"})
+}
+
+func pauseRFEWorkflow(c *gin.Context) {
+	id := c.Param("id")
+
+	workflow, exists := rfeWorkflows[id]
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// TODO: Pause running AgenticSessions
+	workflow.Status = "paused"
+	workflow.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	c.JSON(http.StatusOK, workflow)
+}
+
+func resumeRFEWorkflow(c *gin.Context) {
+	id := c.Param("id")
+
+	workflow, exists := rfeWorkflows[id]
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// TODO: Resume paused AgenticSessions
+	workflow.Status = "in_progress"
+	workflow.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	c.JSON(http.StatusOK, workflow)
+}
+
+func advanceRFEWorkflowPhase(c *gin.Context) {
+	id := c.Param("id")
+
+	var req AdvancePhaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	workflow, exists := rfeWorkflows[id]
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// Determine next phase
+	var nextPhase string
+	switch workflow.CurrentPhase {
+	case "specify":
+		nextPhase = "plan"
+	case "plan":
+		nextPhase = "tasks"
+	case "tasks":
+		nextPhase = "completed"
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot advance from current phase"})
+		return
+	}
+
+	// TODO: Validate current phase is complete (unless force=true)
+	// TODO: Create AgenticSessions for next phase
+
+	workflow.CurrentPhase = nextPhase
+	workflow.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+	if nextPhase == "completed" {
+		workflow.Status = "completed"
+	}
+
+	log.Printf("Advanced workflow %s to phase: %s", id, nextPhase)
+
+	c.JSON(http.StatusOK, workflow)
+}
+
+func pushRFEWorkflowToGit(c *gin.Context) {
+	id := c.Param("id")
+
+	workflow, exists := rfeWorkflows[id]
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// TODO: Implement Git push functionality
+	// 1. Read artifacts from PVC
+	// 2. Clone target repository
+	// 3. Copy artifacts to repository
+	// 4. Commit and push changes
+
+	log.Printf("Pushing workflow %s artifacts to Git: %s", id, workflow.TargetRepoUrl)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Push to Git initiated",
+		"repository": workflow.TargetRepoUrl,
+		"branch": workflow.TargetRepoBranch,
+	})
+}
+
+func getRFEWorkflowArtifact(c *gin.Context) {
+	id := c.Param("id")
+	artifactPath := c.Param("path")
+
+	workflow, exists := rfeWorkflows[id]
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// TODO: Read artifact content from PVC
+	// For now, return mock content
+	mockContent := fmt.Sprintf("# Artifact: %s\n\nContent for workflow: %s\nPath: %s\n\nThis is mock content. Implement PVC reading.",
+		artifactPath, workflow.Title, artifactPath)
+
+	c.Header("Content-Type", "text/plain")
+	c.String(http.StatusOK, mockContent)
+}
+
+func updateRFEWorkflowArtifact(c *gin.Context) {
+	id := c.Param("id")
+	artifactPath := c.Param("path")
+
+	workflow, exists := rfeWorkflows[id]
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+
+	// Read the content from request body
+	content, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read content"})
+		return
+	}
+
+	// TODO: Write artifact content to PVC
+	// For now, just log the update
+	log.Printf("Updating artifact %s for workflow %s (%d bytes)", artifactPath, id, len(content))
+
+	// Update artifact metadata if it exists
+	now := time.Now().UTC().Format(time.RFC3339)
+	for i, artifact := range workflow.Artifacts {
+		if artifact.Path == artifactPath {
+			workflow.Artifacts[i].Size = int64(len(content))
+			workflow.Artifacts[i].ModifiedAt = now
+			break
+		}
+	}
+
+	workflow.UpdatedAt = now
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Artifact updated successfully",
+		"path": artifactPath,
+		"size": len(content),
+	})
 }
 
