@@ -73,4 +73,79 @@ export type CreateAgenticSessionRequest = {
 	llmSettings?: Partial<LLMSettings>;
 	timeout?: number;
 	gitConfig?: GitConfig;
+	// New fields for agent sessions
+	agentPersona?: string;
+	workflowPhase?: string;
+	parentRFE?: string;
+	sharedWorkspace?: string;
+};
+
+// New types for RFE workflows
+export type WorkflowPhase = "specify" | "plan" | "tasks" | "review" | "completed";
+
+export type AgentPersona = {
+	persona: string;
+	name: string;
+	role: string;
+	expertise: string[];
+	description?: string;
+};
+
+export type ArtifactFile = {
+	path: string;
+	name: string;
+	content: string;
+	lastModified: string;
+	size: number;
+	agent?: string;
+	phase?: string;
+};
+
+export type RFESession = {
+	sessionName: string;
+	agent: AgentPersona;
+	phase: WorkflowPhase;
+	status: AgenticSessionPhase;
+	startTime?: string;
+	completionTime?: string;
+	finalOutput?: string;
+	cost?: number;
+	artifactFile?: string;
+};
+
+export type RFEWorkflow = {
+	id: string;
+	title: string;
+	description: string;
+	currentPhase: WorkflowPhase;
+	status: "active" | "completed" | "failed" | "paused";
+	targetRepository: GitRepository;
+	selectedAgents: AgentPersona[];
+	sessions: RFESession[];
+	artifacts: ArtifactFile[];
+	pvcName: string;
+	createdAt: string;
+	updatedAt: string;
+	completedPhases: WorkflowPhase[];
+};
+
+export type CreateRFEWorkflowRequest = {
+	title: string;
+	description: string;
+	targetRepository: GitRepository;
+	selectedAgents: string[]; // Agent persona keys
+	gitConfig?: GitConfig;
+};
+
+export type RFEWorkflowStatus = {
+	phase: WorkflowPhase;
+	agentProgress: {
+		[agentPersona: string]: {
+			status: AgenticSessionPhase;
+			sessionName?: string;
+			completedAt?: string;
+		};
+	};
+	artifactCount: number;
+	lastActivity: string;
 };

@@ -97,7 +97,3 @@ Key operator settings:
 kubectl delete -f .
 kubectl delete crd agenticsessions.vteam.ambient-code
 ```
-
----
-
-**Need help?** Check the logs or create an issue in the vTeam repository.

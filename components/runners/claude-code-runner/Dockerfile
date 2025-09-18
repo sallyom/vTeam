@@ -59,8 +59,10 @@ RUN echo '#!/bin/bash\n' \
 COPY main.py /app/
 COPY spek_kit_integration.py /app/
 COPY git_integration.py /app/
+COPY agent_loader.py /app/
+COPY agents/ /app/agents/
 COPY CLAUDE.md /app/
-RUN chmod 755 /app/main.py && chmod 644 /app/spek_kit_integration.py && chmod 644 /app/git_integration.py && chmod 644 /app/CLAUDE.md
+RUN chmod 755 /app/main.py && chmod 644 /app/spek_kit_integration.py && chmod 644 /app/git_integration.py && chmod 644 /app/agent_loader.py && chmod 644 /app/CLAUDE.md && chmod -R 644 /app/agents/
 
 # Set OpenShift-compatible environment variables
 ENV PYTHONUNBUFFERED=1

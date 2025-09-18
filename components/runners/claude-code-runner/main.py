@@ -18,6 +18,9 @@ from spek_kit_integration import SpekKitIntegration
 # Import Git integration
 from git_integration import GitIntegration
 
+# Import agent support
+from agent_loader import AgentLoader, get_agent_loader
+
 # Configure logging with immediate flush for container visibility
 log_level = (
     logging.DEBUG
@@ -44,6 +47,12 @@ class ClaudeRunner:
             "BACKEND_API_URL", "http://backend-service:8080/api"
         )
 
+        # New: Agent-specific configuration
+        self.agent_persona = os.getenv("AGENT_PERSONA", "")  # e.g., "ENGINEERING_MANAGER"
+        self.workflow_phase = os.getenv("WORKFLOW_PHASE", "")  # e.g., "specify", "plan", "tasks"
+        self.parent_rfe = os.getenv("PARENT_RFE", "")  # e.g., "001-user-auth"
+        self.shared_workspace = os.getenv("SHARED_WORKSPACE", "/workspace")  # PVC mount
+
         # Validate Anthropic API key for Claude Code
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
@@ -53,12 +62,18 @@ class ClaudeRunner:
         workspace_dir = "/workspace"
 
         # Initialize spek-kit integration with persistent workspace
-        self.spek_kit = SpekKitIntegration(workspace_dir=workspace_dir)
+        self.spek_kit = SpekKitIntegration(workspace_dir=self.shared_workspace)
 
         # Initialize Git integration
         self.git = GitIntegration()
 
+        # Initialize agent loader
+        self.agent_loader = get_agent_loader()
+
         logger.info(f"Initialized ClaudeRunner for session: {self.session_name}")
+        logger.info(f"Agent persona: {self.agent_persona}")
+        logger.info(f"Workflow phase: {self.workflow_phase}")
+        logger.info(f"Parent RFE: {self.parent_rfe}")
         logger.info(f"Website URL: {self.website_url}")
         logger.info("Using Claude Code CLI with Playwright MCP and spek-kit integration")
 
@@ -78,14 +93,19 @@ class ClaudeRunner:
             # Generate and set display name
             await self._generate_and_set_display_name()
 
-            # Check if this is a spek-kit command
-            spek_command = self.spek_kit.detect_spek_kit_command(self.prompt)
-            if spek_command:
-                await self._handle_spek_kit_session(spek_command)
-                return
+            # Determine session type based on configuration
+            if self.agent_persona and self.workflow_phase:
+                # Agent-specific RFE workflow session
+                await self._handle_agent_rfe_session()
+            else:
+                # Check if this is a spek-kit command
+                spek_command = self.spek_kit.detect_spek_kit_command(self.prompt)
+                if spek_command:
+                    await self._handle_spek_kit_session(spek_command)
+                    return
 
-            # Standard agentic session with website analysis
-            await self._handle_standard_session()
+                # Standard agentic session with website analysis
+                await self._handle_standard_session()
 
         except Exception as e:
             logger.error(f"Agentic session failed: {str(e)}")
@@ -708,6 +728,81 @@ Provide your enhanced version as a complete, production-ready document that a de
             logger.error(f"Error updating session status: {str(e)}")
             # Don't raise here as this shouldn't stop the main process
 
+    async def _handle_agent_rfe_session(self):
+        """Handle an agent-specific RFE workflow session"""
+        logger.info(f"Starting agent RFE session: {self.agent_persona} - {self.workflow_phase}")
+
+        # Update status to indicate we're starting
+        await self.update_session_status(
+            {
+                "phase": "Running",
+                "message": f"Initializing {self.agent_persona} for {self.workflow_phase} phase",
+                "startTime": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+        # Set up spek-kit workspace (shared across agents)
+        if not await self.spek_kit.setup_workspace():
+            raise RuntimeError("Failed to setup spek-kit workspace")
+
+        # Get agent-specific prompt for this phase
+        agent_prompt = self.agent_loader.get_agent_prompt(
+            self.agent_persona, self.workflow_phase, self.prompt
+        )
+
+        if not agent_prompt:
+            raise RuntimeError(f"No agent configuration found for: {self.agent_persona}")
+
+        # Update status
+        await self.update_session_status(
+            {
+                "phase": "Running",
+                "message": f"{self.agent_persona} executing /{self.workflow_phase} command",
+            }
+        )
+
+        # Create workspace structure for this RFE and agent
+        agent_workspace = Path(self.shared_workspace) / "agents" / self.workflow_phase
+        agent_workspace.mkdir(parents=True, exist_ok=True)
+
+        # Create agent-specific prompt that combines persona with spek-kit command
+        logger.info(f"Running {self.agent_persona} with spek-kit /{self.workflow_phase}...")
+
+        # Execute with Claude Code
+        result, cost, all_messages = await self._run_claude_code(agent_prompt)
+
+        logger.info(f"Agent {self.agent_persona} completed {self.workflow_phase} phase")
+
+        # Save agent-specific result to shared workspace
+        agent_result_file = agent_workspace / f"{self.agent_persona.lower().replace('_', '-')}.md"
+        agent_result_file.write_text(result)
+
+        # Log the complete agent results to console
+        print("\n" + "=" * 80)
+        print(f"🤖 AGENT RESULTS: {self.agent_persona} - {self.workflow_phase.upper()}")
+        print("=" * 80)
+        print(result)
+        print("=" * 80 + "\n")
+
+        # Collect project artifacts from spek-kit
+        artifacts = self.spek_kit.get_project_artifacts()
+
+        # Update the session with the final result
+        await self.update_session_status(
+            {
+                "phase": "Completed",
+                "message": f"{self.agent_persona} completed {self.workflow_phase} phase successfully",
+                "completionTime": datetime.now(timezone.utc).isoformat(),
+                "finalOutput": result,
+                "cost": cost,
+                "messages": all_messages,
+                "artifacts": artifacts,
+                "agentResultFile": str(agent_result_file),
+            }
+        )
+
+        logger.info(f"Agent RFE session completed: {self.agent_persona}")
+
 
 async def main():
     """Main entry point"""
@@ -717,9 +812,14 @@ async def main():
     required_vars = [
         "AGENTIC_SESSION_NAME",
         "PROMPT",
-        "WEBSITE_URL",
         "ANTHROPIC_API_KEY",
     ]
+
+    # For agent RFE sessions, we don't need WEBSITE_URL
+    agent_persona = os.getenv("AGENT_PERSONA", "")
+    if not agent_persona:
+        required_vars.append("WEBSITE_URL")  # Standard sessions need website URL
+
     missing_vars = [var for var in required_vars if not os.getenv(var)]
 
     if missing_vars:
