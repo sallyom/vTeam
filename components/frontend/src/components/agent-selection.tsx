@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { AgentPersona } from "@/types/agentic-session";
 import { AVAILABLE_AGENTS, DEFAULT_AGENT_SELECTIONS, groupAgentsByRole } from "@/lib/agents";
 import { Badge } from "@/components/ui/badge";

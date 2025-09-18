@@ -36,7 +36,7 @@ const formSchema = z.object({
   title: z.string().min(5, "Title must be at least 5 characters long"),
   description: z.string().min(20, "Description must be at least 20 characters long"),
   targetRepoUrl: z.string().url("Please enter a valid repository URL"),
-  targetRepoBranch: z.string().min(1, "Branch is required").default("main"),
+  targetRepoBranch: z.string().min(1, "Branch is required"),
   selectedAgents: z.array(z.string()).min(1, "At least one agent must be selected"),
   // Git configuration fields
   gitUserName: z.string().optional(),
