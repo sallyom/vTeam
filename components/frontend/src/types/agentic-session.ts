@@ -30,7 +30,6 @@ export type GitConfig = {
 
 export type AgenticSessionSpec = {
 	prompt: string;
-	websiteURL: string;
 	llmSettings: LLMSettings;
 	timeout: number;
 	displayName?: string;
@@ -70,7 +69,6 @@ export type AgenticSession = {
 
 export type CreateAgenticSessionRequest = {
 	prompt: string;
-	websiteURL: string;
 	llmSettings?: Partial<LLMSettings>;
 	timeout?: number;
 	gitConfig?: GitConfig;

@@ -19,7 +19,6 @@ import type { CreateAgenticSessionRequest } from "@/types/agentic-session";
 
 const formSchema = z.object({
   prompt: z.string().min(10, "Prompt must be at least 10 characters long"),
-  websiteURL: z.string().url("Please enter a valid URL"),
   model: z.string().min(1, "Please select a model"),
   temperature: z.number().min(0).max(2),
   maxTokens: z.number().min(100).max(8000),
@@ -52,7 +51,6 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
     resolver: zodResolver(formSchema),
     defaultValues: {
       prompt: "",
-      websiteURL: "",
       model: "claude-3-5-sonnet-20241022",
       temperature: 0.7,
       maxTokens: 4000,
@@ -71,7 +69,6 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
     try {
       const request: CreateAgenticSessionRequest = {
         prompt: values.prompt,
-        websiteURL: values.websiteURL,
         llmSettings: {
           model: values.model,
           temperature: values.temperature,
@@ -155,20 +152,6 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name="websiteURL"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Website URL</FormLabel>
-                    <FormControl>
-                      <Input placeholder="https://example.com" {...field} />
-                    </FormControl>
-                    <FormDescription>The website that Claude will analyze</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField

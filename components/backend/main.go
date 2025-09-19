@@ -239,7 +239,6 @@ type AgenticSession struct {
 
 type AgenticSessionSpec struct {
 	Prompt            string             `json:"prompt" binding:"required"`
-	WebsiteURL        string             `json:"websiteURL" binding:"required,url"`
 	DisplayName       string             `json:"displayName"`
 	LLMSettings       LLMSettings        `json:"llmSettings"`
 	Timeout           int                `json:"timeout"`
@@ -302,7 +301,6 @@ type AgenticSessionStatus struct {
 
 type CreateAgenticSessionRequest struct {
 	Prompt            string             `json:"prompt" binding:"required"`
-	WebsiteURL        string             `json:"websiteURL" binding:"required,url"`
 	DisplayName       string             `json:"displayName,omitempty"`
 	LLMSettings       *LLMSettings       `json:"llmSettings,omitempty"`
 	Timeout           *int               `json:"timeout,omitempty"`

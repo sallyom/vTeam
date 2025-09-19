@@ -247,7 +247,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	// Extract spec information from the fresh object
 	spec, _, _ := unstructured.NestedMap(currentObj.Object, "spec")
 	prompt, _, _ := unstructured.NestedString(spec, "prompt")
-	websiteURL, _, _ := unstructured.NestedString(spec, "websiteURL")
 	timeout, _, _ := unstructured.NestedInt64(spec, "timeout")
 
 	llmSettings, _, _ := unstructured.NestedMap(spec, "llmSettings")
@@ -388,7 +387,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									{Name: "AGENTIC_SESSION_NAME", Value: name},
 									{Name: "AGENTIC_SESSION_NAMESPACE", Value: sessionNamespace},
 									{Name: "PROMPT", Value: prompt},
-									{Name: "WEBSITE_URL", Value: websiteURL},
 									{Name: "LLM_MODEL", Value: model},
 									{Name: "LLM_TEMPERATURE", Value: fmt.Sprintf("%.2f", temperature)},
 									{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokens)},
