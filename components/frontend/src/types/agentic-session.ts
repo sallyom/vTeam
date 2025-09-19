@@ -81,7 +81,7 @@ export type CreateAgenticSessionRequest = {
 };
 
 // New types for RFE workflows
-export type WorkflowPhase = "specify" | "plan" | "tasks" | "review" | "completed";
+export type WorkflowPhase = "pre" | "specify" | "plan" | "tasks" | "review" | "completed";
 
 export type AgentPersona = {
 	persona: string;
@@ -120,7 +120,6 @@ export type RFEWorkflow = {
 	status: "active" | "completed" | "failed" | "paused";
 	targetRepoUrl: string;
 	targetRepoBranch: string;
-	selectedAgents: string[]; // Backend sends array of persona strings
 	agentSessions: RFESession[]; // Backend uses 'agentSessions' not 'sessions'
 	artifacts: ArtifactFile[];
 	createdAt: string;
@@ -133,7 +132,6 @@ export type CreateRFEWorkflowRequest = {
 	description: string;
 	targetRepoUrl: string;
 	targetRepoBranch: string;
-	selectedAgents: string[]; // Agent persona keys
 	gitUserName?: string;
 	gitUserEmail?: string;
 };

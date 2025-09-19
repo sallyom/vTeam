@@ -493,13 +493,30 @@ func createSession(c *gin.Context) {
 	name := fmt.Sprintf("agentic-session-%d", timestamp)
 
 	// Create the custom resource
+	// Metadata
+	metadata := map[string]interface{}{
+		"name":      name,
+		"namespace": project,
+	}
+	if len(req.Labels) > 0 {
+		labels := map[string]interface{}{}
+		for k, v := range req.Labels {
+			labels[k] = v
+		}
+		metadata["labels"] = labels
+	}
+	if len(req.Annotations) > 0 {
+		annotations := map[string]interface{}{}
+		for k, v := range req.Annotations {
+			annotations[k] = v
+		}
+		metadata["annotations"] = annotations
+	}
+
 	session := map[string]interface{}{
 		"apiVersion": "vteam.ambient-code/v1alpha1",
 		"kind":       "AgenticSession",
-		"metadata": map[string]interface{}{
-			"name":      name,
-			"namespace": project,
-		},
+		"metadata":   metadata,
 		"spec": map[string]interface{}{
 			"prompt":      req.Prompt,
 			"displayName": req.DisplayName,
@@ -528,6 +545,12 @@ func createSession(c *gin.Context) {
 					"name":  mergedGitConfig.User.Name,
 					"email": mergedGitConfig.User.Email,
 				}
+			}
+
+			// Optional environment variables passthrough
+			if len(req.EnvironmentVariables) > 0 {
+				spec := session["spec"].(map[string]interface{})
+				spec["environmentVariables"] = req.EnvironmentVariables
 			}
 			if mergedGitConfig.Authentication != nil {
 				auth := map[string]interface{}{}
@@ -2615,7 +2638,6 @@ func rfeFromUnstructured(item *unstructured.Unstructured) *RFEWorkflow {
 		Description:      fmt.Sprintf("%v", spec["description"]),
 		Status:           fmt.Sprintf("%v", status["status"]),
 		CurrentPhase:     fmt.Sprintf("%v", status["currentPhase"]),
-		SelectedAgents:   []string{},
 		TargetRepoUrl:    fmt.Sprintf("%v", spec["targetRepoUrl"]),
 		TargetRepoBranch: fmt.Sprintf("%v", spec["targetRepoBranch"]),
 		Project:          fmt.Sprintf("%v", spec["project"]),
@@ -2624,11 +2646,6 @@ func rfeFromUnstructured(item *unstructured.Unstructured) *RFEWorkflow {
 		AgentSessions:    []RFEAgentSession{},
 		Artifacts:        []RFEArtifact{},
 		PhaseResults:     map[string]PhaseResult{},
-	}
-	if sa, ok := spec["selectedAgents"].([]interface{}); ok {
-		for _, v := range sa {
-			wf.SelectedAgents = append(wf.SelectedAgents, fmt.Sprintf("%v", v))
-		}
 	}
 	if sess, ok := status["agentSessions"].([]interface{}); ok {
 		for _, v := range sess {
@@ -2697,26 +2714,6 @@ func listProjectRFEWorkflows(c *gin.Context) {
 			}
 		}
 	}
-	if len(workflows) == 0 {
-		dir := getProjectRFEWorkflowsDir(project)
-		_ = os.MkdirAll(dir, 0755)
-		files, ferr := ioutil.ReadDir(dir)
-		if ferr != nil {
-			c.JSON(http.StatusOK, gin.H{"workflows": []RFEWorkflow{}})
-			return
-		}
-		for _, f := range files {
-			if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
-				continue
-			}
-			id := strings.TrimSuffix(f.Name(), ".json")
-			wf, lerr := loadProjectRFEWorkflow(project, id)
-			if lerr != nil {
-				continue
-			}
-			workflows = append(workflows, *wf)
-		}
-	}
 	if workflows == nil {
 		workflows = []RFEWorkflow{}
 	}
@@ -2740,8 +2737,7 @@ func createProjectRFEWorkflow(c *gin.Context) {
 		Title:            req.Title,
 		Description:      req.Description,
 		Status:           "draft",
-		CurrentPhase:     "specify",
-		SelectedAgents:   req.SelectedAgents,
+		CurrentPhase:     "pre",
 		TargetRepoUrl:    req.TargetRepoUrl,
 		TargetRepoBranch: req.TargetRepoBranch,
 		Project:          project,
@@ -2753,20 +2749,9 @@ func createProjectRFEWorkflow(c *gin.Context) {
 		Artifacts:        []RFEArtifact{},
 		PhaseResults:     make(map[string]PhaseResult),
 	}
-	// Persist workflow JSON to project PVC via content service
-	if b, jerr := json.MarshalIndent(workflow, "", "  "); jerr == nil {
-		if werr := writeProjectContentFile(c, project, "/rfe-workflows/"+workflow.ID+".json", b); werr != nil {
-			log.Printf("⚠️ Failed to write workflow JSON to content service: %v", werr)
-		}
-	} else {
-		log.Printf("⚠️ Failed to marshal workflow for content write: %v", jerr)
-	}
 	_, reqDyn := getK8sClientsForRequest(c)
 	if err := upsertProjectRFEWorkflowCR(reqDyn, workflow); err != nil {
 		log.Printf("⚠️ Failed to upsert RFEWorkflow CR: %v", err)
-	}
-	if err := createAgentSessionsForPhaseProject(reqDyn, workflow, "specify"); err != nil {
-		log.Printf("⚠️ Failed to create project agent sessions for specify: %v", err)
 	}
 	c.JSON(http.StatusCreated, workflow)
 }
@@ -2786,17 +2771,6 @@ func getProjectRFEWorkflow(c *gin.Context) {
 		} else {
 			err = gerr
 		}
-	} else {
-		err = fmt.Errorf("no k8s client")
-	}
-	if wf == nil || err != nil {
-		if b, rerr := readProjectContentFile(c, project, "/rfe-workflows/"+id+".json"); rerr == nil {
-			var tmp RFEWorkflow
-			if uerr := json.Unmarshal(b, &tmp); uerr == nil {
-				wf = &tmp
-				err = nil
-			}
-		}
 	}
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
@@ -2813,24 +2787,20 @@ func deleteProjectRFEWorkflow(c *gin.Context) {
 	if reqDyn != nil {
 		_ = reqDyn.Resource(gvr).Namespace(c.Param("projectName")).Delete(context.TODO(), id, v1.DeleteOptions{})
 	}
-	// No content-service delete; file on PVC remains for audit/history
 	c.JSON(http.StatusOK, gin.H{"message": "Workflow deleted successfully"})
 }
 
 func pauseProjectRFEWorkflow(c *gin.Context) {
 	project := c.Param("projectName")
 	id := c.Param("id")
-	wf, err := loadProjectRFEWorkflow(project, id)
+	_, reqDyn := getK8sClientsForRequest(c)
+	wf, err := loadProjectRFEWorkflowFromCRWithClient(reqDyn, project, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 		return
 	}
 	wf.Status = "paused"
 	wf.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if b, jerr := json.MarshalIndent(wf, "", "  "); jerr == nil {
-		_ = writeProjectContentFile(c, project, "/rfe-workflows/"+id+".json", b)
-	}
-	_, reqDyn := getK8sClientsForRequest(c)
 	_ = upsertProjectRFEWorkflowCR(reqDyn, wf)
 	c.JSON(http.StatusOK, wf)
 }
@@ -2838,16 +2808,15 @@ func pauseProjectRFEWorkflow(c *gin.Context) {
 func resumeProjectRFEWorkflow(c *gin.Context) {
 	project := c.Param("projectName")
 	id := c.Param("id")
-	wf, err := loadProjectRFEWorkflow(project, id)
+	_, reqDyn := getK8sClientsForRequest(c)
+	wf, err := loadProjectRFEWorkflowFromCRWithClient(reqDyn, project, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 		return
 	}
-	wf.Status = "in_progress"
+	// Keep status unchanged if in draft; caller can decide, but ensure updated timestamp
 	wf.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if b, jerr := json.MarshalIndent(wf, "", "  "); jerr == nil {
-		_ = writeProjectContentFile(c, project, "/rfe-workflows/"+id+".json", b)
-	}
+	_ = upsertProjectRFEWorkflowCR(reqDyn, wf)
 	c.JSON(http.StatusOK, wf)
 }
 
@@ -2859,13 +2828,16 @@ func advanceProjectRFEWorkflowPhase(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	wf, err := loadProjectRFEWorkflow(project, id)
+	_, reqDyn := getK8sClientsForRequest(c)
+	wf, err := loadProjectRFEWorkflowFromCRWithClient(reqDyn, project, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 		return
 	}
 	var nextPhase string
 	switch wf.CurrentPhase {
+	case "pre":
+		nextPhase = "specify"
 	case "specify":
 		nextPhase = "plan"
 	case "plan":
@@ -2877,9 +2849,10 @@ func advanceProjectRFEWorkflowPhase(c *gin.Context) {
 		return
 	}
 	if nextPhase != "completed" {
-		_, reqDyn := getK8sClientsForRequest(c)
-		if err := createAgentSessionsForPhaseProject(reqDyn, wf, nextPhase); err != nil {
-			log.Printf("⚠️ Failed to create agent sessions for phase %s (project=%s): %v", nextPhase, project, err)
+		if err := createSingleAgentSessionForPhaseProject(reqDyn, wf, nextPhase); err != nil {
+			log.Printf("⚠️ Failed to create agent session for phase %s (project=%s): %v", nextPhase, project, err)
+		} else {
+			wf.Status = "in_progress"
 		}
 	}
 	wf.CurrentPhase = nextPhase
@@ -2887,16 +2860,15 @@ func advanceProjectRFEWorkflowPhase(c *gin.Context) {
 		wf.Status = "completed"
 	}
 	wf.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if b, jerr := json.MarshalIndent(wf, "", "  "); jerr == nil {
-		_ = writeProjectContentFile(c, project, "/rfe-workflows/"+id+".json", b)
-	}
+	_ = upsertProjectRFEWorkflowCR(reqDyn, wf)
 	c.JSON(http.StatusOK, wf)
 }
 
 func pushProjectRFEWorkflowToGit(c *gin.Context) {
 	project := c.Param("projectName")
 	id := c.Param("id")
-	wf, err := loadProjectRFEWorkflow(project, id)
+	_, reqDyn := getK8sClientsForRequest(c)
+	wf, err := loadProjectRFEWorkflowFromCRWithClient(reqDyn, project, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 		return
@@ -2906,9 +2878,7 @@ func pushProjectRFEWorkflowToGit(c *gin.Context) {
 		return
 	}
 	wf.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-	if b, jerr := json.MarshalIndent(wf, "", "  "); jerr == nil {
-		_ = writeProjectContentFile(c, project, "/rfe-workflows/"+id+".json", b)
-	}
+	_ = upsertProjectRFEWorkflowCR(reqDyn, wf)
 	c.JSON(http.StatusOK, gin.H{"message": "Successfully pushed to Git repository", "repository": wf.TargetRepoUrl, "branch": wf.TargetRepoBranch})
 }
 
@@ -2917,7 +2887,8 @@ func pushProjectRFEWorkflowToGit(c *gin.Context) {
 func exportProjectRFEWorkflowSpecKit(c *gin.Context) {
 	project := c.Param("projectName")
 	id := c.Param("id")
-	wf, err := loadProjectRFEWorkflow(project, id)
+	_, reqDyn := getK8sClientsForRequest(c)
+	wf, err := loadProjectRFEWorkflowFromCRWithClient(reqDyn, project, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 		return
@@ -2944,7 +2915,8 @@ func exportProjectRFEWorkflowSpecKit(c *gin.Context) {
 func scanProjectRFEWorkflowArtifacts(c *gin.Context) {
 	project := c.Param("projectName")
 	id := c.Param("id")
-	wf, err := loadProjectRFEWorkflow(project, id)
+	_, reqDyn := getK8sClientsForRequest(c)
+	wf, err := loadProjectRFEWorkflowFromCRWithClient(reqDyn, project, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 		return
@@ -2953,6 +2925,7 @@ func scanProjectRFEWorkflowArtifacts(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan workspace artifacts", "details": err.Error()})
 		return
 	}
+	_ = upsertProjectRFEWorkflowCR(reqDyn, wf)
 	c.JSON(http.StatusOK, gin.H{"message": "Artifacts scanned successfully", "artifactCount": len(wf.Artifacts)})
 }
 
@@ -2974,7 +2947,8 @@ func updateProjectRFEWorkflowArtifact(c *gin.Context) {
 	project := c.Param("projectName")
 	id := c.Param("id")
 	artifactPath := c.Param("path")
-	wf, err := loadProjectRFEWorkflow(project, id)
+	_, reqDyn := getK8sClientsForRequest(c)
+	wf, err := loadProjectRFEWorkflowFromCRWithClient(reqDyn, project, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 		return
@@ -2998,9 +2972,7 @@ func updateProjectRFEWorkflowArtifact(c *gin.Context) {
 		}
 	}
 	wf.UpdatedAt = now
-	if b, jerr := json.MarshalIndent(wf, "", "  "); jerr == nil {
-		_ = writeProjectContentFile(c, project, "/rfe-workflows/"+id+".json", b)
-	}
+	_ = upsertProjectRFEWorkflowCR(reqDyn, wf)
 	c.JSON(http.StatusOK, gin.H{"message": "Artifact updated successfully", "path": artifactPath, "size": len(content)})
 }
 
