@@ -16,7 +16,7 @@ RUN go mod download
 COPY . .
 
 # Build the application (with flags to avoid segfault)
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o operator .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o operator .
 
 # Final stage
 FROM alpine:latest
