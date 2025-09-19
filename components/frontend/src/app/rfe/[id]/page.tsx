@@ -85,7 +85,9 @@ export default function RFEWorkflowDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isStartingPhase, setIsStartingPhase] = useState(false);
+  const [isUpdatingDynamicData, setIsUpdatingDynamicData] = useState(false);
 
+  // Initial fetch for complete workflow data
   const fetchWorkflow = useCallback(async () => {
     try {
       setIsLoading(true);
@@ -111,12 +113,48 @@ export default function RFEWorkflowDetailPage() {
     }
   }, [workflowId]);
 
+  // Fetch only dynamic data that changes frequently
+  const fetchDynamicUpdates = useCallback(async () => {
+    if (!workflow) return;
+
+    try {
+      setIsUpdatingDynamicData(true);
+      const response = await fetch(`${getApiUrl()}/rfe-workflows/${workflowId}`);
+      if (!response.ok) return;
+
+      const data = await response.json();
+
+      // Only update if there are actual changes to prevent unnecessary re-renders
+      const hasSessionChanges = JSON.stringify(workflow.agentSessions) !== JSON.stringify(data.agentSessions);
+      const hasArtifactChanges = JSON.stringify(workflow.artifacts) !== JSON.stringify(data.artifacts);
+      const hasPhaseChange = workflow.currentPhase !== data.currentPhase;
+
+      if (hasSessionChanges || hasArtifactChanges || hasPhaseChange) {
+        setWorkflow(prevWorkflow => ({
+          ...prevWorkflow!,
+          agentSessions: data.agentSessions,
+          artifacts: data.artifacts,
+          currentPhase: data.currentPhase,
+        }));
+      }
+    } catch (err) {
+      console.error("Error fetching dynamic updates:", err);
+    } finally {
+      setIsUpdatingDynamicData(false);
+    }
+  }, [workflowId, workflow]);
+
   useEffect(() => {
     fetchWorkflow();
-    // Set up polling for real-time updates
-    const interval = setInterval(fetchWorkflow, 5000);
-    return () => clearInterval(interval);
   }, [workflowId, fetchWorkflow]);
+
+  // Set up polling for dynamic updates only after initial load
+  useEffect(() => {
+    if (!workflow) return;
+
+    const interval = setInterval(fetchDynamicUpdates, 3000); // More frequent updates for dynamic data
+    return () => clearInterval(interval);
+  }, [workflow, fetchDynamicUpdates]);
 
   const handleStartNextPhase = async () => {
     if (!workflow) return;
@@ -375,10 +413,17 @@ export default function RFEWorkflowDetailPage() {
         {/* Agent Sessions by Phase */}
         <Card>
           <CardHeader>
-            <CardTitle>Agent Sessions</CardTitle>
-            <CardDescription>
-              Track progress of individual agent executions across workflow phases
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle>Agent Sessions</CardTitle>
+                <CardDescription>
+                  Track progress of individual agent executions across workflow phases
+                </CardDescription>
+              </div>
+              {isUpdatingDynamicData && (
+                <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <Tabs defaultValue={workflow.currentPhase} className="w-full">
@@ -444,10 +489,15 @@ export default function RFEWorkflowDetailPage() {
         {(workflow.artifacts || []).length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Generated Artifacts
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Generated Artifacts
+                </CardTitle>
+                {isUpdatingDynamicData && (
+                  <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
