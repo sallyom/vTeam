@@ -4,12 +4,11 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
-export default function HomePage() {
+export default function HomeRedirect() {
   const router = useRouter();
-
   useEffect(() => {
     // Redirect to RFE workflows as the new main interface
-    router.replace("/rfe");
+    router.replace("/projects");
   }, [router]);
 
   return (

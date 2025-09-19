@@ -7,6 +7,10 @@
 
 set -e
 
+# Always run from the script's directory (manifests root)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -21,10 +25,13 @@ command_exists() {
 
 # Configuration
 NAMESPACE="${NAMESPACE:-ambient-code}"
-DEFAULT_BACKEND_IMAGE="${DEFAULT_BACKEND_IMAGE:-quay.io/ambient_code/vteam_backend:latest}"
-DEFAULT_FRONTEND_IMAGE="${DEFAULT_FRONTEND_IMAGE:-quay.io/ambient_code/vteam_frontend:latest}"
-DEFAULT_OPERATOR_IMAGE="${DEFAULT_OPERATOR_IMAGE:-quay.io/ambient_code/vteam_operator:latest}"
-DEFAULT_RUNNER_IMAGE="${DEFAULT_RUNNER_IMAGE:-quay.io/ambient_code/vteam_claude_runner:latest}"
+# Allow overriding images via CONTAINER_REGISTRY/IMAGE_TAG or explicit DEFAULT_*_IMAGE
+CONTAINER_REGISTRY="${CONTAINER_REGISTRY:-quay.io/ambient_code}"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+DEFAULT_BACKEND_IMAGE="${DEFAULT_BACKEND_IMAGE:-${CONTAINER_REGISTRY}/vteam_backend:${IMAGE_TAG}}"
+DEFAULT_FRONTEND_IMAGE="${DEFAULT_FRONTEND_IMAGE:-${CONTAINER_REGISTRY}/vteam_frontend:${IMAGE_TAG}}"
+DEFAULT_OPERATOR_IMAGE="${DEFAULT_OPERATOR_IMAGE:-${CONTAINER_REGISTRY}/vteam_operator:${IMAGE_TAG}}"
+DEFAULT_RUNNER_IMAGE="${DEFAULT_RUNNER_IMAGE:-${CONTAINER_REGISTRY}/vteam_claude_runner:${IMAGE_TAG}}"
 
 # Handle uninstall command early
 if [ "${1:-}" = "uninstall" ]; then
@@ -99,8 +106,8 @@ fi
 echo -e "${GREEN}✅ Authenticated as: $(oc whoami)${NC}"
 echo ""
 
-# Check environment file
-echo -e "${YELLOW}Checking environment configuration...${NC}"
+# Load required environment file
+echo -e "${YELLOW}Loading environment configuration (.env)...${NC}"
 ENV_FILE=".env"
 if [[ ! -f "$ENV_FILE" ]]; then
     echo -e "${RED}❌ .env file not found${NC}"
@@ -109,16 +116,34 @@ if [[ ! -f "$ENV_FILE" ]]; then
     echo "  # Edit .env and add your actual API key and Git configuration"
     exit 1
 fi
-
-# Source environment variables
+set -a
 source "$ENV_FILE"
+set +a
+echo ""
 
-if [[ -z "$ANTHROPIC_API_KEY" ]]; then
-    echo -e "${RED}❌ ANTHROPIC_API_KEY not set in .env file${NC}"
-    exit 1
+# Prepare oauth secret env file for kustomize secretGenerator
+echo -e "${YELLOW}Preparing oauth secret env for kustomize...${NC}"
+OAUTH_ENV_FILE="oauth-secret.env"
+CLIENT_SECRET_VALUE="${OCP_OAUTH_CLIENT_SECRET:-}"
+COOKIE_SECRET_VALUE="${OCP_OAUTH_COOKIE_SECRET:-}"
+if [[ -z "$CLIENT_SECRET_VALUE" ]]; then
+    CLIENT_SECRET_VALUE=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
 fi
-
-echo -e "${GREEN}✅ Environment configuration loaded${NC}"
+# cookie_secret must be exactly 16, 24, or 32 bytes. Use 32 ASCII bytes by default.
+if [[ -z "$COOKIE_SECRET_VALUE" ]]; then
+    COOKIE_SECRET_VALUE=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+fi
+# If provided via .env, ensure it meets required length
+COOKIE_LEN=${#COOKIE_SECRET_VALUE}
+if [[ $COOKIE_LEN -ne 16 && $COOKIE_LEN -ne 24 && $COOKIE_LEN -ne 32 ]]; then
+    echo -e "${YELLOW}Provided OCP_OAUTH_COOKIE_SECRET length ($COOKIE_LEN) is invalid; regenerating 32-byte value...${NC}"
+    COOKIE_SECRET_VALUE=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+fi
+cat > "$OAUTH_ENV_FILE" << EOF
+client-secret=${CLIENT_SECRET_VALUE}
+cookie_secret=${COOKIE_SECRET_VALUE}
+EOF
+echo -e "${GREEN}✅ Generated ${OAUTH_ENV_FILE}${NC}"
 echo ""
 
 # Update git-configmap with environment variables if they exist
@@ -187,13 +212,8 @@ echo -e "${GREEN}✅ Namespace ${NAMESPACE} is active${NC}"
 echo -e "${BLUE}Switching to namespace ${NAMESPACE}...${NC}"
 oc project ${NAMESPACE}
 
-# Create API key secret (kustomize creates empty secret, we populate it)
-echo -e "${BLUE}Creating API key secret...${NC}"
-oc patch secret ambient-code-secrets -n ${NAMESPACE} -p "{\"stringData\":{\"anthropic-api-key\":\"$ANTHROPIC_API_KEY\"}}" || {
-    echo -e "${YELLOW}Secret patch failed, ensuring secret exists and retrying...${NC}"
-    sleep 1
-    oc patch secret ambient-code-secrets -n ${NAMESPACE} -p "{\"stringData\":{\"anthropic-api-key\":\"$ANTHROPIC_API_KEY\"}}"
-}
+# Secrets are now managed through the UI. Skip creating or patching any secrets here.
+echo -e "${BLUE}Skipping secret management (handled via UI).${NC}"
 
 # Apply git configuration if we created a patch
 if [[ -f "/tmp/git-config-patch.yaml" ]]; then
@@ -216,8 +236,8 @@ oc rollout status deployment/backend-api --namespace=${NAMESPACE} --timeout=300s
 oc rollout status deployment/agentic-operator --namespace=${NAMESPACE} --timeout=300s
 oc rollout status deployment/frontend --namespace=${NAMESPACE} --timeout=300s
 
-# Get service information
-echo -e "${BLUE}Getting service information...${NC}"
+# Get service and route information
+echo -e "${BLUE}Getting service and route information...${NC}"
 echo ""
 echo -e "${GREEN}🎉 Deployment successful!${NC}"
 echo -e "${GREEN}========================${NC}"
@@ -229,19 +249,33 @@ echo -e "${BLUE}Pod Status:${NC}"
 oc get pods -n ${NAMESPACE}
 echo ""
 
-# Show services
+# Show services and route
 echo -e "${BLUE}Services:${NC}"
 oc get services -n ${NAMESPACE}
 echo ""
+echo -e "${BLUE}Routes:${NC}"
+oc get route -n ${NAMESPACE} || true
+ROUTE_HOST=$(oc get route frontend-route -n ${NAMESPACE} -o jsonpath='{.spec.host}' 2>/dev/null || true)
+echo ""
+
+# Cleanup generated files
+echo -e "${BLUE}Cleaning up generated files...${NC}"
+rm -f "$OAUTH_ENV_FILE"
 
 echo -e "${YELLOW}Next steps:${NC}"
-echo -e "1. Access the RFE workflow frontend:"
-echo -e "   ${BLUE}oc port-forward svc/frontend-service 3000:3000 -n ${NAMESPACE}${NC}"
-echo -e "   Then open: http://localhost:3000"
-echo -e "   Create new RFE workflows at: http://localhost:3000/rfe/new"
-echo -e "2. Monitor the deployment:"
+if [[ -n "${ROUTE_HOST}" ]]; then
+    echo -e "1. Access the frontend via Route:"
+    echo -e "   ${BLUE}https://${ROUTE_HOST}${NC}"
+else
+    echo -e "1. Access the frontend (fallback via port-forward):"
+    echo -e "   ${BLUE}oc port-forward svc/frontend-service 3000:3000 -n ${NAMESPACE}${NC}"
+    echo -e "   Then open: http://localhost:3000"
+fi
+echo -e "2. Configure secrets in the UI (Runner/API keys, project settings)."
+echo -e "   Open the app and follow Settings → Runner Secrets."
+echo -e "3. Monitor the deployment:"
 echo -e "   ${BLUE}oc get pods -n ${NAMESPACE} -w${NC}"
-echo -e "3. View logs:"
+echo -e "4. View logs:"
 echo -e "   ${BLUE}oc logs -f deployment/backend-api -n ${NAMESPACE}${NC}"
 echo -e "   ${BLUE}oc logs -f deployment/agentic-operator -n ${NAMESPACE}${NC}"
 echo -e "4. Monitor RFE workflows:"
