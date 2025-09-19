@@ -42,49 +42,6 @@ spec:
                 type: string
           status:
             type: object
-            properties:
-              status:
-                type: string
-              currentPhase:
-                type: string
-              agentSessions:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    id:
-                      type: string
-                    agentPersona:
-                      type: string
-                    phase:
-                      type: string
-                    state:
-                      type: string
-                    startedAt:
-                      type: string
-                    completedAt:
-                      type: string
-              artifacts:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    path:
-                      type: string
-                    name:
-                      type: string
-                    type:
-                      type: string
-                    phase:
-                      type: string
-                    createdBy:
-                      type: string
-                    size:
-                      type: integer
-                    modifiedAt:
-                      type: string
-              phaseResults:
-                type: object
     subresources:
       status: {}
 

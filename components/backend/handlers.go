@@ -297,7 +297,6 @@ func parseSpec(spec map[string]interface{}) AgenticSessionSpec {
 		result.Prompt = prompt
 	}
 
-
 	if displayName, ok := spec["displayName"].(string); ok {
 		result.DisplayName = displayName
 	}
@@ -1622,6 +1621,10 @@ func writeProjectContentFile(c *gin.Context, project string, absPath string, dat
 // using the caller's Authorization token. The path must be absolute (starts with "/").
 func readProjectContentFile(c *gin.Context, project string, absPath string) ([]byte, error) {
 	token := c.GetHeader("Authorization")
+	if strings.TrimSpace(token) == "" {
+		// Fallback to X-Forwarded-Access-Token if present
+		token = c.GetHeader("X-Forwarded-Access-Token")
+	}
 	if !strings.HasPrefix(absPath, "/") {
 		absPath = "/" + absPath
 	}
@@ -1630,7 +1633,9 @@ func readProjectContentFile(c *gin.Context, project string, absPath string) ([]b
 		base = "http://ambient-content.%s.svc:8080"
 	}
 	endpoint := fmt.Sprintf(base, project)
-	u := fmt.Sprintf("%s/content/file?path=%s", endpoint, url.QueryEscape(absPath))
+	// Normalize any accidental double slashes in path parameter
+	cleanedPath := "/" + strings.TrimLeft(absPath, "/")
+	u := fmt.Sprintf("%s/content/file?path=%s", endpoint, url.QueryEscape(cleanedPath))
 	httpReq, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, u, nil)
 	if strings.TrimSpace(token) != "" {
 		httpReq.Header.Set("Authorization", token)
@@ -2632,6 +2637,10 @@ func rfeFromUnstructured(item *unstructured.Unstructured) *RFEWorkflow {
 	spec, _ := obj["spec"].(map[string]interface{})
 	status, _ := obj["status"].(map[string]interface{})
 
+	created := ""
+	if item.GetCreationTimestamp().Time != (time.Time{}) {
+		created = item.GetCreationTimestamp().Time.UTC().Format(time.RFC3339)
+	}
 	wf := &RFEWorkflow{
 		ID:               item.GetName(),
 		Title:            fmt.Sprintf("%v", spec["title"]),
@@ -2641,7 +2650,7 @@ func rfeFromUnstructured(item *unstructured.Unstructured) *RFEWorkflow {
 		TargetRepoUrl:    fmt.Sprintf("%v", spec["targetRepoUrl"]),
 		TargetRepoBranch: fmt.Sprintf("%v", spec["targetRepoBranch"]),
 		Project:          fmt.Sprintf("%v", spec["project"]),
-		CreatedAt:        "",
+		CreatedAt:        created,
 		UpdatedAt:        time.Now().UTC().Format(time.RFC3339),
 		AgentSessions:    []RFEAgentSession{},
 		Artifacts:        []RFEArtifact{},
@@ -2717,7 +2726,21 @@ func listProjectRFEWorkflows(c *gin.Context) {
 	if workflows == nil {
 		workflows = []RFEWorkflow{}
 	}
-	c.JSON(http.StatusOK, gin.H{"workflows": workflows})
+	// Return slim summaries: omit artifacts/agentSessions/phaseResults/status/currentPhase
+	summaries := make([]map[string]interface{}, 0, len(workflows))
+	for _, w := range workflows {
+		summaries = append(summaries, map[string]interface{}{
+			"id":               w.ID,
+			"title":            w.Title,
+			"description":      w.Description,
+			"project":          w.Project,
+			"targetRepoUrl":    w.TargetRepoUrl,
+			"targetRepoBranch": w.TargetRepoBranch,
+			"createdAt":        w.CreatedAt,
+			"updatedAt":        w.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"workflows": summaries})
 }
 
 func createProjectRFEWorkflow(c *gin.Context) {
@@ -2776,7 +2799,17 @@ func getProjectRFEWorkflow(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 		return
 	}
-	c.JSON(http.StatusOK, wf)
+	// Return slim object without artifacts/agentSessions/phaseResults/status/currentPhase
+	c.JSON(http.StatusOK, gin.H{
+		"id":               wf.ID,
+		"title":            wf.Title,
+		"description":      wf.Description,
+		"project":          wf.Project,
+		"targetRepoUrl":    wf.TargetRepoUrl,
+		"targetRepoBranch": wf.TargetRepoBranch,
+		"createdAt":        wf.CreatedAt,
+		"updatedAt":        wf.UpdatedAt,
+	})
 }
 
 func deleteProjectRFEWorkflow(c *gin.Context) {

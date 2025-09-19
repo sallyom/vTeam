@@ -632,12 +632,25 @@ func loadProjectRFEWorkflowFromCRWithClient(dyn dynamic.Interface, project, id s
 	spec, _ := obj["spec"].(map[string]interface{})
 	status, _ := obj["status"].(map[string]interface{})
 
+	// Safe getters to avoid "<nil>" string values
+	getStr := func(m map[string]interface{}, key string) string {
+		if m == nil {
+			return ""
+		}
+		if v, ok := m[key]; ok {
+			if s, ok2 := v.(string); ok2 {
+				return s
+			}
+		}
+		return ""
+	}
+
 	wf := &RFEWorkflow{
 		ID:               id,
-		Title:            fmt.Sprintf("%v", spec["title"]),
-		Description:      fmt.Sprintf("%v", spec["description"]),
-		Status:           fmt.Sprintf("%v", status["status"]),
-		CurrentPhase:     fmt.Sprintf("%v", status["currentPhase"]),
+		Title:            getStr(spec, "title"),
+		Description:      getStr(spec, "description"),
+		Status:           getStr(status, "status"),
+		CurrentPhase:     getStr(status, "currentPhase"),
 		TargetRepoUrl:    fmt.Sprintf("%v", spec["targetRepoUrl"]),
 		TargetRepoBranch: fmt.Sprintf("%v", spec["targetRepoBranch"]),
 		Project:          fmt.Sprintf("%v", spec["project"]),

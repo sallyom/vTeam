@@ -116,15 +116,15 @@ export type RFEWorkflow = {
 	id: string;
 	title: string;
 	description: string;
-	currentPhase: WorkflowPhase;
-	status: "active" | "completed" | "failed" | "paused";
+  currentPhase?: WorkflowPhase; // derived in UI
+  status?: "active" | "completed" | "failed" | "paused"; // derived in UI
 	targetRepoUrl: string;
 	targetRepoBranch: string;
-	agentSessions: RFESession[]; // Backend uses 'agentSessions' not 'sessions'
-	artifacts: ArtifactFile[];
+  agentSessions?: RFESession[];
+  artifacts?: ArtifactFile[];
 	createdAt: string;
 	updatedAt: string;
-	phaseResults: { [phase: string]: PhaseResult }; // Backend uses 'phaseResults'
+  phaseResults?: { [phase: string]: PhaseResult };
 };
 
 export type CreateRFEWorkflowRequest = {
