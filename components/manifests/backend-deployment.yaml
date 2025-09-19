@@ -31,9 +31,13 @@ spec:
           value: "8080"
         - name: STATE_BASE_DIR
           value: "/data/state"
+        - name: PVC_BASE_DIR
+          value: "/workspace"
         volumeMounts:
         - name: state-storage
           mountPath: /data/state
+        - name: workspace-storage
+          mountPath: /workspace
         - name: temp-storage
           mountPath: /tmp
         resources:
@@ -59,6 +63,9 @@ spec:
       - name: state-storage
         persistentVolumeClaim:
           claimName: vteam-state-storage
+      - name: workspace-storage
+        persistentVolumeClaim:
+          claimName: vteam-workspace-pvc
       - name: temp-storage
         emptyDir: {}
 ---

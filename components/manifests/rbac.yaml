@@ -15,6 +15,13 @@ rules:
 - apiGroups: ["vteam.ambient-code"]
   resources: ["agenticsessions/status"]
   verbs: ["get", "update", "patch"]
+# AgenticSession custom resources (ambient.dev API group)
+- apiGroups: ["ambient.dev"]
+  resources: ["agenticsessions"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["ambient.dev"]
+  resources: ["agenticsessions/status"]
+  verbs: ["get", "update", "patch"]
 # Jobs
 - apiGroups: ["batch"]
   resources: ["jobs"]
@@ -60,6 +67,13 @@ rules:
 - apiGroups: ["vteam.ambient-code"]
   resources: ["agenticsessions/status"]
   verbs: ["get", "update", "patch"]
+# AgenticSession custom resources (ambient.dev API group)
+- apiGroups: ["ambient.dev"]
+  resources: ["agenticsessions"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["ambient.dev"]
+  resources: ["agenticsessions/status"]
+  verbs: ["get", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -81,6 +95,9 @@ rules:
 - apiGroups: ["vteam.ambient-code"]
   resources: ["agenticsessions"]
   verbs: ["list", "get", "watch"]
+- apiGroups: ["ambient.dev"]
+  resources: ["agenticsessions"]
+  verbs: ["list", "get", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -100,6 +117,9 @@ metadata:
   name: agentic-sessions-watcher
 rules:
 - apiGroups: ["vteam.ambient-code"]
+  resources: ["agenticsessions"]
+  verbs: ["watch", "get", "list"]
+- apiGroups: ["ambient.dev"]
   resources: ["agenticsessions"]
   verbs: ["watch", "get", "list"]
 ---

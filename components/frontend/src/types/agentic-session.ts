@@ -73,4 +73,91 @@ export type CreateAgenticSessionRequest = {
 	llmSettings?: Partial<LLMSettings>;
 	timeout?: number;
 	gitConfig?: GitConfig;
+	// New fields for agent sessions
+	agentPersona?: string;
+	workflowPhase?: string;
+	parentRFE?: string;
+	sharedWorkspace?: string;
+};
+
+// New types for RFE workflows
+export type WorkflowPhase = "specify" | "plan" | "tasks" | "review" | "completed";
+
+export type AgentPersona = {
+	persona: string;
+	name: string;
+	role: string;
+	expertise: string[];
+	description?: string;
+};
+
+export type ArtifactFile = {
+	path: string;
+	name: string;
+	content: string;
+	lastModified: string;
+	size: number;
+	agent?: string;
+	phase?: string;
+};
+
+export type RFESession = {
+	id: string;
+	agentPersona: string; // Agent persona key (e.g., "ENGINEERING_MANAGER")
+	phase: WorkflowPhase;
+	status: string; // "pending", "running", "completed", "failed"
+	startedAt?: string;
+	completedAt?: string;
+	result?: string;
+	cost?: number;
+};
+
+export type RFEWorkflow = {
+	id: string;
+	title: string;
+	description: string;
+	currentPhase: WorkflowPhase;
+	status: "active" | "completed" | "failed" | "paused";
+	targetRepoUrl: string;
+	targetRepoBranch: string;
+	selectedAgents: string[]; // Backend sends array of persona strings
+	agentSessions: RFESession[]; // Backend uses 'agentSessions' not 'sessions'
+	artifacts: ArtifactFile[];
+	createdAt: string;
+	updatedAt: string;
+	phaseResults: { [phase: string]: PhaseResult }; // Backend uses 'phaseResults'
+};
+
+export type CreateRFEWorkflowRequest = {
+	title: string;
+	description: string;
+	targetRepoUrl: string;
+	targetRepoBranch: string;
+	selectedAgents: string[]; // Agent persona keys
+	gitUserName?: string;
+	gitUserEmail?: string;
+};
+
+export type PhaseResult = {
+	phase: string;
+	status: string; // "completed", "in_progress", "failed"
+	agents: string[]; // agents that worked on this phase
+	artifacts: string[]; // artifact paths created in this phase
+	summary: string;
+	startedAt: string;
+	completedAt?: string;
+	metadata?: { [key: string]: unknown };
+};
+
+export type RFEWorkflowStatus = {
+	phase: WorkflowPhase;
+	agentProgress: {
+		[agentPersona: string]: {
+			status: AgenticSessionPhase;
+			sessionName?: string;
+			completedAt?: string;
+		};
+	};
+	artifactCount: number;
+	lastActivity: string;
 };

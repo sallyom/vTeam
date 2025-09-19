@@ -16,14 +16,13 @@ spec:
             type: object
             required:
             - prompt
-            - websiteURL
             properties:
               prompt:
                 type: string
                 description: "The initial prompt for the agentic session"
               websiteURL:
                 type: string
-                description: "The website URL to analyze"
+                description: "The website URL to analyze (optional for non-web agentic sessions)"
               displayName:
                 type: string
                 description: "A descriptive display name for the agentic session generated from prompt and website"
@@ -84,6 +83,11 @@ spec:
                         clonePath:
                           type: string
                           description: "Relative path where to clone the repository"
+              environmentVariables:
+                type: object
+                description: "Additional environment variables for the agentic session container"
+                additionalProperties:
+                  type: string
           status:
             type: object
             properties:
