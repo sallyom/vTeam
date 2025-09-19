@@ -330,7 +330,7 @@ export default function ArtifactEditPage() {
               <div className="p-4 border-b">
                 <h3 className="font-medium">Artifacts</h3>
                 <p className="text-sm text-muted-foreground">
-                  {workflow.artifacts.length} files
+                  {(workflow.artifacts || []).length} files
                 </p>
               </div>
 
@@ -344,7 +344,7 @@ export default function ArtifactEditPage() {
                   />
                 ))}
 
-                {workflow.artifacts.length === 0 && (
+                {(workflow.artifacts || []).length === 0 && (
                   <div className="text-center py-8 text-muted-foreground">
                     <FileText className="mx-auto h-8 w-8 mb-2" />
                     <p className="text-sm">No artifacts generated yet</p>

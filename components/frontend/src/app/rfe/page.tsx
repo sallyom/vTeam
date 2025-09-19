@@ -357,7 +357,7 @@ function RFEWorkflowCard({ workflow, onDelete, onPause, onResume }: RFEWorkflowC
         <div className="flex items-center gap-2">
           <Users className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">
-            {completedSessions}/{workflow.agentSessions.length} agent sessions completed
+            {completedSessions}/{(workflow.agentSessions || []).length} agent sessions completed
           </span>
         </div>
 
@@ -373,13 +373,16 @@ function RFEWorkflowCard({ workflow, onDelete, onPause, onResume }: RFEWorkflowC
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">
-            {workflow.artifacts.length} artifacts generated
+            {(workflow.artifacts || []).length} artifacts generated
           </span>
         </div>
 
         {/* Last Activity */}
         <div className="text-xs text-muted-foreground">
-          Updated {formatDistanceToNow(new Date(workflow.updatedAt), { addSuffix: true })}
+          Updated {workflow.updatedAt && !isNaN(new Date(workflow.updatedAt).getTime())
+            ? formatDistanceToNow(new Date(workflow.updatedAt), { addSuffix: true })
+            : 'recently'
+          }
         </div>
       </CardContent>
     </Card>

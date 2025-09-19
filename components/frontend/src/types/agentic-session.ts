@@ -102,15 +102,14 @@ export type ArtifactFile = {
 };
 
 export type RFESession = {
-	sessionName: string;
-	agent: AgentPersona;
+	id: string;
+	agentPersona: string; // Agent persona key (e.g., "ENGINEERING_MANAGER")
 	phase: WorkflowPhase;
-	status: AgenticSessionPhase;
-	startTime?: string;
-	completionTime?: string;
-	finalOutput?: string;
+	status: string; // "pending", "running", "completed", "failed"
+	startedAt?: string;
+	completedAt?: string;
+	result?: string;
 	cost?: number;
-	artifactFile?: string;
 };
 
 export type RFEWorkflow = {

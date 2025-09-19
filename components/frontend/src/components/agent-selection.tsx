@@ -270,7 +270,7 @@ function AgentCard({ agent, selected, onToggle, disabled }: AgentCardProps) {
           </div>
           <Checkbox
             checked={selected}
-            onChange={onToggle}
+            onCheckedChange={onToggle}
             disabled={disabled}
             className="mt-1"
           />

@@ -168,9 +168,21 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 
 	log.Printf("Processing AgenticSession %s with phase %s", name, phase)
 
-	// Only process if status is Pending
-	if phase != "Pending" {
+	// Only process if status is Pending or not set (newly created resources)
+	if phase != "Pending" && phase != "" {
 		return nil
+	}
+
+	// If phase is empty (new resource), initialize it to Pending
+	if phase == "" {
+		if err := updateAgenticSessionStatus(name, map[string]interface{}{
+			"phase": "Pending",
+		}); err != nil {
+			log.Printf("Failed to initialize AgenticSession status to Pending: %v", err)
+			return err
+		}
+		phase = "Pending"
+		log.Printf("Initialized AgenticSession %s status to Pending", name)
 	}
 
 	// Create a Kubernetes Job for this AgenticSession
@@ -188,6 +200,8 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	prompt, _, _ := unstructured.NestedString(spec, "prompt")
 	websiteURL, _, _ := unstructured.NestedString(spec, "websiteURL")
 	timeout, _, _ := unstructured.NestedInt64(spec, "timeout")
+
+	// For RFE workflows, websiteURL may be empty - this is expected and valid
 
 	llmSettings, _, _ := unstructured.NestedMap(spec, "llmSettings")
 	model, _, _ := unstructured.NestedString(llmSettings, "model")
@@ -210,6 +224,19 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		if len(gitRepositories) > 0 {
 			if reposBytes, err := json.Marshal(gitRepositories); err == nil {
 				gitRepositoriesJSON = string(reposBytes)
+			}
+		}
+	}
+
+	// Extract additional environment variables (for RFE workflows and other custom configurations)
+	additionalEnvVars := make(map[string]string)
+	if envVars, envVarsExist, _ := unstructured.NestedMap(spec, "environmentVariables"); envVarsExist {
+		for key, value := range envVars {
+			if strValue, ok := value.(string); ok {
+				additionalEnvVars[key] = strValue
+			} else {
+				// Convert other types to string
+				additionalEnvVars[key] = fmt.Sprintf("%v", value)
 			}
 		}
 	}
@@ -248,23 +275,40 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 					// Annotations: map[string]string{"sidecar.istio.io/inject": "false"},
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					RestartPolicy:      corev1.RestartPolicyNever,
+					ServiceAccountName: "claude-runner",
 
 					// ⚠️ Let OpenShift SCC choose UID/GID dynamically (restricted-v2 compatible)
 					// SecurityContext omitted to allow SCC assignment
 
-					// 🔧 Shared memory volume for browser
-					Volumes: []corev1.Volume{
-						{
-							Name: "dshm",
-							VolumeSource: corev1.VolumeSource{
-								EmptyDir: &corev1.EmptyDirVolumeSource{
-									Medium:    corev1.StorageMediumMemory,
-									SizeLimit: resource.NewQuantity(256*1024*1024, resource.BinarySI),
+					// 🔧 Shared memory volume for browser and workspace storage for RFE workflows
+					Volumes: func() []corev1.Volume {
+						volumes := []corev1.Volume{
+							{
+								Name: "dshm",
+								VolumeSource: corev1.VolumeSource{
+									EmptyDir: &corev1.EmptyDirVolumeSource{
+										Medium:    corev1.StorageMediumMemory,
+										SizeLimit: resource.NewQuantity(256*1024*1024, resource.BinarySI),
+									},
 								},
 							},
-						},
-					},
+						}
+
+						// Add workspace PVC for RFE workflows if SHARED_WORKSPACE env var is set
+						if _, hasSharedWorkspace := additionalEnvVars["SHARED_WORKSPACE"]; hasSharedWorkspace {
+							volumes = append(volumes, corev1.Volume{
+								Name: "workspace",
+								VolumeSource: corev1.VolumeSource{
+									PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+										ClaimName: "vteam-workspace-pvc",
+									},
+								},
+							})
+						}
+
+						return volumes
+					}(),
 
 					Containers: []corev1.Container{
 						{
@@ -280,54 +324,79 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 								},
 							},
 
-							// 📦 Mount shared memory volume only
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "dshm", MountPath: "/dev/shm"},
-							},
+							// 📦 Mount shared memory volume and workspace for RFE workflows
+							VolumeMounts: func() []corev1.VolumeMount {
+								mounts := []corev1.VolumeMount{
+									{Name: "dshm", MountPath: "/dev/shm"},
+								}
 
-							Env: []corev1.EnvVar{
-								{Name: "AGENTIC_SESSION_NAME", Value: name},
-								{Name: "AGENTIC_SESSION_NAMESPACE", Value: namespace},
-								{Name: "PROMPT", Value: prompt},
-								{Name: "WEBSITE_URL", Value: websiteURL},
-								{Name: "LLM_MODEL", Value: model},
-								{Name: "LLM_TEMPERATURE", Value: fmt.Sprintf("%.2f", temperature)},
-								{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokens)},
-								{Name: "TIMEOUT", Value: fmt.Sprintf("%d", timeout)},
-								{Name: "BACKEND_API_URL", Value: os.Getenv("BACKEND_API_URL")},
+								// Add workspace mount for RFE workflows if SHARED_WORKSPACE env var is set
+								if _, hasSharedWorkspace := additionalEnvVars["SHARED_WORKSPACE"]; hasSharedWorkspace {
+									mounts = append(mounts, corev1.VolumeMount{
+										Name:      "workspace",
+										MountPath: "/workspace",
+									})
+								}
 
-								// 🔑 Anthropic key from Secret
-								{
-									Name: "ANTHROPIC_API_KEY",
-									ValueFrom: &corev1.EnvVarSource{
-										SecretKeyRef: &corev1.SecretKeySelector{
-											LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-code-secrets"},
-											Key:                  "anthropic-api-key",
+								return mounts
+							}(),
+
+							Env: func() []corev1.EnvVar {
+								// Base environment variables
+								baseEnvVars := []corev1.EnvVar{
+									{Name: "AGENTIC_SESSION_NAME", Value: name},
+									{Name: "AGENTIC_SESSION_NAMESPACE", Value: namespace},
+									{Name: "PROMPT", Value: prompt},
+									{Name: "WEBSITE_URL", Value: websiteURL},
+									{Name: "LLM_MODEL", Value: model},
+									{Name: "LLM_TEMPERATURE", Value: fmt.Sprintf("%.2f", temperature)},
+									{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokens)},
+									{Name: "TIMEOUT", Value: fmt.Sprintf("%d", timeout)},
+									{Name: "BACKEND_API_URL", Value: os.Getenv("BACKEND_API_URL")},
+
+									// 🔑 Anthropic key from Secret
+									{
+										Name: "ANTHROPIC_API_KEY",
+										ValueFrom: &corev1.EnvVarSource{
+											SecretKeyRef: &corev1.SecretKeySelector{
+												LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-code-secrets"},
+												Key:                  "anthropic-api-key",
+											},
 										},
 									},
-								},
 
-								// 🔧 Git configuration environment variables
-								{Name: "GIT_USER_NAME", Value: gitUserName},
-								{Name: "GIT_USER_EMAIL", Value: gitUserEmail},
-								{Name: "GIT_REPOSITORIES", Value: gitRepositoriesJSON},
+									// 🔧 Git configuration environment variables
+									{Name: "GIT_USER_NAME", Value: gitUserName},
+									{Name: "GIT_USER_EMAIL", Value: gitUserEmail},
+									{Name: "GIT_REPOSITORIES", Value: gitRepositoriesJSON},
 
-								// ✅ Use /tmp for SCC-assigned random UID (OpenShift compatible)
-								{Name: "HOME", Value: "/tmp"},
-								{Name: "XDG_CONFIG_HOME", Value: "/tmp/.config"},
-								{Name: "XDG_CACHE_HOME", Value: "/tmp/.cache"},
-								{Name: "XDG_DATA_HOME", Value: "/tmp/.local/share"},
+									// ✅ Use /tmp for SCC-assigned random UID (OpenShift compatible)
+									{Name: "HOME", Value: "/tmp"},
+									{Name: "XDG_CONFIG_HOME", Value: "/tmp/.config"},
+									{Name: "XDG_CACHE_HOME", Value: "/tmp/.cache"},
+									{Name: "XDG_DATA_HOME", Value: "/tmp/.local/share"},
 
-								// 🧊 Playwright/Chromium optimized for containers with shared memory
-								{Name: "PW_CHROMIUM_ARGS", Value: "--no-sandbox --disable-gpu"},
+									// 🧊 Playwright/Chromium optimized for containers with shared memory
+									{Name: "PW_CHROMIUM_ARGS", Value: "--no-sandbox --disable-gpu"},
 
-								// 📁 Playwright browser cache in writable location
-								{Name: "PLAYWRIGHT_BROWSERS_PATH", Value: "/tmp/.cache/ms-playwright"},
+									// 📁 Playwright browser cache in writable location
+									{Name: "PLAYWRIGHT_BROWSERS_PATH", Value: "/tmp/.cache/ms-playwright"},
 
-								// (Optional) proxy envs if your cluster requires them:
-								// { Name: "HTTPS_PROXY", Value: "http://proxy.corp:3128" },
-								// { Name: "NO_PROXY",    Value: ".svc,.cluster.local,10.0.0.0/8" },
-							},
+									// (Optional) proxy envs if your cluster requires them:
+									// { Name: "HTTPS_PROXY", Value: "http://proxy.corp:3128" },
+									// { Name: "NO_PROXY",    Value: ".svc,.cluster.local,10.0.0.0/8" },
+								}
+
+								// Add additional environment variables from spec (for RFE workflows and custom configurations)
+								for key, value := range additionalEnvVars {
+									baseEnvVars = append(baseEnvVars, corev1.EnvVar{
+										Name:  key,
+										Value: value,
+									})
+								}
+
+								return baseEnvVars
+							}(),
 
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{

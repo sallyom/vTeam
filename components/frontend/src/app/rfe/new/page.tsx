@@ -40,7 +40,10 @@ const formSchema = z.object({
   selectedAgents: z.array(z.string()).min(1, "At least one agent must be selected"),
   // Git configuration fields
   gitUserName: z.string().optional(),
-  gitUserEmail: z.string().email().optional().or(z.literal("")),
+  gitUserEmail: z.union([
+    z.literal(""),
+    z.string().email("Please enter a valid email")
+  ]).optional(),
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -90,6 +93,14 @@ export default function NewRFEWorkflowPage() {
   }, [form]);
 
   const onSubmit = async (values: FormValues) => {
+    console.log("Form submission started with values:", values);
+
+    // Validate that we have selected agents
+    if (!values.selectedAgents || values.selectedAgents.length === 0) {
+      setError("Please select at least one agent");
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
@@ -117,12 +128,12 @@ export default function NewRFEWorkflowPage() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || `Failed to create RFE workflow: ${response.status}`
-        );
+        const errorMessage = errorData.error || errorData.message || `HTTP ${response.status}: ${response.statusText}`;
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
+      console.log("RFE workflow created successfully:", result);
 
       // Redirect to the RFE workflow detail page
       router.push(`/rfe/${result.id}`);
@@ -158,7 +169,13 @@ export default function NewRFEWorkflowPage() {
         </div>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              form.handleSubmit(onSubmit)(e);
+            }}
+            className="space-y-8"
+          >
             {/* Basic Information */}
             <Card>
               <CardHeader>
@@ -277,11 +294,11 @@ export default function NewRFEWorkflowPage() {
                 <FormField
                   control={form.control}
                   name="selectedAgents"
-                  render={({ fieldState }) => (
+                  render={({ field, fieldState }) => (
                     <FormItem>
                       <FormControl>
                         <AgentSelection
-                          selectedAgents={Array.isArray(form.getValues("selectedAgents")) ? form.getValues("selectedAgents") : []}
+                          selectedAgents={Array.isArray(field.value) ? field.value : []}
                           onSelectionChange={handleAgentSelectionChange}
                           maxAgents={8}
                           disabled={isSubmitting}

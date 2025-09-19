@@ -37,31 +37,31 @@ import { getApiUrl } from "@/lib/config";
 import { WORKFLOW_PHASE_LABELS, WORKFLOW_PHASE_DESCRIPTIONS, getAgentByPersona } from "@/lib/agents";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-const getSessionStatusIcon = (status: AgenticSessionPhase) => {
-  switch (status) {
-    case "Completed":
+const getSessionStatusIcon = (status: string) => {
+  switch (status.toLowerCase()) {
+    case "completed":
       return <CheckCircle className="h-4 w-4 text-green-600" />;
-    case "Failed":
-    case "Error":
+    case "failed":
+    case "error":
       return <XCircle className="h-4 w-4 text-red-600" />;
-    case "Running":
+    case "running":
       return <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />;
     default:
       return <Clock className="h-4 w-4 text-gray-400" />;
   }
 };
 
-const getSessionStatusColor = (status: AgenticSessionPhase) => {
-  switch (status) {
-    case "Completed":
+const getSessionStatusColor = (status: string) => {
+  switch (status.toLowerCase()) {
+    case "completed":
       return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300";
-    case "Failed":
-    case "Error":
+    case "failed":
+    case "error":
       return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300";
-    case "Running":
+    case "running":
       return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300";
-    case "Pending":
-    case "Creating":
+    case "pending":
+    case "creating":
       return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300";
     default:
       return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300";
@@ -73,7 +73,7 @@ function calculatePhaseProgress(workflow: RFEWorkflow, phase: WorkflowPhase): nu
   const phaseSessions = safeSessions.filter(s => s.phase === phase);
   if (phaseSessions.length === 0) return 0;
 
-  const completedSessions = phaseSessions.filter(s => s.status === "Completed").length;
+  const completedSessions = phaseSessions.filter(s => s.status.toLowerCase() === "completed").length;
   return (completedSessions / phaseSessions.length) * 100;
 }
 
@@ -236,7 +236,7 @@ export default function RFEWorkflowDetailPage() {
                 Edit Artifacts
               </Button>
             </Link>
-            {workflow.artifacts.length > 0 && (
+            {(workflow.artifacts || []).length > 0 && (
               <Button onClick={handlePushToGit} variant="outline" size="sm">
                 <Upload className="mr-2 h-4 w-4" />
                 Push to Git
@@ -271,7 +271,7 @@ export default function RFEWorkflowDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {(workflow.agentSessions || []).filter(s => s.status === "Completed").length}/{(workflow.agentSessions || []).length}
+                {(workflow.agentSessions || []).filter(s => s.status.toLowerCase() === "completed").length}/{(workflow.agentSessions || []).length}
               </div>
               <p className="text-xs text-muted-foreground">
                 Sessions completed across all phases
@@ -285,7 +285,7 @@ export default function RFEWorkflowDetailPage() {
               <FileText className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{workflow.artifacts.length}</div>
+              <div className="text-2xl font-bold">{(workflow.artifacts || []).length}</div>
               <p className="text-xs text-muted-foreground">
                 Generated specifications and plans
               </p>
@@ -396,14 +396,14 @@ export default function RFEWorkflowDetailPage() {
                     {(workflow.agentSessions || [])
                       .filter(session => session.phase === phase)
                       .map(session => {
-                        const agent = getAgentByPersona(session.agent.persona);
+                        const agent = getAgentByPersona(session.agentPersona);
                         return (
-                          <div key={`${session.agent.persona}-${phase}`} className="flex items-center justify-between p-4 border rounded-lg">
+                          <div key={`${session.agentPersona}-${phase}`} className="flex items-center justify-between p-4 border rounded-lg">
                             <div className="flex items-center gap-3">
                               {getSessionStatusIcon(session.status)}
                               <div>
-                                <p className="font-medium">{agent?.name || session.agent.name}</p>
-                                <p className="text-sm text-muted-foreground">{agent?.role || session.agent.role}</p>
+                                <p className="font-medium">{agent?.name || session.agentPersona}</p>
+                                <p className="text-sm text-muted-foreground">{agent?.role || 'Agent'}</p>
                               </div>
                             </div>
 
@@ -412,9 +412,9 @@ export default function RFEWorkflowDetailPage() {
                                 {session.status}
                               </Badge>
 
-                              {session.completionTime && (
+                              {session.completedAt && !isNaN(new Date(session.completedAt).getTime()) && (
                                 <span className="text-xs text-muted-foreground">
-                                  {formatDistanceToNow(new Date(session.completionTime), { addSuffix: true })}
+                                  {formatDistanceToNow(new Date(session.completedAt), { addSuffix: true })}
                                 </span>
                               )}
 
@@ -441,7 +441,7 @@ export default function RFEWorkflowDetailPage() {
         </Card>
 
         {/* Generated Artifacts */}
-        {workflow.artifacts.length > 0 && (
+        {(workflow.artifacts || []).length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -460,7 +460,10 @@ export default function RFEWorkflowDetailPage() {
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {(artifact.size / 1024).toFixed(1)} KB • {formatDistanceToNow(new Date(artifact.lastModified), { addSuffix: true })}
+                      {(artifact.size / 1024).toFixed(1)} KB • {artifact.lastModified && !isNaN(new Date(artifact.lastModified).getTime())
+                        ? formatDistanceToNow(new Date(artifact.lastModified), { addSuffix: true })
+                        : 'recently'
+                      }
                     </p>
                   </div>
                 ))}

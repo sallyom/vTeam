@@ -1101,6 +1101,82 @@ func deleteRFEWorkflowFile(id string) error {
 	return nil
 }
 
+// Sync agent session statuses from Kubernetes AgenticSession resources
+func syncAgentSessionStatuses(workflow *RFEWorkflow) error {
+	if workflow == nil || len(workflow.AgentSessions) == 0 {
+		return nil
+	}
+
+	// Define resource for AgenticSession
+	gvr := getAgenticSessionResource()
+
+	for i := range workflow.AgentSessions {
+		session := &workflow.AgentSessions[i]
+		sessionName := session.ID
+
+		// Get the AgenticSession resource from Kubernetes
+		item, err := dynamicClient.Resource(gvr).Namespace(namespace).Get(context.TODO(), sessionName, v1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				log.Printf("AgenticSession %s not found in Kubernetes, keeping status as %s", sessionName, session.Status)
+				continue
+			}
+			log.Printf("Failed to get AgenticSession %s: %v", sessionName, err)
+			continue
+		}
+
+		// Parse the status from the AgenticSession resource
+		if status, ok := item.Object["status"].(map[string]interface{}); ok {
+			// Update phase status
+			if phase, ok := status["phase"].(string); ok {
+				// Map Kubernetes phase to our session status
+				switch phase {
+				case "Pending", "Creating":
+					session.Status = "pending"
+				case "Running":
+					session.Status = "running"
+				case "Completed":
+					session.Status = "completed"
+					// Set completion time if available
+					if completionTime, ok := status["completionTime"].(string); ok {
+						session.CompletedAt = &completionTime
+					}
+				case "Failed", "Error":
+					session.Status = "failed"
+					if completionTime, ok := status["completionTime"].(string); ok {
+						session.CompletedAt = &completionTime
+					}
+				case "Stopped":
+					session.Status = "failed" // Treat stopped as failed for UI purposes
+					if completionTime, ok := status["completionTime"].(string); ok {
+						session.CompletedAt = &completionTime
+					}
+				}
+			}
+
+			// Set start time if available and not already set
+			if session.StartedAt == nil {
+				if startTime, ok := status["startTime"].(string); ok {
+					session.StartedAt = &startTime
+				}
+			}
+
+			// Set cost if available
+			if cost, ok := status["cost"].(float64); ok {
+				session.Cost = &cost
+			}
+		}
+	}
+
+	// Save the updated workflow back to disk so the status persists
+	err := saveRFEWorkflow(workflow)
+	if err != nil {
+		log.Printf("Failed to save workflow %s after syncing agent session statuses: %v", workflow.ID, err)
+	}
+
+	return nil
+}
+
 // RFE Workspace utility functions
 func getRFEWorkspaceDir(workflowID string) string {
 	return filepath.Join(pvcBaseDir, workflowID)
@@ -1359,9 +1435,10 @@ func createAgentSessionsForPhase(workflow *RFEWorkflow, phase string) error {
 		sessionName := fmt.Sprintf("%s-%s-%s", workflow.ID, phase, strings.ToLower(strings.ReplaceAll(agentPersona, "_", "-")))
 
 		// Create the AgenticSession resource for this agent
+		// Note: For RFE workflows, we do NOT set websiteURL - this allows the claude-code-runner to
+		// detect it as an agent-specific session and run _handle_agent_rfe_session() instead of browser automation
 		sessionSpec := map[string]interface{}{
-			"prompt": fmt.Sprintf("/specify %s", workflow.Description),
-			"websiteURL": "http://localhost:3000", // Placeholder - not used for RFE workflows
+			"prompt": fmt.Sprintf("/%s %s", phase, workflow.Description),
 			"displayName": fmt.Sprintf("%s - %s (%s)", workflow.Title, agentPersona, phase),
 			"llmSettings": map[string]interface{}{
 				"model":       "claude-3-5-sonnet-20241022",
@@ -1378,8 +1455,8 @@ func createAgentSessionsForPhase(workflow *RFEWorkflow, phase string) error {
 					},
 				},
 			},
-			// Add RFE-specific environment variables
-			"environmentVariables": map[string]string{
+			// Add RFE-specific environment variables - these trigger _handle_agent_rfe_session() in claude-code-runner
+			"environmentVariables": map[string]interface{}{
 				"AGENT_PERSONA":    agentPersona,
 				"WORKFLOW_PHASE":   phase,
 				"PARENT_RFE":       workflow.ID,
@@ -1409,6 +1486,9 @@ func createAgentSessionsForPhase(workflow *RFEWorkflow, phase string) error {
 				},
 			},
 			"spec": sessionSpec,
+			"status": map[string]interface{}{
+				"phase": "Pending",
+			},
 		}
 
 		gvr := getAgenticSessionResource()
@@ -1517,6 +1597,12 @@ func scanAndUpdateWorkflowArtifacts(workflow *RFEWorkflow) error {
 func listRFEWorkflows(c *gin.Context) {
 	var workflows []RFEWorkflow
 	for _, workflow := range rfeWorkflows {
+		// Sync agent session statuses before returning
+		err := syncAgentSessionStatuses(workflow)
+		if err != nil {
+			log.Printf("⚠️ Failed to sync agent session statuses for workflow %s: %v", workflow.ID, err)
+			// Don't fail the request, just log the warning
+		}
 		workflows = append(workflows, *workflow)
 	}
 
@@ -1604,9 +1690,50 @@ func createRFEWorkflow(c *gin.Context) {
 func getRFEWorkflow(c *gin.Context) {
 	id := c.Param("id")
 
+	// First try to get from memory
 	workflow, exists := rfeWorkflows[id]
 	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		// If not in memory, try to load from disk
+		loadedWorkflow, err := loadRFEWorkflow(id)
+		if err != nil {
+			log.Printf("❌ Failed to load workflow %s from disk: %v", id, err)
+			c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+			return
+		}
+
+		// Add back to memory cache for future requests
+		rfeWorkflows[id] = loadedWorkflow
+		workflow = loadedWorkflow
+		log.Printf("✅ Loaded workflow %s from disk and cached in memory", id)
+	}
+
+	// Sync agent session statuses from Kubernetes AgenticSession resources
+	err := syncAgentSessionStatuses(workflow)
+	if err != nil {
+		log.Printf("⚠️ Failed to sync agent session statuses for workflow %s: %v", id, err)
+		// Don't fail the request, just log the warning
+	}
+
+	// Scan for new artifacts before returning (if workspace is accessible)
+	if workspaceDir := getRFEWorkspaceDir(workflow.ID); workspaceDir != "" {
+		if _, err := os.Stat(filepath.Dir(workspaceDir)); err == nil {
+			err := scanAndUpdateWorkflowArtifacts(workflow)
+			if err != nil {
+				log.Printf("⚠️ Failed to scan artifacts for workflow %s: %v", id, err)
+				// Don't fail the request, just log the warning
+			}
+		} else {
+			log.Printf("ℹ️ Workspace directory not accessible for workflow %s: %v", id, err)
+		}
+	}
+
+	// Try to marshal to JSON first to catch any serialization issues
+	_, jsonErr := json.Marshal(workflow)
+	if jsonErr != nil {
+		log.Printf("❌ Failed to marshal workflow %s to JSON: %v", id, jsonErr)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Internal server error - failed to serialize workflow data",
+		})
 		return
 	}
 

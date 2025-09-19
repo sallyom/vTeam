@@ -12,6 +12,7 @@ namespace: ambient-code
 resources:
 - namespace.yaml
 - pvc.yaml
+- workspace-pvc.yaml
 - crd.yaml
 - rbac.yaml
 - secrets.yaml
