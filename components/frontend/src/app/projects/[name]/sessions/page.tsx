@@ -138,8 +138,7 @@ export default function ProjectSessionsListPage({ params }: { params: Promise<{ 
                   <TableRow>
                     <TableHead className="min-w-[180px]">Name</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="min-w-[120px]">Website</TableHead>
-                    <TableHead className="hidden md:table-cell">Model</TableHead>
+                        <TableHead className="hidden md:table-cell">Model</TableHead>
                     <TableHead className="hidden lg:table-cell">Created</TableHead>
                     <TableHead className="hidden xl:table-cell">Cost</TableHead>
                     <TableHead className="w-[50px]">Actions</TableHead>
@@ -160,11 +159,6 @@ export default function ProjectSessionsListPage({ params }: { params: Promise<{ 
                       </TableCell>
                       <TableCell>
                         <span className="text-sm">{session.status?.phase || "Pending"}</span>
-                      </TableCell>
-                      <TableCell className="min-w-[120px] max-w-[200px]">
-                        <a href={session.spec.websiteURL} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate block w-full" title={session.spec.websiteURL}>
-                          {session.spec.websiteURL}
-                        </a>
                       </TableCell>
                       <TableCell className="hidden md:table-cell">
                         <span className="text-sm text-gray-600 truncate max-w-[120px] block">{session.spec.llmSettings.model}</span>

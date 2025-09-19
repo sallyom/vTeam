@@ -22,9 +22,6 @@ spec:
               prompt:
                 type: string
                 description: "The initial prompt for the agentic session"
-              websiteURL:
-                type: string
-                description: "The website URL to analyze (optional for non-web agentic sessions)"
               displayName:
                 type: string
                 description: "A descriptive display name for the agentic session generated from prompt and website"
@@ -133,10 +130,6 @@ spec:
       type: string
       description: Current phase of the agentic session
       jsonPath: .status.phase
-    - name: Website
-      type: string
-      description: Target website URL
-      jsonPath: .spec.websiteURL
     - name: Age
       type: date
       jsonPath: .metadata.creationTimestamp

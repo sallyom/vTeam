@@ -104,7 +104,6 @@ func TestParseSpecWithGitConfig(t *testing.T) {
 	// Create test spec with Git configuration
 	spec := map[string]interface{}{
 		"prompt":     "Test prompt",
-		"websiteURL": "https://example.com",
 		"timeout":    float64(300),
 		"llmSettings": map[string]interface{}{
 			"model":       "claude-3-5-sonnet-20241022",
@@ -153,7 +152,6 @@ func TestParseSpecWithGitConfig(t *testing.T) {
 func TestParseSpecWithoutGitConfig(t *testing.T) {
 	spec := map[string]interface{}{
 		"prompt":     "Test prompt",
-		"websiteURL": "https://example.com",
 		"timeout":    float64(300),
 		"llmSettings": map[string]interface{}{
 			"model":       "claude-3-5-sonnet-20241022",

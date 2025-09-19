@@ -389,29 +389,6 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Globe className="w-5 h-5 mr-2" />
-                Target Website
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-center space-x-2">
-                <div className="flex-1 min-w-0">
-                  <a
-                    href={session.spec.websiteURL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center text-blue-600 hover:underline"
-                  >
-                    <span className="truncate block max-w-full">{session.spec.websiteURL}</span>
-                    <ExternalLink className="w-4 h-4 ml-2 flex-shrink-0 text-blue-600 hover:text-blue-800" />
-                  </a>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </div>
 
         {/* Configuration */}

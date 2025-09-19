@@ -297,9 +297,6 @@ func parseSpec(spec map[string]interface{}) AgenticSessionSpec {
 		result.Prompt = prompt
 	}
 
-	if websiteURL, ok := spec["websiteURL"].(string); ok {
-		result.WebsiteURL = websiteURL
-	}
 
 	if displayName, ok := spec["displayName"].(string); ok {
 		result.DisplayName = displayName
@@ -505,7 +502,6 @@ func createSession(c *gin.Context) {
 		},
 		"spec": map[string]interface{}{
 			"prompt":      req.Prompt,
-			"websiteURL":  req.WebsiteURL,
 			"displayName": req.DisplayName,
 			"project":     project,
 			"llmSettings": map[string]interface{}{
@@ -1029,7 +1025,6 @@ func updateSession(c *gin.Context) {
 	// Update spec
 	spec := item.Object["spec"].(map[string]interface{})
 	spec["prompt"] = req.Prompt
-	spec["websiteURL"] = req.WebsiteURL
 	spec["displayName"] = req.DisplayName
 
 	if req.LLMSettings != nil {

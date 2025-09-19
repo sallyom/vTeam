@@ -43,7 +43,6 @@ class ClaudeRunner:
         self.session_name = os.getenv("AGENTIC_SESSION_NAME", "")
         self.session_namespace = os.getenv("AGENTIC_SESSION_NAMESPACE", "default")
         self.prompt = os.getenv("PROMPT", "")
-        self.website_url = os.getenv("WEBSITE_URL", "")
         self.timeout = int(os.getenv("TIMEOUT", "300"))
         self.backend_api_url = os.getenv(
             "BACKEND_API_URL", "http://backend-service:8080/api"
@@ -79,18 +78,15 @@ class ClaudeRunner:
         logger.info(f"Agent persona: {self.agent_persona}")
         logger.info(f"Workflow phase: {self.workflow_phase}")
         logger.info(f"Parent RFE: {self.parent_rfe}")
-        logger.info(f"Website URL: {self.website_url}")
-        logger.info("Using Claude Code CLI with Playwright MCP and spek-kit integration")
+        logger.info("Using Claude Code CLI with spek-kit integration")
 
     async def run_agentic_session(self):
         """Main method to run the agentic session"""
         try:
             logger.info(
-                "Starting agentic session with Claude Code + Playwright MCP + spek-kit..."
+                "Starting agentic session with Claude Code + spek-kit..."
             )
 
-            # Verify browser setup before starting
-            await self._verify_browser_setup()
 
             # Set up Git configuration
             await self._setup_git_integration()
@@ -126,56 +122,6 @@ class ClaudeRunner:
 
             sys.exit(1)
 
-    async def _verify_browser_setup(self):
-        """Verify browser installation and permissions for OpenShift compatibility"""
-        try:
-            import subprocess
-            import os
-
-            logger.info("Verifying browser setup for OpenShift environment...")
-
-            # Check if browser directory exists and is accessible
-            browser_path = "/tmp/.cache/ms-playwright"
-            if not os.path.exists(browser_path):
-                logger.warning(f"Browser cache directory not found at {browser_path}")
-                return
-
-            # Check directory permissions
-            if not os.access(browser_path, os.R_OK | os.X_OK):
-                logger.error(f"Browser directory {browser_path} not accessible")
-                return
-
-            # List browser contents for debugging
-            try:
-                contents = os.listdir(browser_path)
-                logger.info(f"Browser cache contents: {contents}")
-            except Exception as e:
-                logger.warning(f"Could not list browser cache: {e}")
-
-            # Check if chromium binary exists and is executable
-            for root, dirs, files in os.walk(browser_path):
-                for file in files:
-                    if "chromium" in file.lower() and os.access(
-                        os.path.join(root, file), os.X_OK
-                    ):
-                        logger.info(
-                            f"Found executable browser binary: {os.path.join(root, file)}"
-                        )
-                        break
-            else:
-                logger.warning("No executable chromium binary found")
-
-            # Check environment variables
-            env_vars = ["PLAYWRIGHT_BROWSERS_PATH", "HOME", "DISPLAY"]
-            for var in env_vars:
-                value = os.getenv(var, "Not set")
-                logger.info(f"{var}: {value}")
-
-            logger.info("Browser setup verification completed")
-
-        except Exception as e:
-            logger.error(f"Error during browser setup verification: {e}")
-            # Don't fail the process, just log the warning
 
     async def _generate_and_set_display_name(self):
         """Generate a display name using LLM and update it via backend API"""
@@ -200,15 +146,14 @@ class ClaudeRunner:
 
             client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-            prompt = f"""Create a concise, descriptive display name (max 50 characters) for an agentic session with these details:
+            prompt = f"""Create a concise, descriptive display name (max 50 characters) for an agentic session with this query:
 
 Agentic Query: {self.prompt}
-Target Website: {self.website_url}
 
-The display name should capture the essence of what's being analyzed and where. Use format like:
-- "Pricing Analysis - acme.com"  
-- "Feature Review - product-site.com"
-- "Company Info - startup.io"
+The display name should capture the essence of the task or request. Use format like:
+- "Code Review Task"
+- "Data Analysis Request"
+- "Technical Documentation"
 
 Return only the display name, nothing else."""
 
@@ -229,12 +174,7 @@ Return only the display name, nothing else."""
         except Exception as e:
             logger.error(f"Error generating display name with Claude: {e}")
             # Fallback to a simple format
-            domain = (
-                self.website_url.replace("http://", "")
-                .replace("https://", "")
-                .split("/")[0]
-            )
-            return f"Analysis - {domain}"
+            return f"Agentic Task - {self.session_name[:20]}"
 
     async def _update_display_name(self, display_name: str):
         """Update the display name via backend API"""
@@ -258,38 +198,22 @@ Return only the display name, nothing else."""
             logger.error(f"Error updating display name via API: {e}")
 
     async def _run_claude_code(self, prompt: str) -> tuple[str, float, list[str]]:
-        """Run Claude Code using Python SDK with MCP browser automation"""
+        """Run Claude Code using Python SDK"""
         try:
-            logger.info("Initializing Claude Code Python SDK with MCP server...")
+            logger.info("Initializing Claude Code Python SDK...")
 
-            # Configure MCP servers for OpenShift compatibility
-            mcp_servers = {
-                "playwright": {
-                    "command": "npx",
-                    "args": [
-                        "@playwright/mcp",
-                        "--headless",
-                        "--browser",
-                        "chromium",
-                        "--no-sandbox",
-                    ],
-                }
-            }
-
-            # Configure SDK with direct MCP server configuration
+            # Configure SDK
             options = ClaudeCodeOptions(
-                system_prompt="You are an agentic assistant with browser automation capabilities via Playwright MCP tools.",
+                system_prompt="You are an agentic assistant that can help with various tasks including coding, analysis, and general queries.",
                 max_turns=25,
                 permission_mode="acceptEdits",
-                allowed_tools=["mcp__playwright"],
-                mcp_servers=mcp_servers,
                 cwd="/app",
             )
 
-            logger.info("Creating Claude SDK client with MCP browser automation...")
+            logger.info("Creating Claude SDK client...")
 
             async with ClaudeSDKClient(options=options) as client:
-                logger.info("SDK Client initialized successfully with MCP tools")
+                logger.info("SDK Client initialized successfully")
 
                 # Send the agentic prompt
                 logger.info("Sending agentic query to Claude Code SDK...")
@@ -455,22 +379,14 @@ Return only the display name, nothing else."""
             raise
 
     def _create_agentic_prompt(self) -> str:
-        """Create a focused agentic prompt for Claude Code with MCP browser instructions"""
-        return f"""You are an agentic assistant with browser automation capabilities. 
+        """Create a focused agentic prompt for Claude Code"""
+        return f"""You are an agentic assistant that can help with various tasks including coding, analysis, and general queries.
 
 AGENTIC QUERY: {self.prompt}
 
-TARGET WEBSITE: {self.website_url}
+Please help with this request. You can handle general queries, coding tasks, analysis, and other requests as appropriate.
 
-Please use your browser tools to visit {self.website_url} and answer this question: "{self.prompt}"
-
-Use your browser automation tools to:
-1. Navigate to and explore the website
-2. Take snapshots and screenshots as needed
-3. Extract relevant information from the page
-4. Navigate to additional pages if necessary to find the answer
-
-Provide a clear, direct answer to the agentic query based on what you find on the website. Focus on answering the specific question rather than providing a comprehensive website analysis."""
+Provide a clear, helpful response to the agentic query."""
 
     async def _handle_spek_kit_session(self, spek_command):
         """Handle a spek-kit specific session"""
@@ -549,24 +465,26 @@ Provide a clear, direct answer to the agentic query based on what you find on th
         await self.update_session_status(
             {
                 "phase": "Running",
-                "message": "Initializing Claude Code with Playwright MCP browser capabilities",
+                "message": "Initializing Claude Code",
                 "startTime": datetime.now(timezone.utc).isoformat(),
             }
         )
 
-        # Create agentic prompt for Claude Code with MCP tools
+        # Create agentic prompt for Claude Code
         agentic_prompt = self._create_agentic_prompt()
 
         # Update status
+        status_message = "Claude Code processing agentic request"
+
         await self.update_session_status(
             {
                 "phase": "Running",
-                "message": f"Claude Code analyzing {self.website_url} with agentic browser automation",
+                "message": status_message,
             }
         )
 
         # Run Claude Code with our agentic prompt
-        logger.info("Running Claude Code with MCP browser automation...")
+        logger.info("Running Claude Code...")
 
         result, cost, all_messages = await self._run_claude_code(agentic_prompt)
 
@@ -586,7 +504,7 @@ Provide a clear, direct answer to the agentic query based on what you find on th
         await self.update_session_status(
             {
                 "phase": "Completed",
-                "message": "Agentic analysis completed successfully using Claude Code + Playwright MCP",
+                "message": "Agentic analysis completed successfully using Claude Code",
                 "completionTime": datetime.now(timezone.utc).isoformat(),
                 "finalOutput": result,
                 "cost": cost,
@@ -801,7 +719,7 @@ Provide your enhanced version as a complete, production-ready document that a de
 
 async def main():
     """Main entry point"""
-    logger.info("Claude Agentic Runner with Claude Code + Playwright MCP starting...")
+    logger.info("Claude Agentic Runner with Claude Code starting...")
 
     # Validate required environment variables
     required_vars = [
@@ -810,10 +728,7 @@ async def main():
         "ANTHROPIC_API_KEY",
     ]
 
-    # For agent RFE sessions, we don't need WEBSITE_URL
-    agent_persona = os.getenv("AGENT_PERSONA", "")
-    if not agent_persona:
-        required_vars.append("WEBSITE_URL")  # Standard sessions need website URL
+    # WEBSITE_URL is now optional for all session types
 
     missing_vars = [var for var in required_vars if not os.getenv(var)]
 

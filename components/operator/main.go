@@ -33,6 +33,7 @@ var (
 	ambientCodeRunnerImage string
 	imagePullPolicy        corev1.PullPolicy
 	contentServiceImage    string
+	backendNamespace       string
 )
 
 func main() {
@@ -45,6 +46,12 @@ func main() {
 	namespace = os.Getenv("NAMESPACE")
 	if namespace == "" {
 		namespace = "default"
+	}
+
+	// Get backend namespace from environment or use operator namespace
+	backendNamespace = os.Getenv("BACKEND_NAMESPACE")
+	if backendNamespace == "" {
+		backendNamespace = namespace // Default to same namespace as operator
 	}
 
 	// Get ambient-code runner image from environment or use default
@@ -247,7 +254,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	// Extract spec information from the fresh object
 	spec, _, _ := unstructured.NestedMap(currentObj.Object, "spec")
 	prompt, _, _ := unstructured.NestedString(spec, "prompt")
-	websiteURL, _, _ := unstructured.NestedString(spec, "websiteURL")
 	timeout, _, _ := unstructured.NestedInt64(spec, "timeout")
 
 	llmSettings, _, _ := unstructured.NestedMap(spec, "llmSettings")
@@ -388,12 +394,11 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									{Name: "AGENTIC_SESSION_NAME", Value: name},
 									{Name: "AGENTIC_SESSION_NAMESPACE", Value: sessionNamespace},
 									{Name: "PROMPT", Value: prompt},
-									{Name: "WEBSITE_URL", Value: websiteURL},
 									{Name: "LLM_MODEL", Value: model},
 									{Name: "LLM_TEMPERATURE", Value: fmt.Sprintf("%.2f", temperature)},
 									{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokens)},
 									{Name: "TIMEOUT", Value: fmt.Sprintf("%d", timeout)},
-									{Name: "BACKEND_API_URL", Value: os.Getenv("BACKEND_API_URL")},
+									{Name: "BACKEND_API_URL", Value: getBackendAPIURL()},
 
 									// 🔑 Git configuration environment variables
 									{Name: "GIT_USER_NAME", Value: gitUserName},
@@ -1003,6 +1008,20 @@ func updateProjectSettingsStatus(namespace, name string, statusUpdate map[string
 	}
 
 	return nil
+}
+
+// getBackendAPIURL returns the fully qualified backend API URL for cross-namespace communication
+func getBackendAPIURL() string {
+	// Check if a custom backend API URL is provided
+	if customURL := os.Getenv("BACKEND_API_URL"); customURL != "" {
+		// If it already contains a fully qualified domain, use it as-is
+		if strings.Contains(customURL, ".svc.cluster.local") || strings.Contains(customURL, "://") {
+			return customURL
+		}
+	}
+
+	// Construct fully qualified service name for cross-namespace communication
+	return fmt.Sprintf("http://backend-service.%s.svc.cluster.local:8080/api", backendNamespace)
 }
 
 var (
