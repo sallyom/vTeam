@@ -1,23 +1,25 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { formatDistanceToNow, format } from "date-fns";
 import {
   ArrowLeft,
   RefreshCw,
-  ExternalLink,
   Clock,
-  Globe,
   Brain,
   Square,
   Trash2,
   Copy,
+  ChevronRight,
+  ChevronDown,
+  CheckCircle2,
+  XCircle,
 } from "lucide-react";
 
 // Custom components
 import { Message } from "@/components/ui/message";
-import { ToolMessage } from "@/components/ui/tool-message";
+import { StreamMessage } from "@/components/ui/stream-message";
 
 // Markdown rendering
 import ReactMarkdown from "react-markdown";
@@ -34,14 +36,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FileTree, type FileTreeNode } from "@/components/file-tree";
 import {
   AgenticSession,
   AgenticSessionPhase,
 } from "@/types/agentic-session";
+import type { MessageObject, ToolUseBlock, ToolUseMessages, ToolResultBlock, ResultMessage } from "@/types/agentic-session";
 import { CloneSessionDialog } from "@/components/clone-session-dialog";
 
 import { getApiUrl } from "@/lib/config";
-import { Project } from "@/types/project";
+import { cn } from "@/lib/utils";
 
 const getPhaseColor = (phase: AgenticSessionPhase) => {
   switch (phase) {
@@ -120,13 +125,21 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   const [sessionName, setSessionName] = useState<string>("");
 
   const [session, setSession] = useState<AgenticSession | null>(null);
+  const [messages, setMessages] = useState<MessageObject[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null);
+  const [activeTab, setActiveTab] = useState<string>("overview");
 
-  // Project editing state
-  const [project, setProject] = useState<Project | null>(null);
-  const [projectForm, setProjectForm] = useState({ displayName: "", description: "" });
+  // Embedded workspace state
+  const [wsTree, setWsTree] = useState<FileTreeNode[]>([]);
+  const [wsSelectedPath, setWsSelectedPath] = useState<string | undefined>(undefined);
+  const [wsFileContent, setWsFileContent] = useState<string>("");
+  const [wsLoading, setWsLoading] = useState<boolean>(false);
+  const [usageExpanded, setUsageExpanded] = useState(false);
+
+  const [chatInput, setChatInput] = useState("")
 
   useEffect(() => {
     params.then(({ name, sessionName }) => {
@@ -150,12 +163,45 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       }
       const data = await response.json();
       setSession(data);
+      // Fetch messages from proxy endpoint to ensure latest content
+      const msgResp = await fetch(
+        `${apiUrl}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/messages`
+      );
+      if (msgResp.ok) {
+        const msgData = await msgResp.json();
+        if (Array.isArray(msgData)) setMessages(msgData);
+      }
+
+      // Probe workspace existence via API proxy
+      try {
+        const wsResp = await fetch(
+          `${apiUrl}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
+        );
+        setHasWorkspace(wsResp.ok);
+      } catch {
+        setHasWorkspace(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   }, [projectName, sessionName]);
+
+  const sendChat = useCallback(async () => {
+    if (!chatInput.trim() || !projectName || !sessionName) return
+    try {
+      const apiUrl = getApiUrl()
+      await fetch(`${apiUrl}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: chatInput.trim() })
+      })
+      setChatInput("")
+      await fetchSession()
+      setActiveTab('messages')
+    } catch {}
+  }, [chatInput, projectName, sessionName, fetchSession])
 
   useEffect(() => {
     if (projectName && sessionName) {
@@ -173,34 +219,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     }
   }, [projectName, sessionName, session?.status?.phase, fetchSession]);
 
-  // Fetch project to populate edit form
-  useEffect(() => {
-    const fetchProject = async () => {
-      if (!projectName) return;
-      try {
-        const apiUrl = getApiUrl();
-        const response = await fetch(`${apiUrl}/projects/${encodeURIComponent(projectName)}`);
-        if (!response.ok) return; // soft-fail
-        const data: Project = await response.json();
-        setProject(data);
-        setProjectForm({
-          displayName: data.displayName || "",
-          description: data.description || "",
-        });
-      } catch {
-        // ignore; non-blocking for session view
-      }
-    };
-    if (projectName) {
-      void fetchProject();
-    }
-  }, [projectName]);
-
-  const handleRefresh = () => {
-    setLoading(true);
-    fetchSession();
-  };
-
+ 
   const handleStop = async () => {
     if (!session || !projectName) return;
     setActionLoading("stopping");
@@ -250,6 +269,130 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       setActionLoading(null);
     }
   };
+  
+
+  const allMessages = useMemo(() => {
+    const toolUseBlocks: { block: ToolUseBlock; timestamp: string }[] = [];
+    const toolResultBlocks: { block: ToolResultBlock; timestamp: string }[] = [];
+    const agenticMessages: MessageObject[] = [];
+    
+    for (const message of messages) {
+      if (message.type === "assistant_message" || message.type === "user_message") {
+        if (typeof message.content === "object" && message.content.type === "tool_use_block") {
+          toolUseBlocks.push({ block: message.content, timestamp: message.timestamp });
+        } else if (typeof message.content === "object" && message.content.type === "tool_result_block") {
+          toolResultBlocks.push({ block: message.content, timestamp: message.timestamp });
+        } else {
+          agenticMessages.push(message);
+        }
+      } else {
+        agenticMessages.push(message);
+      }
+    }
+
+    // Merge tool use blocks with their corresponding result blocks
+    const toolUseMessages: ToolUseMessages[] = [];
+    for (const toolUseItem of toolUseBlocks) {
+      const resultItem = toolResultBlocks.find(result => result.block.tool_use_id === toolUseItem.block.id);
+      if (resultItem) {
+        toolUseMessages.push({
+          type: "tool_use_messages",
+          timestamp: toolUseItem.timestamp,
+          toolUseBlock: toolUseItem.block,
+          resultBlock: resultItem.block,
+        });
+      }
+    }
+
+    return [...agenticMessages, ...toolUseMessages];
+  }, [messages]);
+
+  const latestDisplayMessage = useMemo(() => {
+    if (allMessages.length === 0) return null;
+    const sorted = [...allMessages].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return sorted[sorted.length - 1];
+  }, [allMessages]);
+
+  // Stats: derive latest result metrics and duration
+  const latestResult: ResultMessage | null = useMemo(() => {
+    const results = messages.filter((m) => m.type === "result_message");
+    return results.length > 0 ? (results[results.length - 1] as any) : null;
+  }, [messages]);
+
+  const durationMs = useMemo(() => {
+    const start = session?.status?.startTime
+      ? new Date(session.status.startTime).getTime()
+      : undefined;
+    const end = session?.status?.completionTime
+      ? new Date(session.status.completionTime).getTime()
+      : Date.now();
+    return start ? Math.max(0, end - start) : undefined;
+  }, [session?.status?.startTime, session?.status?.completionTime]);
+
+  // Workspace helpers (loaded when Workspace tab opens)
+  type ListItem = { name: string; path: string; isDir: boolean; size: number; modifiedAt: string };
+  const listWsPath = useCallback(async (relPath?: string) => {
+    const url = new URL(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`, window.location.origin);
+    if (relPath) url.searchParams.set("path", relPath);
+    const resp = await fetch(url.toString());
+    if (!resp.ok) throw new Error("Failed to list workspace");
+    const data = await resp.json();
+    const items: ListItem[] = Array.isArray(data.items) ? data.items : [];
+    return items;
+  }, [projectName, sessionName]);
+
+  const readWsFile = useCallback(async (rel: string) => {
+    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(rel)}`);
+    if (!resp.ok) throw new Error("Failed to fetch file");
+    const text = await resp.text();
+    return text;
+  }, [projectName, sessionName]);
+
+  const buildWsRoot = useCallback(async () => {
+    if (!hasWorkspace) return;
+    setWsLoading(true);
+    try {
+      const items = await listWsPath();
+      const children: FileTreeNode[] = items.map((it) => ({
+        name: it.name,
+        path: it.path.replace(/^\/+/, ""),
+        type: it.isDir ? "folder" : "file",
+        expanded: it.isDir,
+        sizeKb: it.isDir ? undefined : it.size / 1024,
+      }));
+      setWsTree(children);
+    } finally {
+      setWsLoading(false);
+    }
+  }, [hasWorkspace, listWsPath]);
+
+  const onWsToggle = useCallback(async (node: FileTreeNode) => {
+    if (node.type !== "folder") return;
+    // Lazy-load folder children when expanding
+    const items = await listWsPath(node.path);
+    const children: FileTreeNode[] = items.map((it) => ({
+      name: it.name,
+      path: `${node.path}/${it.name}`.replace(/^\/+/, ""),
+      type: it.isDir ? "folder" : "file",
+      expanded: false,
+      sizeKb: it.isDir ? undefined : it.size / 1024,
+    }));
+    node.children = children;
+    setWsTree((prev) => [...prev]);
+  }, [listWsPath]);
+
+  const onWsSelect = useCallback(async (node: FileTreeNode) => {
+    if (node.type !== "file") return;
+    setWsSelectedPath(node.path);
+    const text = await readWsFile(node.path);
+    setWsFileContent(text);
+  }, [readWsFile]);
+
+  useEffect(() => {
+    if (activeTab === "workspace" && wsTree.length === 0) {
+      buildWsRoot();
+    }
+  }, [activeTab, wsTree.length, buildWsRoot]);
 
   if (loading) {
     return (
@@ -283,279 +426,388 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   }
 
   return (
-    <div className="container mx-auto p-6 max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
+    <div className="container mx-auto p-6 max-w-5xl">
+      <div className="flex items-center justify-start mb-6">
         <Link href={`/projects/${encodeURIComponent(projectName)}/sessions`}>
           <Button variant="ghost" size="sm">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Sessions
           </Button>
         </Link>
-        <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={handleRefresh} disabled={loading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-
-          {/* Action buttons based on session status */}
-          {session && (() => {
-            const phase = session.status?.phase || "Pending";
-
-            if (actionLoading) {
-              return (
-                <Button variant="outline" disabled>
-                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  {actionLoading}
-                </Button>
-              );
-            }
-
-            const buttons = [] as React.ReactNode[];
-
-            // Clone button for all sessions
-            buttons.push(
-              <CloneSessionDialog
-                key="clone"
-                session={session}
-                onSuccess={() => fetchSession()}
-                trigger={
-                  <Button variant="outline">
-                    <Copy className="w-4 h-4 mr-2" />
-                    Clone
-                  </Button>
-                }
-              />
-            );
-
-            // Stop button for Pending/Creating/Running sessions
-            if (phase === "Pending" || phase === "Creating" || phase === "Running") {
-              buttons.push(
-                <Button key="stop" variant="secondary" onClick={handleStop}>
-                  <Square className="w-4 h-4 mr-2" />
-                  Stop
-                </Button>
-              );
-            }
-
-            // Delete button for all sessions (except running/creating)
-            if (phase !== "Running" && phase !== "Creating") {
-              buttons.push(
-                <Button key="delete" variant="destructive" onClick={handleDelete}>
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Delete
-                </Button>
-              );
-            }
-
-            return buttons;
-          })()}
-        </div>
       </div>
 
       <div className="space-y-6">
-        {/* Header */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-2xl">
-                  {session.spec.displayName || session.metadata.name}
-                </CardTitle>
-                {session.spec.displayName && (
-                  <div className="text-sm text-gray-500 mb-1">{session.metadata.name}</div>
-                )}
-                <CardDescription>
-                  Created {formatDistanceToNow(new Date(session.metadata.creationTimestamp), { addSuffix: true })}
-                </CardDescription>
-              </div>
+        {/* Title & phase */}
+        <div className="flex items-start justify-between ">
+          <div>
+            <h1 className="text-2xl font-semibold flex items-center gap-2">
+              <span>{session.spec.displayName || session.metadata.name}</span>
               <Badge className={getPhaseColor(session.status?.phase || "Pending")}>
                 {session.status?.phase || "Pending"}
               </Badge>
+            </h1>
+            {session.spec.displayName && (
+              <div className="text-sm text-gray-500">{session.metadata.name}</div>
+            )}
+            <div className="text-xs text-gray-500 mt-1">
+              Created {formatDistanceToNow(new Date(session.metadata.creationTimestamp), { addSuffix: true })}
             </div>
-          </CardHeader>
-        </Card>
+          </div>
+          <div className="flex items-center gap-2">
+            <CloneSessionDialog
+              session={session}
+              onSuccess={() => fetchSession()}
+              trigger={
+                <Button variant="outline">
+                  <Copy className="w-4 h-4 mr-2" />
+                  Clone
+                </Button>
+              }
+            />
 
-        {/* Session Details */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Brain className="w-5 h-5 mr-2" />
-                Agentic Prompt
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="whitespace-pre-wrap text-sm">{session.spec.prompt}</p>
-            </CardContent>
-          </Card>
+            {session.status?.phase !== "Running" && session.status?.phase !== "Creating" && (
+              <Button variant="destructive" onClick={handleDelete} disabled={!!actionLoading}>
+                <Trash2 className="w-4 h-4 mr-2" />
+                {actionLoading === "deleting" ? "Deleting..." : "Delete"}
+              </Button>
+            )}
 
+            {session.status?.phase === "Pending" || session.status?.phase === "Creating" || session.status?.phase === "Running" && (
+              <div>
+                <div className="text-xs font-semibold text-muted-foreground mb-2">Controls</div>
+                <Button variant="secondary" onClick={handleStop} disabled={!!actionLoading}>
+                  <Square className="w-4 h-4 mr-2" />
+                  {actionLoading === "stopping" ? "Stopping..." : "Stop"}
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Configuration */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Configuration</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              <div>
-                <p className="font-semibold">Model</p>
-                <p className="text-muted-foreground">{session.spec.llmSettings.model}</p>
-              </div>
-              <div>
-                <p className="font-semibold">Temperature</p>
-                <p className="text-muted-foreground">{session.spec.llmSettings.temperature}</p>
-              </div>
-              <div>
-                <p className="font-semibold">Max Tokens</p>
-                <p className="text-muted-foreground">{session.spec.llmSettings.maxTokens}</p>
-              </div>
-              <div>
-                <p className="font-semibold">Timeout</p>
-                <p className="text-muted-foreground">{session.spec.timeout}s</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Status Information */}
-        {session.status && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Clock className="w-5 h-5 mr-2" />
-                Execution Status
-              </CardTitle>
-            </CardHeader>
+        {/* Top compact stat cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Card className="py-4">
             <CardContent>
-              <div className="space-y-3">
-                {session.status.message && (
-                  <div>
-                    <p className="font-semibold text-sm">Status Message</p>
-                    <p className="text-sm text-muted-foreground">{session.status.message}</p>
+              <div className="text-xs text-muted-foreground">Cost</div>
+              <div className="text-lg font-semibold">{typeof session.status?.total_cost_usd === "number" ? `$${session.status.total_cost_usd.toFixed(4)}` : "-"}</div>
+            </CardContent>
+          </Card>
+          <Card className="py-4">
+            <CardContent >
+              <div className="text-xs text-muted-foreground">Duration</div>
+              <div className="text-lg font-semibold">{typeof durationMs === "number" ? `${durationMs} ms` : "-"}</div>
+            </CardContent>
+          </Card>
+          <Card className="py-4">
+            <CardContent >
+              <div className="text-xs text-muted-foreground">Messages</div>
+              <div className="text-lg font-semibold">{allMessages.length}</div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Tabbed content */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className={`grid ${hasWorkspace ? "grid-cols-4" : "grid-cols-3"} w-full`}>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="messages">Messages</TabsTrigger>
+            {hasWorkspace ? <TabsTrigger value="workspace">Workspace</TabsTrigger> : null}
+            <TabsTrigger value="results">Results</TabsTrigger>
+          </TabsList>
+
+          {/* Overview */}
+          <TabsContent value="overview" className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Prompt */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Brain className="w-5 h-5 mr-2" />
+                    InitialPrompt
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="whitespace-pre-wrap text-sm">{session.spec.prompt}</p>
+                </CardContent>
+              </Card>
+              {/* Latest Message */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Latest Message</CardTitle>
+                    <button className="text-xs text-blue-600 hover:underline" onClick={() => setActiveTab("messages")}>Go to messages</button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {latestDisplayMessage ? (
+                    <div className="space-y-4">
+                      <StreamMessage message={latestDisplayMessage} onGoToResults={() => setActiveTab("results")} />
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-500">No messages yet</div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+            <div className="grid grid-cols-1 gap-6">
+              {/* System Status + Configuration (merged) */}
+              {session.status && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <Clock className="w-5 h-5 mr-2" />
+                      System Status & Configuration
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4 text-sm">
+                      <div>
+                        <div className="text-xs font-semibold text-muted-foreground mb-2">Runtime</div>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          {session.status.startTime && (
+                            <div>
+                              <p className="font-semibold">Started</p>
+                              <p className="text-muted-foreground">{format(new Date(session.status.startTime), "PPp")}</p>
+                            </div>
+                          )}
+                          {session.status.completionTime && (
+                            <div>
+                              <p className="font-semibold">Completed</p>
+                              <p className="text-muted-foreground">{format(new Date(session.status.completionTime), "PPp")}</p>
+                            </div>
+                          )}
+                          {session.status.jobName && (
+                            <div>
+                              <p className="font-semibold">K8s Job</p>
+                              <p className="text-muted-foreground font-mono text-xs">{session.status.jobName}</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs font-semibold text-muted-foreground mb-2">LLM Config</div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div>
+                            <p className="font-semibold">Model</p>
+                            <p className="text-muted-foreground">{session.spec.llmSettings.model}</p>
+                          </div>
+                          <div>
+                            <p className="font-semibold">Temperature</p>
+                            <p className="text-muted-foreground">{session.spec.llmSettings.temperature}</p>
+                          </div>
+                          <div>
+                            <p className="font-semibold">Max Tokens</p>
+                            <p className="text-muted-foreground">{session.spec.llmSettings.maxTokens}</p>
+                          </div>
+                          <div>
+                            <p className="font-semibold">Timeout</p>
+                            <p className="text-muted-foreground">{session.spec.timeout}s</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* Messages */}
+          <TabsContent value="messages">
+            <div className="flex flex-col gap-4 max-h-[60vh] overflow-y-auto pr-1">
+              {allMessages
+                .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                .map((message, index) => (
+                  <StreamMessage key={`msg-${index}`} message={message} onGoToResults={() => setActiveTab("results")} />
+              ))}
+
+              {/* Chat composer (shown only when interactive) */}
+              {session.spec?.interactive && (
+                <div className="sticky bottom-0 border-t bg-white">
+                  <div className="p-3">
+                    <div className="border rounded-md p-3 space-y-2 bg-white">
+                      <textarea
+                        className="w-full border rounded p-2 text-sm"
+                        placeholder="Type a message to the agent... (use /end to finish)"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        rows={3}
+                      />
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-muted-foreground">Type <span className="font-mono">/end</span> to end the session</div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={async () => {
+                              setChatInput("/end")
+                              await sendChat()
+                            }}
+                          >
+                            End session
+                          </Button>
+                          <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()}>
+                            Send
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(session.status?.phase === "Running" ||
+                session.status?.phase === "Pending" ||
+                session.status?.phase === "Creating") && (
+                <Message
+                  role="bot"
+                  content={session.status.message || (() => {
+                    const messages = [
+                      "Pretending to be productive...",
+                      "Downloading more RAM...",
+                      "Consulting the magic 8-ball...",
+                      "Teaching bugs to behave...",
+                      "Brewing digital coffee...",
+                      "Rolling for initiative...",
+                      "Surfing the data waves...",
+                      "Juggling bits and bytes...",
+                      "Tipping my fedora...",
+                    ];
+                    return messages[Math.floor(Math.random() * messages.length)];
+                  })()}
+                  name="Claude AI"
+                  isLoading={true}
+                />
+              )}
+
+              {(messages.length === 0) &&
+                session.status?.phase !== "Running" &&
+                session.status?.phase !== "Pending" &&
+                session.status?.phase !== "Creating" && (
+                  <div className="text-center py-8 text-gray-500">
+                    <Brain className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                    <p>No messages yet</p>
                   </div>
                 )}
+            </div>
+          </TabsContent>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  {session.status.startTime && (
-                    <div>
-                      <p className="font-semibold">Started</p>
-                      <p className="text-muted-foreground">{format(new Date(session.status.startTime), "PPp")}</p>
-                    </div>
-                  )}
-
-                  {session.status.completionTime && (
-                    <div>
-                      <p className="font-semibold">Completed</p>
-                      <p className="text-muted-foreground">{format(new Date(session.status.completionTime), "PPp")}</p>
-                    </div>
-                  )}
-
-                  {session.status.jobName && (
-                    <div>
-                      <p className="font-semibold">Kubernetes Job</p>
-                      <p className="text-muted-foreground font-mono text-xs">{session.status.jobName}</p>
-                    </div>
-                  )}
-
-                  {session.status.cost && (
-                    <div>
-                      <p className="font-semibold">Cost</p>
-                      <p className="text-muted-foreground">${session.status.cost.toFixed(4)}</p>
-                    </div>
-                  )}
+          {/* Workspace */}
+          {hasWorkspace ? (
+            <TabsContent value="workspace">
+              {wsLoading && (
+                <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
+                  <RefreshCw className="animate-spin h-4 w-4 mr-2" /> Loading workspace...
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              )}
+              {!wsLoading && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
+                  <div className="border rounded-md overflow-hidden">
+                    <div className="p-3 border-b">
+                      <h3 className="font-medium text-sm">Files</h3>
+                      <p className="text-xs text-muted-foreground">{wsTree.length} items</p>
+                    </div>
+                    <div className="p-2">
+                      <FileTree nodes={wsTree} selectedPath={wsSelectedPath} onSelect={onWsSelect} onToggle={onWsToggle} />
+                    </div>
+                  </div>
+                  <div className="overflow-auto">
+                    <Card className="m-3">
+                      <CardContent className="p-4">
+                        {wsSelectedPath ? (
+                          <>
+                            <div className="flex items-center justify-between mb-2">
+                              <div className="text-sm">
+                                <span className="font-medium">{wsSelectedPath.split('/').pop()}</span>
+                                <Badge variant="outline" className="ml-2">{wsSelectedPath}</Badge>
+                              </div>
+                            </div>
+                            <pre className="bg-gray-900 text-gray-100 p-4 rounded overflow-auto text-sm">{wsFileContent}</pre>
+                          </>
+                        ) : (
+                          <div className="text-sm text-muted-foreground p-4">Select a file to preview</div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+          ) : null}
 
-        {/* Real-time Messages Progress*/}
-        {((session.status?.messages && session.status.messages.length > 0) ||
-          session.status?.phase === "Running" ||
-          session.status?.phase === "Pending" ||
-          session.status?.phase === "Creating") && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <span>Agentic Progress</span>
-                <Badge variant="secondary">
-                  {session.status?.messages?.length || 0} message
-                  {(session.status?.messages?.length || 0) !== 1 ? "s" : ""}
-                </Badge>
-              </CardTitle>
-              <CardDescription>Live analysis from Claude AI</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="max-h-96 overflow-y-auto space-y-4 bg-gray-50 rounded-lg p-4">
-                {/* Display all existing messages */}
-                {session.status?.messages?.map((message, index) => {
-                  const isToolMessage = message.tool_use_id || message.tool_use_name;
-                  if (isToolMessage) {
-                    return (
-                      <ToolMessage key={`tool-${index}-${message.tool_use_id}`} message={message} />
-                    );
-                  } else {
-                    return (
-                      <Message
-                        key={`text-${index}`}
-                        role="bot"
-                        content={message.content || ""}
-                        name="Claude AI"
-                      />
-                    );
-                  }
-                })}
+          {/* Results */}
+          <TabsContent value="results">
+            {latestResult ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Agent Results</CardTitle>
+                  <CardDescription>
+                    <Badge variant={latestResult.is_error ? "destructive" : "secondary"} className="text-xs">
+                      {latestResult.is_error ? (
+                        <span className="inline-flex items-center"><XCircle className="w-3 h-3 mr-1" /> Error</span>
+                      ) : (
+                        <span className="inline-flex items-center"><CheckCircle2 className="w-3 h-3 mr-1" /> Success</span>
+                      )}
+                    </Badge>
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="mb-4">
+                    <div className="flex flex-col justify-between mb-2">
+                      <div className="flex justify-between w-full gap-2 text-xs text-gray-700">
+                        <div><span className="font-medium">Duration:</span> {latestResult.duration_ms} ms</div>
+                        <div><span className="font-medium">API:</span> {latestResult.duration_api_ms} ms</div>
+                        <div><span className="font-medium">Turns:</span> {latestResult.num_turns}</div>
+                        {typeof latestResult.total_cost_usd === "number" && <div><span className="font-medium">Cost:</span> ${latestResult.total_cost_usd.toFixed(4)}</div>}
+                      </div>
 
-                {/* Show loading message if still processing */}
-                {(session.status?.phase === "Running" ||
-                  session.status?.phase === "Pending" ||
-                  session.status?.phase === "Creating") && (
-                  <Message
-                    role="bot"
-                    content={
-                      session.status?.phase === "Pending"
-                        ? "Agentic session is queued and waiting to start..."
-                        : session.status?.phase === "Creating"
-                        ? "Creating agentic environment..."
-                        : "Analyzing the website and generating insights..."
-                    }
-                    name="Claude AI"
-                    isLoading={true}
-                  />
-                )}
+                      {latestResult.usage && (
+                        <div className="mt-2">
+                          <div className="flex flex-col justify-between mb-1">
+                            <div className="text-[11px] text-gray-500">Usage</div>
+                            <button
+                              className="text-xs text-blue-600 hover:underline inline-flex items-center gap-1"
+                              onClick={() => setUsageExpanded((e) => !e)}
+                              aria-expanded={usageExpanded}
+                            >
+                              {usageExpanded ? "Hide" : "Show"} details
+                              {usageExpanded ? (
+                                <ChevronDown className="w-3 h-3 text-gray-500" />
+                              ) : (
+                                <ChevronRight className="w-3 h-3 text-gray-500" />
+                              )}
+                            </button>
+                          </div>
 
-                {/* Show empty state if no messages yet */}
-                {(!session.status?.messages || session.status.messages.length === 0) &&
-                  session.status?.phase !== "Running" &&
-                  session.status?.phase !== "Pending" &&
-                  session.status?.phase !== "Creating" && (
-                    <div className="text-center py-8 text-gray-500">
-                      <Brain className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                      <p>No messages yet</p>
+                          {!usageExpanded && (
+                            <div className="text-xs text-gray-600 italic">Usage details hidden</div>
+                          )}
+
+                          {usageExpanded && (
+                            <pre className="bg-gray-50 border rounded p-2 whitespace-pre-wrap break-words text-xs text-gray-800">
+                              {JSON.stringify(latestResult.usage, null, 2)}
+                            </pre>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {session.status?.result && (
+                    <div className="bg-white rounded-lg prose prose-sm max-w-none prose-headings:text-gray-900 prose-p:text-gray-700 prose-strong:text-gray-900 prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-gray-900 prose-pre:text-gray-100">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={outputComponents}>
+                        {session.status.result}
+                      </ReactMarkdown>
                     </div>
                   )}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Agentic Results */}
-        {session.status?.finalOutput && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Agentic Results</CardTitle>
-              <CardDescription>Claude&apos;s analysis of the target website</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="bg-white rounded-lg border p-6 prose prose-sm max-w-none prose-headings:text-gray-900 prose-p:text-gray-700 prose-strong:text-gray-900 prose-code:bg-gray-100 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-pre:bg-gray-900 prose-pre:text-gray-100">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={outputComponents}>
-                  {session.status.finalOutput}
-                </ReactMarkdown>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="text-sm text-muted-foreground">No results yet</div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );

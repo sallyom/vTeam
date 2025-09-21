@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Info } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -15,7 +15,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getApiUrl } from "@/lib/config";
-import type { CreateAgenticSessionRequest } from "@/types/agentic-session";
+import type { CreateAgenticSessionRequest, AgentPersona as AgentSummary } from "@/types/agentic-session";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const formSchema = z.object({
   prompt: z.string().min(10, "Prompt must be at least 10 characters long"),
@@ -23,18 +24,22 @@ const formSchema = z.object({
   temperature: z.number().min(0).max(2),
   maxTokens: z.number().min(100).max(8000),
   timeout: z.number().min(60).max(1800),
+  interactive: z.boolean().default(false),
   // Git configuration fields
   gitUserName: z.string().optional(),
   gitUserEmail: z.string().email().optional().or(z.literal("")),
   gitRepoUrl: z.string().url().optional().or(z.literal("")),
+  // storage paths are not user-configurable anymore
+  agentPersona: z.string().optional(),
 });
 
-type FormValues = z.infer<typeof formSchema>;
-
+type FormValues = z.input<typeof formSchema>;
 const models = [
-  { value: "claude-3-5-sonnet-20241022", label: "Claude 3.5 Sonnet" },
-  { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
-  { value: "claude-3-opus-20240229", label: "Claude 3 Opus" },
+  { value: "claude-opus-4-1", label: "Claude Opus 4.1" },
+  { value: "claude-opus-4-0", label: "Claude Opus 4" },
+  { value: "claude-sonnet-4-0", label: "Claude Sonnet 4" },
+  { value: "claude-3-7-sonnet-latest", label: "Claude Sonnet 3.7" },
+  { value: "claude-3-5-haiku-latest", label: "Claude Haiku 3.5" },
 ];
 
 export default function NewProjectSessionPage({ params }: { params: Promise<{ name: string }> }) {
@@ -42,6 +47,7 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
   const [projectName, setProjectName] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
 
   useEffect(() => {
     params.then(({ name }) => setProjectName(name));
@@ -51,15 +57,35 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
     resolver: zodResolver(formSchema),
     defaultValues: {
       prompt: "",
-      model: "claude-3-5-sonnet-20241022",
+      model: "claude-3-7-sonnet-latest",
       temperature: 0.7,
       maxTokens: 4000,
       timeout: 300,
+      interactive: false,
       gitUserName: "",
       gitUserEmail: "",
       gitRepoUrl: "",
+      agentPersona: "",
+      
     },
   });
+
+  useEffect(() => {
+    const loadAgents = async () => {
+      if (!projectName) return;
+      try {
+        const apiUrl = getApiUrl();
+        const res = await fetch(`${apiUrl}/projects/${encodeURIComponent(projectName)}/agents`);
+        if (res.ok) {
+          const data = await res.json();
+          setAgents(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    loadAgents();
+  }, [projectName]);
 
   const onSubmit = async (values: FormValues) => {
     if (!projectName) return;
@@ -75,6 +101,7 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
           maxTokens: values.maxTokens,
         },
         timeout: values.timeout,
+        interactive: values.interactive,
       };
 
       // Add Git configuration if provided
@@ -98,6 +125,14 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
         }
       }
 
+      // No user-configurable storage paths; backend/operator provide defaults
+      if (values.agentPersona) {
+        request.environmentVariables = {
+          ...(request.environmentVariables || {}),
+          AGENT_PERSONA: values.agentPersona,
+        };
+      }
+
       const apiUrl = getApiUrl();
       const response = await fetch(`${apiUrl}/projects/${encodeURIComponent(projectName)}/agentic-sessions`, {
         method: "POST",
@@ -110,7 +145,13 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
         throw new Error(errorData.message || "Failed to create agentic session");
       }
 
-      router.push(`/projects/${encodeURIComponent(projectName)}/sessions`);
+      try {
+        const responseData = await response.json();
+        const sessionName = responseData.name; 
+        router.push(`/projects/${encodeURIComponent(projectName)}/sessions/${sessionName}`);
+      } catch (err) {
+        router.push(`/projects/${encodeURIComponent(projectName)}/sessions`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -195,6 +236,56 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                 />
               </div>
 
+              <FormField
+                control={form.control}
+                name="agentPersona"
+                render={({ field }) => {
+                  const selected = agents.find((a) => a.persona === field.value);
+                  return (
+                    <FormItem>
+                      <FormLabel className="flex items-center gap-2">
+                        Agent Persona
+                        {selected && (
+                          <span className="relative group inline-block">
+                            <Info className="w-4 h-4 text-muted-foreground" />
+                            <div className="absolute z-10 hidden group-hover:block bg-popover text-popover-foreground border rounded-md p-3 shadow-md w-72 left-1/2 -translate-x-1/2 mt-2">
+                              <div className="text-sm font-medium mb-1">{selected.name}</div>
+                              <div className="text-xs text-muted-foreground mb-2">{selected.role}</div>
+                              <ul className="list-disc pl-5 space-y-1 text-sm">
+                                {selected.expertise?.map((e, i) => (
+                                  <li key={i}>{e}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          </span>
+                        )}
+                      </FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select an agent (optional)" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {agents.map((a) => (
+                            <SelectItem key={a.persona} value={a.persona}>
+                              <div className="flex flex-col">
+                                <span>{a.name}</span>
+                                <span className="text-xs text-muted-foreground">{a.role}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormDescription>
+                        Optionally inject a persona’s knowledge into the session at start.
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
+              />
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
@@ -226,6 +317,25 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                   )}
                 />
               </div>
+
+              <FormField
+                control={form.control}
+                name="interactive"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3">
+                    <FormControl>
+                      <Checkbox checked={field.value} onCheckedChange={(v) => field.onChange(Boolean(v))} />
+                    </FormControl>
+                    <div className="space-y-1 leading-none">
+                      <FormLabel>Interactive chat</FormLabel>
+                      <FormDescription>
+                        When enabled, the session runs in chat mode. You can send messages and receive streamed responses.
+                      </FormDescription>
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               {/* Git Configuration Section */}
               <div className="space-y-4">
@@ -285,6 +395,8 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                   )}
                 />
               </div>
+
+              {/* Storage paths are managed automatically by the backend/operator */}
 
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-md p-3">

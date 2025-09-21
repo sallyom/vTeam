@@ -1,755 +1,690 @@
 #!/usr/bin/env python3
 
-import asyncio
+from dataclasses import asdict
 import logging
 import os
-import requests
 import sys
-from typing import Dict, Any
+import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Dict, Any, List
 
-# Import Claude Code Python SDK
-from claude_code_sdk import ClaudeSDKClient, ClaudeCodeOptions
+from claude_code_sdk.types import StreamEvent, ResultMessage
+import requests
+from anthropic import Anthropic
 
-# Import spek-kit integration
-from spek_kit_integration import SpekKitIntegration
-
-# Import Git integration
+from auth_handler import AuthHandler, BackendClient
 from git_integration import GitIntegration
 
-# Import agent support
-from agent_loader import AgentLoader, get_agent_loader
-# Import authentication handler and backend client
-from auth_handler import AuthHandler, BackendClient
 
-# Configure logging with immediate flush for container visibility
-log_level = (
-    logging.DEBUG
-    if os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
-    else logging.INFO
-)
-logging.basicConfig(
-    level=log_level,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    stream=sys.stdout,
-    force=True,
-)
+log_level = logging.DEBUG if os.getenv("DEBUG", "").lower() in ("true", "1", "yes") else logging.INFO
+logging.basicConfig(level=log_level, format="%(asctime)s - %(levelname)s - %(message)s", stream=sys.stdout, force=True)
 logger = logging.getLogger(__name__)
 
 
-class ClaudeRunner:
-    def __init__(self):
+class SimpleClaudeRunner:
+    def __init__(self) -> None:
+        # Required inputs
         self.session_name = os.getenv("AGENTIC_SESSION_NAME", "")
         self.session_namespace = os.getenv("AGENTIC_SESSION_NAMESPACE", "default")
         self.prompt = os.getenv("PROMPT", "")
-        self.timeout = int(os.getenv("TIMEOUT", "300"))
-        self.backend_api_url = os.getenv(
-            "BACKEND_API_URL", "http://backend-service:8080/api"
-        )
+        self.api_key = os.getenv("ANTHROPIC_API_KEY", "")
 
-        # New: Agent-specific configuration
-        self.agent_persona = os.getenv("AGENT_PERSONA", "")  # e.g., "ENGINEERING_MANAGER"
-        self.workflow_phase = os.getenv("WORKFLOW_PHASE", "")  # e.g., "specify", "plan", "tasks"
-        self.parent_rfe = os.getenv("PARENT_RFE", "")  # e.g., "001-user-auth"
-        self.shared_workspace = os.getenv("SHARED_WORKSPACE", "/workspace")  # PVC mount
-        # Initialize authentication handler (T050: ServiceAccount token support)
-        self.auth_handler = AuthHandler()
-        self.backend_client = BackendClient(self.backend_api_url, self.auth_handler)
+        # Optional inputs
+        self.git_user_name = os.getenv("GIT_USER_NAME", "").strip()
+        self.git_user_email = os.getenv("GIT_USER_EMAIL", "").strip()
+        self.backend_api_url = os.getenv("BACKEND_API_URL", f"http://backend-service:8080/api").rstrip("/")
+        self.pvc_proxy_api_url = os.getenv("PVC_PROXY_API_URL", f"http://ambient-content.{self.session_namespace}.svc:8080").rstrip("/")
+        self.message_store_path = os.getenv("MESSAGE_STORE_PATH", f"/sessions/{self.session_name}/messages.json")
+        self.workspace_store_path = os.getenv("WORKSPACE_STORE_PATH", f"/sessions/{self.session_name}/workspace")
+        self.inbox_store_path = os.getenv("INBOX_STORE_PATH", f"/sessions/{self.session_name}/inbox.jsonl")
 
-        # Validate Anthropic API key for Claude Code
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY environment variable is required")
-
-        # Use persistent workspace for shared storage across agent sessions
-        workspace_dir = "/workspace"
-
-        # Initialize spek-kit integration with persistent workspace
-        self.spek_kit = SpekKitIntegration(workspace_dir=self.shared_workspace)
-
-        # Initialize Git integration
+        # Git integration (multi-repo via GIT_REPOSITORIES)
         self.git = GitIntegration()
+        
+        # Derived
+        self.workdir = Path("/tmp/workdir")
+        self.artifacts_dir = self.workdir / "artifacts"
+        self.messages: List[Dict[str, Any]] = []
 
-        # Initialize agent loader
-        self.agent_loader = get_agent_loader()
+        if not self.session_name or not self.prompt or not self.api_key:
+            missing = [k for k, v in {
+                "AGENTIC_SESSION_NAME": self.session_name,
+                "PROMPT": self.prompt,
+                "ANTHROPIC_API_KEY": self.api_key,
+            }.items() if not v]
+            raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}")
 
-        logger.info(f"Initialized ClaudeRunner for session: {self.session_name}")
-        logger.info(f"Agent persona: {self.agent_persona}")
-        logger.info(f"Workflow phase: {self.workflow_phase}")
-        logger.info(f"Parent RFE: {self.parent_rfe}")
-        logger.info("Using Claude Code CLI with spek-kit integration")
+        self.auth = AuthHandler()
+        self.backend = BackendClient(self.backend_api_url, self.auth)
 
-    async def run_agentic_session(self):
-        """Main method to run the agentic session"""
+    # ---------------- Display name helpers ----------------
+    def _fallback_display_name(self, prompt: str) -> str:
         try:
-            logger.info(
-                "Starting agentic session with Claude Code + spek-kit..."
-            )
+            first_line = (prompt or "").strip().splitlines()[0].strip()
+            if not first_line:
+                return f"Session {self.session_name}"
+            title = first_line[:60]
+            if len(first_line) > 60:
+                title = title.rstrip() + "…"
+            return title
+        except Exception:
+            return f"Session {self.session_name}"
 
-
-            # Set up Git configuration
-            await self._setup_git_integration()
-
-            # Generate and set display name
-            await self._generate_and_set_display_name()
-
-            # Determine session type based on configuration
-            if self.agent_persona and self.workflow_phase:
-                # Agent-specific RFE workflow session
-                await self._handle_agent_rfe_session()
-            else:
-                # Check if this is a spek-kit command
-                spek_command = self.spek_kit.detect_spek_kit_command(self.prompt)
-                if spek_command:
-                    await self._handle_spek_kit_session(spek_command)
-                    return
-
-                # Standard agentic session with website analysis
-                await self._handle_standard_session()
-
-        except Exception as e:
-            logger.error(f"Agentic session failed: {str(e)}")
-
-            # Update status to indicate failure
-            await self.update_session_status(
-                {
-                    "phase": "Failed",
-                    "message": f"Agentic analysis failed: {str(e)}",
-                    "completionTime": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-
-            sys.exit(1)
-
-
-    async def _generate_and_set_display_name(self):
-        """Generate a display name using LLM and update it via backend API"""
+    def _generate_display_name_from_prompt(self, prompt: str) -> str:
+        """Use a lightweight model to summarize the prompt into a short display name."""
         try:
-            logger.info("Generating display name for agentic session...")
+            api_key = self.api_key
+            if not api_key:
+                return self._fallback_display_name(prompt)
 
-            display_name = await self._generate_display_name()
-            logger.info(f"Generated display name: {display_name}")
-
-            # Update the display name via backend API
-            await self._update_display_name(display_name)
-            logger.info("Display name updated successfully")
-
-        except Exception as e:
-            logger.error(f"Error generating or setting display name: {e}")
-            # Don't fail the process, just log the warning
-
-    async def _generate_display_name(self) -> str:
-        """Generate a concise display name using Anthropic Claude API directly"""
-        try:
-            import anthropic
-
-            client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
-            prompt = f"""Create a concise, descriptive display name (max 50 characters) for an agentic session with this query:
-
-Agentic Query: {self.prompt}
-
-The display name should capture the essence of the task or request. Use format like:
-- "Code Review Task"
-- "Data Analysis Request"
-- "Technical Documentation"
-
-Return only the display name, nothing else."""
-
-            message = client.messages.create(
-                model="claude-3-5-haiku-20241022",  # Use faster, cheaper model for this simple task
-                max_tokens=100,
-                messages=[{"role": "user", "content": prompt}],
+            model = os.getenv("CLAUDE_TITLE_MODEL", "claude-3-haiku-20240307")
+            client = Anthropic(api_key=api_key)
+            system_prompt = (
+                "You generate concise, human-friendly session titles. "
+                "Return a short title (max 8 words), no punctuation at the end, "
+                "no quotes, no markdown. Title-case important words."
             )
-
-            display_name = message.content[0].text.strip()
-
-            # Ensure it's not too long
-            if len(display_name) > 50:
-                display_name = display_name[:47] + "..."
-
-            return display_name
-
-        except Exception as e:
-            logger.error(f"Error generating display name with Claude: {e}")
-            # Fallback to a simple format
-            return f"Agentic Task - {self.session_name[:20]}"
-
-    async def _update_display_name(self, display_name: str):
-        """Update the display name via backend API"""
-        try:
-            url = f"{self.backend_api_url}/agentic-sessions/{self.session_name}/displayname"
-
-            payload = {"displayName": display_name}
-
-            response = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: requests.put(url, json=payload, timeout=30)
+            user_prompt = (
+                "Summarize this prompt into a short session display name.\n\n" + prompt
             )
-
-            if response.status_code != 200:
-                logger.error(
-                    f"Failed to update display name: {response.status_code} - {response.text}"
-                )
-            else:
-                logger.info("Display name updated via backend API")
-
-        except Exception as e:
-            logger.error(f"Error updating display name via API: {e}")
-
-    async def _run_claude_code(self, prompt: str) -> tuple[str, float, list[str]]:
-        """Run Claude Code using Python SDK"""
-        try:
-            logger.info("Initializing Claude Code Python SDK...")
-
-            # Configure SDK
-            options = ClaudeCodeOptions(
-                system_prompt="You are an agentic assistant that can help with various tasks including coding, analysis, and general queries.",
-                max_turns=25,
-                permission_mode="acceptEdits",
-                cwd="/app",
+            msg = client.messages.create(
+                model=model,
+                max_tokens=64,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
             )
-
-            logger.info("Creating Claude SDK client...")
-
-            async with ClaudeSDKClient(options=options) as client:
-                logger.info("SDK Client initialized successfully")
-
-                # Send the agentic prompt
-                logger.info("Sending agentic query to Claude Code SDK...")
-                await client.query(prompt)
-
-                # Collect streaming response
-                response_text = []
-                all_messages = []  # Track all individual model outputs for CRD
-                cost = 0.0
-                duration = 0
-
-                logger.info("Processing streaming response from Claude...")
-                async for message in client.receive_response():
-                    try:
-                        # Log the message type for debugging
-                        message_type = type(message).__name__
-                        logger.debug(f"Received message type: {message_type}")
-
-                        # Stream content as it arrives
-                        print(f"[DEBUG] message object: {message}")
-                        if hasattr(message, "content"):
-                            import json
-
-                            for block in message.content:
-                                message_obj = None
-
-                                # Check for TextBlock (has 'text' attribute)
-                                if hasattr(block, "text"):
-                                    text = block.text
-                                    response_text.append(text)
-
-                                    if (
-                                        text.strip()
-                                    ):  # Only log and track non-empty text
-                                        logger.info(f"[MODEL OUTPUT] {text}")
-                                        message_obj = {"content": text.strip()}
-
-                                # Check for ToolUseBlock (has 'id', 'name', 'input' attributes)
-                                elif (
-                                    hasattr(block, "id")
-                                    and hasattr(block, "name")
-                                    and hasattr(block, "input")
-                                ):
-                                    tool_input = (
-                                        json.dumps(block.input) if block.input else "{}"
-                                    )
-                                    logger.info(f"[TOOL USE] {block.name} ({block.id})")
-                                    message_obj = {
-                                        "tool_use_id": block.id,
-                                        "tool_use_name": block.name,
-                                        "tool_use_input": tool_input,
-                                    }
-
-                                # Check for ToolResultBlock (has 'tool_use_id', 'content', 'is_error' attributes)
-                                elif hasattr(block, "tool_use_id") and hasattr(
-                                    block, "content"
-                                ):
-                                    content = ""
-                                    if isinstance(block.content, list):
-                                        # Handle list of content items
-                                        content_parts = []
-                                        for item in block.content:
-                                            if (
-                                                isinstance(item, dict)
-                                                and "text" in item
-                                            ):
-                                                content_parts.append(item["text"])
-                                            elif isinstance(item, str):
-                                                content_parts.append(item)
-                                        content = "\n".join(content_parts)
-                                    elif isinstance(block.content, str):
-                                        content = block.content
-                                    else:
-                                        content = str(block.content)
-
-                                    # Truncate very long content
-                                    if len(content) > 5000:
-                                        content = (
-                                            content[:5000]
-                                            + "\n\n[Content truncated - full content available in logs]"
-                                        )
-
-                                    is_error = getattr(block, "is_error", False)
-                                    logger.info(
-                                        f"[TOOL RESULT] {block.tool_use_id} (error: {is_error})"
-                                    )
-
-                                    # Find and update the corresponding tool use message
-                                    for i, existing_msg in enumerate(
-                                        reversed(all_messages)
-                                    ):
-                                        if (
-                                            existing_msg.get("tool_use_id")
-                                            == block.tool_use_id
-                                            and "content" not in existing_msg
-                                        ):
-                                            # Update the existing tool use message with result
-                                            idx = len(all_messages) - 1 - i
-                                            all_messages[idx]["content"] = content
-                                            all_messages[idx][
-                                                "tool_use_is_error"
-                                            ] = is_error
-                                            message_obj = None  # Don't create new message, we updated existing
-                                            break
-                                    else:
-                                        # No matching tool use found, create standalone result
-                                        message_obj = {
-                                            "content": content,
-                                            "tool_use_id": block.tool_use_id,
-                                            "tool_use_is_error": is_error,
-                                        }
-
-                                # Add message object to tracking if we created one
-                                if message_obj:
-                                    all_messages.append(message_obj)
-
-                            # Update CRD with all messages after processing this message's blocks
-                            if hasattr(message, "content") and message.content:
-                                await self.update_session_status(
-                                    {
-                                        "phase": "Running",
-                                        "message": f"Processing... ({len(all_messages)} messages received)",
-                                        "messages": all_messages,
-                                    }
-                                )
-
-                        # Get final result with metadata
-                        if message_type == "ResultMessage":
-                            cost = getattr(message, "total_cost_usd", 0.0)
-                            duration = getattr(message, "duration_ms", 0)
-                            logger.info(
-                                f"[RESULT] Cost: ${cost:.4f}, Duration: {duration}ms"
-                            )
-
-                    except Exception as e:
-                        logger.error(f"Error processing message: {e}")
-                        logger.debug(f"Message content: {message}")
-                        continue
-
-                # Get final result - use the last message content
-                result = ""
-                if response_text:
-                    # Find the last non-empty text response
-                    for text in reversed(response_text):
-                        if text.strip():
-                            result = text.strip()
+            # Extract first text block
+            text = ""
+            try:
+                for block in getattr(msg, "content", []) or []:
+                    kind = getattr(block, "type", None)
+                    if kind == "text":
+                        text = getattr(block, "text", "")
+                        if text:
                             break
+            except Exception:
+                text = ""
 
-                if not result:
-                    # Fallback to joining all if no single final message found
-                    result = "".join(response_text).strip()
-
-                if not result:
-                    raise RuntimeError("Claude Code SDK returned empty result")
-
-                logger.info(f"Agentic analysis completed successfully ({len(result)} chars)")
-                logger.info(f"Cost: ${cost:.4f}, Duration: {duration}ms")
-
-                return result, cost, all_messages
-
+            title = (text or "").strip()
+            # Sanitize
+            if title.startswith("\"") and title.endswith("\""):
+                title = title[1:-1]
+            title = title.replace("\n", " ").strip()
+            if not title:
+                return self._fallback_display_name(prompt)
+            if len(title) > 60:
+                title = title[:60].rstrip() + "…"
+            return title
         except Exception as e:
-            logger.error(f"Error running Claude Code SDK: {str(e)}")
-            raise
+            logger.warning(f"Title generation error: {e}")
+            return self._fallback_display_name(prompt)
 
-    def _create_agentic_prompt(self) -> str:
-        """Create a focused agentic prompt for Claude Code"""
-        return f"""You are an agentic assistant that can help with various tasks including coding, analysis, and general queries.
-
-AGENTIC QUERY: {self.prompt}
-
-Please help with this request. You can handle general queries, coding tasks, analysis, and other requests as appropriate.
-
-Provide a clear, helpful response to the agentic query."""
-
-    async def _handle_spek_kit_session(self, spek_command):
-        """Handle a spek-kit specific session"""
-        command, args = spek_command
-
-        logger.info(f"Processing spek-kit command: /{command}")
-
-        # Update status to indicate we're starting spek-kit workflow
-        await self.update_session_status(
-            {
-                "phase": "Running",
-                "message": f"Initializing spek-kit workflow for /{command} command",
-                "startTime": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-
-        # Set up spek-kit workspace
-        if not await self.spek_kit.setup_workspace():
-            raise RuntimeError("Failed to setup spek-kit workspace")
-
-        # Update status
-        await self.update_session_status(
-            {
-                "phase": "Running",
-                "message": f"Executing spek-kit /{command} command with spec-driven development",
-            }
-        )
-
-        # Execute the spek-kit command
-        spek_result = await self.spek_kit.execute_spek_command(command, args)
-
-        if not spek_result.get("success", False):
-            raise RuntimeError(f"Spek-kit command failed: {spek_result.get('error', 'Unknown error')}")
-
-        # Now run Claude Code to enhance the generated specs
-        enhanced_prompt = self._create_spek_enhanced_prompt(command, args, spek_result)
-
-        logger.info("Running Claude Code to enhance spek-kit specifications...")
-        result, cost, all_messages = await self._run_claude_code(enhanced_prompt)
-
-        # Collect project artifacts
-        artifacts = self.spek_kit.get_project_artifacts()
-
-        # Log the results
-        print("\n" + "=" * 80)
-        print("📋 SPEK-KIT SPECIFICATION RESULTS")
-        print("=" * 80)
-        print(f"Command: /{command}")
-        print(f"Generated Files: {len(artifacts['files'])}")
-        print("\nGenerated Specifications:")
-        print(result)
-        print("=" * 80 + "\n")
-
-        logger.info(f"SPEK-KIT RESULTS:\n{result}")
-
-        # Update the session with the final result including artifacts
-        await self.update_session_status(
-            {
-                "phase": "Completed",
-                "message": f"Spek-kit /{command} completed successfully with spec-driven development artifacts",
-                "completionTime": datetime.now(timezone.utc).isoformat(),
-                "finalOutput": result,
-                "cost": cost,
-                "messages": all_messages,
-                "spekKitCommand": command,
-                "spekKitArtifacts": artifacts,
-                "spekKitResult": spek_result,
-            }
-        )
-
-        logger.info("Spek-kit session completed successfully")
-
-    async def _handle_standard_session(self):
-        """Handle a standard agentic session with website analysis"""
-        # Update status to indicate we're starting
-        await self.update_session_status(
-            {
-                "phase": "Running",
-                "message": "Initializing Claude Code",
-                "startTime": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-
-        # Create agentic prompt for Claude Code
-        agentic_prompt = self._create_agentic_prompt()
-
-        # Update status
-        status_message = "Claude Code processing agentic request"
-
-        await self.update_session_status(
-            {
-                "phase": "Running",
-                "message": status_message,
-            }
-        )
-
-        # Run Claude Code with our agentic prompt
-        logger.info("Running Claude Code...")
-
-        result, cost, all_messages = await self._run_claude_code(agentic_prompt)
-
-        logger.info("Received agentic analysis from Claude Code")
-
-        # Log the complete agentic results to console
-        print("\n" + "=" * 80)
-        print("🔬 AGENTIC ANALYSIS RESULTS")
-        print("=" * 80)
-        print(result)
-        print("=" * 80 + "\n")
-
-        # Also log to structured logging
-        logger.info(f"FINAL AGENTIC RESULTS:\n{result}")
-
-        # Update the session with the final result
-        await self.update_session_status(
-            {
-                "phase": "Completed",
-                "message": "Agentic analysis completed successfully using Claude Code",
-                "completionTime": datetime.now(timezone.utc).isoformat(),
-                "finalOutput": result,
-                "cost": cost,
-                "messages": all_messages,
-            }
-        )
-
-        logger.info("Agentic session completed successfully")
-
-    def _create_spek_enhanced_prompt(self, command: str, args: str, spek_result: Dict[str, Any]) -> str:
-        """Create an enhanced prompt for Claude Code to work with spek-kit generated content"""
-
-        base_prompt = f"""You are working in a spek-kit project where a /{command} command has been executed.
-
-SPEK-KIT COMMAND: /{command} {args}
-
-GENERATED ARTIFACTS:
-"""
-
-        # Add information about generated files
-        if spek_result.get("files_created"):
-            base_prompt += f"Files created: {', '.join(spek_result['files_created'])}\n"
-
-        # Add the generated content
-        if command == "specify" and "spec_content" in spek_result:
-            base_prompt += f"\nGenerated Specification:\n{spek_result['spec_content']}\n"
-        elif command == "plan" and "plan_content" in spek_result:
-            base_prompt += f"\nGenerated Plan:\n{spek_result['plan_content']}\n"
-        elif command == "tasks" and "tasks_content" in spek_result:
-            base_prompt += f"\nGenerated Tasks:\n{spek_result['tasks_content']}\n"
-
-        base_prompt += f"""
-
-ENHANCEMENT INSTRUCTIONS:
-Please review and enhance the generated {command} content above. Your goal is to:
-
-1. **Analyze and improve** the generated content for completeness and quality
-2. **Add specific technical details** that may be missing
-3. **Provide actionable recommendations** for implementation
-4. **Ensure best practices** are reflected in the specifications
-5. **Make the content more comprehensive** while maintaining clarity
-
-"""
-
-        if command == "specify":
-            base_prompt += """
-For specifications, focus on:
-- More detailed user stories with clear acceptance criteria
-- Comprehensive functional and non-functional requirements
-- Technical constraints and dependencies
-- Risk assessment and mitigation strategies
-- Clear success metrics
-"""
-        elif command == "plan":
-            base_prompt += """
-For implementation plans, focus on:
-- Detailed technical architecture decisions
-- Clear development phases with timelines
-- Specific technology choices and justifications
-- Integration patterns and data flow
-- Testing and deployment strategies
-"""
-        elif command == "tasks":
-            base_prompt += """
-For task breakdowns, focus on:
-- More granular and actionable tasks
-- Clear effort estimations and dependencies
-- Specific deliverables for each task
-- Quality gates and definition of done
-- Resource allocation recommendations
-"""
-
-        base_prompt += """
-Provide your enhanced version as a complete, production-ready document that a development team could immediately use to start implementation.
-"""
-
-        return base_prompt
-
-    async def _setup_git_integration(self):
-        """Set up Git configuration and authentication"""
+    def _set_display_name_early(self) -> None:
+        """Generate and update the session display name as early as possible."""
         try:
-            logger.info("Setting up Git integration...")
+            display_name = self._generate_display_name_from_prompt(self.prompt)
+            if not display_name:
+                return
+            try:
+                import asyncio as _asyncio
+                _asyncio.run(self.backend.update_session_display_name(self.session_name, display_name))
+            except RuntimeError:
+                # Already in an event loop; skip to avoid crash
+                pass
+            except Exception as e:
+                logger.warning(f"Failed to set display name: {e}")
+        except Exception as e:
+            logger.debug(f"Skipping display name set: {e}")
 
-            # Set up Git configuration
-            git_setup_success = await self.git.setup_git_config()
-            if git_setup_success:
-                logger.info("Git configuration completed successfully")
+    def _inject_selected_agents(self) -> None:
+        """Fetch selected agent persona markdown from backend and write to .claude/agents.
 
-                # Log authentication status
-                auth_status = self.git.get_auth_status()
-                logger.info(f"Git auth status: {auth_status}")
+        Personas can be provided via AGENT_PERSONAS (comma-separated) or AGENT_PERSONA (single).
+        """
+        try:
+            personas_env = os.getenv("AGENT_PERSONAS") or os.getenv("AGENT_PERSONA", "")
+            personas = [p.strip() for p in personas_env.split(",") if p.strip()]
+            if not personas:
+                return
+            base = f"{self.backend_api_url}/projects/{self.session_namespace}/agents"
+            out_dir = self.workdir / ".claude" / "agents"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for p in personas:
+                try:
+                    url = f"{base}/{p}/markdown"
+                    resp = requests.get(url, headers=self._auth_headers(), timeout=20)
+                    if resp.status_code != 200:
+                        logger.warning(f"Agent markdown fetch failed for {p}: HTTP {resp.status_code}")
+                        continue
+                    content = resp.text or ""
+                    # Write to working dir for runner/Claude
+                    local_path = out_dir / f"{p}.md"
+                    local_path.write_text(content, encoding="utf-8")
+                    # Mirror to PVC so UI can show immediately
+                    pvc_path = f"{self.workspace_store_path}/.claude/agents/{p}.md"
+                    self.content_write(pvc_path, content, "utf8")
+                    logger.info(f"Injected agent persona: {p}")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"Failed injecting agent {p}: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Skipping agent injection: {e}")
 
-                # Clone repositories if configured
-                if self.git.repositories:
-                    logger.info(f"Cloning {len(self.git.repositories)} configured repositories...")
-                    workspace_path = Path("/workspace/git-repos")
-                    try:
-                        workspace_path.mkdir(parents=True, exist_ok=True)
-                        logger.info(f"Created Git workspace: {workspace_path}")
-                    except (PermissionError, OSError) as e:
-                        logger.warning(f"Cannot create Git workspace at {workspace_path}: {e}")
-                        # Fall back to user home directory
-                        workspace_path = Path.home() / "git-repos"
-                        workspace_path.mkdir(parents=True, exist_ok=True)
-                        logger.info(f"Using fallback Git workspace: {workspace_path}")
+    # ---------------- PVC content helpers ----------------
+    def _auth_headers(self) -> Dict[str, str]:
+        return self.auth.get_auth_headers()
 
-                    cloned_repos = await self.git.clone_repositories(workspace_path)
-                    logger.info(f"Successfully cloned {len(cloned_repos)} repositories")
+    def content_write(self, path: str, content: str, encoding: str = "utf8") -> bool:
+        url = f"{self.pvc_proxy_api_url}/content/write"
+        body = {"path": path, "content": content, "encoding": encoding}
+        try:
+            resp = requests.post(url, headers={**self._auth_headers(), "Content-Type": "application/json"}, data=json.dumps(body), timeout=30)
+            if resp.status_code // 100 == 2:
+                return True
+            logger.error(f"content_write failed for {path}: HTTP {resp.status_code}")
+        except Exception as e:
+            logger.error(f"content_write error for {path}: {e}")
+        return False
 
-                    # Store cloned repository paths for later use
-                    self.cloned_repositories = cloned_repos
+    def content_read(self, path: str) -> bytes:
+        url = f"{self.pvc_proxy_api_url}/content/file"
+        try:
+            resp = requests.get(url, headers=self._auth_headers(), params={"path": path}, timeout=30)
+            if resp.status_code == 200:
+                return resp.content
+        except Exception as e:
+            logger.error(f"content_read error for {path}: {e}")
+        return b""
+
+    def content_list(self, path: str) -> List[Dict[str, Any]]:
+        url = f"{self.pvc_proxy_api_url}/content/list"
+        try:
+            resp = requests.get(url, headers=self._auth_headers(), params={"path": path}, timeout=30)
+            if resp.status_code == 200:
+                return resp.json().get("items", [])
+        except Exception as e:
+            logger.error(f"content_list error for {path}: {e}")
+        return []
+
+    # ---------------- Workspace sync ----------------
+    def _sync_workspace_from_pvc(self) -> None:
+        if not self.workspace_store_path:
+            logger.debug("No workspace store path configured, skipping sync from PVC")
+            return
+        
+        logger.info(f"Starting workspace sync from PVC: {self.workspace_store_path} -> {self.workdir}")
+        
+        def pull_dir(pvc_path: str, dst: Path) -> None:
+            logger.debug(f"Pulling directory: {pvc_path} -> {dst}")
+            dst.mkdir(parents=True, exist_ok=True)
+            items = self.content_list(pvc_path)
+            logger.debug(f"Found {len(items)} items in {pvc_path}")
+            
+            for it in items:
+                p = it.get("path", "")
+                name = Path(p).name
+                target = dst / name
+                if it.get("isDir"):
+                    logger.debug(f"Recursively pulling directory: {p}")
+                    pull_dir(p, target)
                 else:
-                    logger.info("No repositories configured for cloning")
-                    self.cloned_repositories = {}
-            else:
-                logger.warning("Git configuration failed, continuing without Git support")
-                self.cloned_repositories = {}
+                    try:
+                        logger.debug(f"Pulling file: {p} -> {target}")
+                        data = self.content_read(p) or b""
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(data)
+                        logger.debug(f"Successfully pulled file: {p} ({len(data)} bytes)")
+                    except Exception as e:
+                        logger.warning(f"Failed to pull file {p} -> {target}: {e}")
+        
+        pull_dir(self.workspace_store_path, self.workdir)
+        logger.info("Completed workspace sync from PVC")
 
-        except Exception as e:
-            logger.error(f"Error setting up Git integration: {e}")
-            self.cloned_repositories = {}
+    def _push_workspace_to_pvc(self) -> None:
+        if not self.workspace_store_path:
+            return
+        for path in self.workdir.rglob("*"):
+            if path.is_dir():
+                        continue
+            rel = path.relative_to(self.workdir)
+            pvc_path = str(Path(self.workspace_store_path) / rel)
+            try:
+                content = path.read_text(encoding="utf-8")
+                self.content_write(pvc_path, content, "utf8")
+            except Exception:
+                try:
+                    import base64
+                    self.content_write(pvc_path, base64.b64encode(path.read_bytes()).decode("ascii"), "base64")
+                except Exception as e:
+                    logger.warning(f"Failed to push file {path} -> {pvc_path}: {e}")
 
-    async def update_session_status(self, status_update: Dict[str, Any]):
-        """Update the AgenticSession status via the backend API"""
+    # ---------------- Messaging ----------------
+    def _append_message(self, message: str) -> None:
+        payload = {
+            "type": "system_message",
+            "data": message,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        self.messages.append(payload)
+        self._flush_messages()
+
+    def _flush_messages(self) -> None:
         try:
-            logger.info(f"Updating session status: {status_update.get('phase', 'unknown')}")
-
-            # Use authenticated backend client with project-scoped API
-            ok = await self.backend_client.update_session_status(self.session_name, status_update)
+            payload = json.dumps(self.messages)
+            ok = self.content_write(self.message_store_path, payload, encoding="utf8")
             if not ok:
-                logger.error("Failed to update session status via backend client")
+                logger.warning("Failed to write messages to PVC proxy")
+            logger.info(f"Flushed {len(self.messages)} messages to PVC proxy")
+        except Exception as e:
+            logger.warning(f"Failed to flush messages: {e}")
+
+    # ---------------- Chat inbox helpers ----------------
+    async def _read_inbox_lines(self, last_offset: int) -> tuple[list[dict[str, Any]], int]:
+        try:
+            data = self.content_read(self.inbox_store_path) or b""
+            if not data:
+                return [], last_offset
+            text = data.decode("utf-8", errors="ignore")
+            lines = text.splitlines()
+            if last_offset >= len(lines):
+                return [], len(lines)
+            new_lines = lines[last_offset:]
+            msgs: list[dict[str, Any]] = []
+            for ln in new_lines:
+                try:
+                    obj = json.loads(ln)
+                    if isinstance(obj, dict):
+                        msgs.append(obj)
+                except Exception:
+                    continue
+            return msgs, len(lines)
+        except Exception as e:
+            logger.debug(f"read inbox error: {e}")
+            return [], last_offset
+
+    async def _chat_mode(self) -> None:
+        from claude_code_sdk import (
+            ClaudeSDKClient,
+            ClaudeCodeOptions,
+            AssistantMessage,
+            ToolUseBlock,
+            ToolResultBlock,
+            TextBlock,
+            UserMessage,
+            SystemMessage,
+            ThinkingBlock,
+            ResultMessage,
+        )
+
+        allowed_tools_env = os.getenv("CLAUDE_ALLOWED_TOOLS", "Read,Write,Bash").strip()
+        allowed_tools = [t.strip() for t in allowed_tools_env.split(",") if t.strip()]
+
+        options = ClaudeCodeOptions(
+            permission_mode=os.getenv("CLAUDE_PERMISSION_MODE", "acceptEdits"),
+            allowed_tools=allowed_tools if allowed_tools else None,
+            cwd=str(self.workdir),
+        )
+
+        # Restore cursor if present
+        cursor_path = f"{self.workspace_store_path}/.inbox_cursor"
+        last_offset = 0
+        try:
+            off_b = self.content_read(cursor_path)
+            if off_b:
+                last_offset = int((off_b.decode("utf-8").strip() or "0"))
+        except Exception:
+            pass
+
+        async with ClaudeSDKClient(options=options) as client:
+            async def _push_workspace_async() -> None:
+                try:
+                    loop = __import__("asyncio").get_running_loop()
+                    await loop.run_in_executor(None, self._push_workspace_to_pvc)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(f"async push workspace failed: {e}")
+
+            while True:
+                inbox, new_offset = await self._read_inbox_lines(last_offset)
+                if inbox:
+                    for msg in inbox:
+                        text = str(msg.get("content", ""))
+                        norm = text.strip().lower()
+                        if norm in ("/end", "/stop", "/quit", "/exit", "/finish"):
+                            # Graceful end of interactive session
+                            try:
+                                self._append_message("User requested session end")
+                            except Exception:
+                                pass
+                            await _push_workspace_async()
+                            self._update_status("Completed", message="Session ended by user", completed=True)
+                            await _push_workspace_async()
+                            return
+                        # Mirror user message into outbox
+                        self.messages.append({
+                            "type": "user_message",
+                            "content": text,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                        self._flush_messages()
+
+                        # Ensure any recent local changes are visible in UI before next run
+                        await _push_workspace_async()
+
+                        # Send to Claude and stream results
+                        await client.query(text)
+                        async for message in client.receive_response():
+                            if isinstance(message, AssistantMessage):
+                                message_type_map = {
+                            AssistantMessage: "assistant_message",
+                            UserMessage: "user_message",
+                            SystemMessage: "system_message",
+                            ResultMessage: "result_message",
+                        }
+                        message_type = message_type_map.get(type(message), "unknown_message")
+                        if isinstance(message, AssistantMessage) or isinstance(message, UserMessage):
+                            if isinstance(message.content, str):
+                                payload = {
+                                    "type": message_type,
+                                    "content": message.content,
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                }
+                                self.messages.append(payload)
+                                self._flush_messages()
+                            else:
+                                for block in message.content:
+                                    content_type_map = {
+                                        TextBlock: "text_block",
+                                        ThinkingBlock: "thinking_block",
+                                        ToolUseBlock: "tool_use_block",
+                                        ToolResultBlock: "tool_result_block",
+                                    }
+                                    content_type = content_type_map.get(type(block), "unknown_block")
+                                    payload = {
+                                        "type": message_type,
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        "content": {
+                                            "type": content_type,
+                                            **asdict(block),
+                                        },
+                                    }
+                                    self.messages.append(payload)
+                                    self._flush_messages()
+                        else:
+                            payload = {
+                                "type": message_type,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                **asdict(message),
+                            }
+                            self.messages.append(payload)
+                        self._flush_messages()
+                        await _push_workspace_async()
+
+                    # Commit cursor
+                    last_offset = new_offset
+                    try:
+                        self.content_write(cursor_path, str(last_offset), "utf8")
+                    except Exception:
+                        pass
+
+                await __import__("asyncio").sleep(float(os.getenv("INBOX_POLL_INTERVAL_SEC", "0.5")))
+
+    # ---------------- Status ----------------
+    def _update_status(self, phase: str, message: str | None = None, completed: bool = False, result_msg: ResultMessage | None = None) -> None:
+        payload: Dict[str, Any] = {"phase": phase}
+        if message:
+            payload["message"] = message
+
+        if result_msg:
+            payload["result"] = result_msg.result
+            payload["subtype"] = result_msg.subtype
+            payload["is_error"] = result_msg.is_error
+            payload["num_turns"] = result_msg.num_turns
+            payload["session_id"] = result_msg.session_id
+            payload["total_cost_usd"] = result_msg.total_cost_usd
+            payload["usage"] = result_msg.usage
+      
+        if completed:
+            payload["completionTime"] = datetime.now(timezone.utc).isoformat()
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.backend.update_session_status(self.session_name, payload))
+            finally:
+                loop.close()
+        except RuntimeError:
+            # already in event loop
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to update status: {e}")
+
+    # ---------------- LLM call (streaming) ----------------
+    def _run_llm_streaming(self, prompt: str) -> ResultMessage | None:
+        """Run the LLM with streaming via Claude Code SDK, emitting structured messages for the UI."""
+        # Nudge the agent to write files to artifacts folder
+        full_prompt = prompt + "\n\nIMPORTANT: Save any file outputs into the 'artifacts' folder of the working directory."
+
+        result_message: ResultMessage | None = None
+
+
+        async def run_with_client() -> None:
+            from claude_code_sdk import (
+                query,
+                ClaudeCodeOptions,
+                AssistantMessage,
+                UserMessage,
+                SystemMessage,
+                ToolUseBlock,
+                ToolResultBlock,
+                TextBlock,
+                ThinkingBlock,
+                ResultMessage,
+            )
+
+            nonlocal result_message
+
+            # Allow configuring tools via env; default to common ones
+            allowed_tools_env = os.getenv("CLAUDE_ALLOWED_TOOLS", "Read,Write,Bash").strip()
+            allowed_tools = [t.strip() for t in allowed_tools_env.split(",") if t.strip()]
+
+            options = ClaudeCodeOptions(
+                permission_mode=os.getenv("CLAUDE_PERMISSION_MODE", "acceptEdits"),
+                allowed_tools=allowed_tools if allowed_tools else None,
+                cwd=str(self.workdir),
+                # include_partial_messages=True, # TODO add incremental messages
+            )
+
+            stream = query(prompt=full_prompt, options=options)
+            try:
+                async for message in stream:
+                    logger.info(f"Message: {message}")
+                    if isinstance(message, StreamEvent):
+                        # handle stream events
+                        pass
+                    else:
+                        message_type_map = {
+                            AssistantMessage: "assistant_message",
+                            UserMessage: "user_message",
+                            SystemMessage: "system_message",
+                            ResultMessage: "result_message",
+                        }
+                        message_type = message_type_map.get(type(message), "unknown_message")
+                        if isinstance(message, AssistantMessage) or isinstance(message, UserMessage):
+
+                            if isinstance(message.content, str):
+                                payload = {
+                                    "type": message_type,
+                                    "content": message.content,
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                }
+                                self.messages.append(payload)
+                                self._flush_messages()
+                            else:
+                                for block in message.content:
+                                    content_type_map = {
+                                        TextBlock: "text_block",
+                                        ThinkingBlock: "thinking_block",
+                                        ToolUseBlock: "tool_use_block",
+                                        ToolResultBlock: "tool_result_block",
+                                    }
+                                    content_type = content_type_map.get(type(block), "unknown_block")
+                                    payload = {
+                                        "type": message_type,
+                                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                                        "content": {
+                                            "type": content_type,
+                                            **asdict(block),
+                                        },
+                                    }
+                                    self.messages.append(payload)
+                                    self._flush_messages()
+                        else:
+                            payload = {
+                                "type": message_type,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                **asdict(message),
+                            }
+                            self.messages.append(payload)
+                            self._flush_messages()
+                            if isinstance(message, ResultMessage):
+                                result_message = message
+            except GeneratorExit:
+                logger.debug("Stream generator closed (GeneratorExit)")
+            except Exception as e:  # noqa: BLE001
+                logger.error(f"Claude Code SDK streaming error: {e}")
+            finally:
+                aclose = getattr(stream, "aclose", None)
+                if callable(aclose):
+                    try:
+                        await aclose()
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug(f"Stream aclose raised: {e}")
+                        
+                    
+
+
+        try:
+            import asyncio
+            asyncio.run(run_with_client())
+        except RuntimeError:
+            # If we're already inside an event loop (unlikely here), run in a thread
+            import threading
+
+            thread_error: List[Exception] = []
+            done = threading.Event()
+
+            def runner() -> None:
+                try:
+                    import asyncio as _asyncio
+                    _asyncio.run(run_with_client())
+                except Exception as e:  # noqa: BLE001
+                    thread_error.append(e)
+                finally:
+                    done.set()
+
+            t = threading.Thread(target=runner, daemon=True)
+            t.start()
+            done.wait()
+            if thread_error:
+                logger.error(f"Claude Code SDK streaming failed: {thread_error[0]}")
+
+        # Final flush to ensure UI gets all content
+        self._flush_messages()
+        return result_message
+
+    # ---------------- Main flow ----------------
+    def run(self) -> int:
+        try:
+            logger.info(f"Starting session {self.session_namespace}/{self.session_name}")
+            self.workdir.mkdir(parents=True, exist_ok=True)
+            self.artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+            self._update_status("Running", message="Initializing session")
+
+            # Update display name immediately based on the prompt
+            self._set_display_name_early()
+
+            # 1) Sync shared workspace from PVC (if configured)
+            self._update_status("Running", message="Syncing workspace from PVC")
+            self._sync_workspace_from_pvc()
+
+            # Inject selected agents into .claude/agents as markdown
+            self._inject_selected_agents()
+
+            # 1b) Setup Git and clone configured repositories into workdir (always)
+            try:
+                import asyncio
+                self._update_status("Running", message="Setting up Git")
+                asyncio.run(self.git.setup_git_config())
+                self._update_status("Running", message="Cloning repositories")
+                asyncio.run(self.git.clone_repositories(self.workdir))
+            except RuntimeError:
+                # If an event loop is already running, skip async setup to avoid crash
+                pass
+
+
+            # Chat vs headless mode
+            chat_enabled = os.getenv("INTERACTIVE", "").lower() in ("true", "1", "yes")
+            if chat_enabled:
+                logger.info("Entering chat mode")
+                self._update_status("Waiting for user input", message="Claude is running in interactive mode")
+                import asyncio as _asyncio
+                _asyncio.run(self._chat_mode())
+                # Chat mode is long-running; we won't push workspace or mark completed here
+                return 0
+
+            # 3) Headless one-shot
+            self._update_status("Running", message="Claude is running")
+            result_msg = self._run_llm_streaming(self.prompt)
+            
+
+            # 4) Push entire workspace back to PVC
+            self._update_status("Running", message="Pushing workspace to PVC")
+            self._push_workspace_to_pvc()
+
+            if result_msg is not None:
+                try:
+                    import asyncio as _asyncio
+                    async def _send():
+                        summary_payload = {
+                            "message": "Session completed",
+                            "phase": "Completed",
+                            "subtype": getattr(result_msg, "subtype", None),
+                            "is_error": getattr(result_msg, "is_error", None),
+                            "num_turns": getattr(result_msg, "num_turns", None),
+                            "session_id": getattr(result_msg, "session_id", None),
+                            "total_cost_usd": getattr(result_msg, "total_cost_usd", None),
+                            "usage": getattr(result_msg, "usage", None),
+                            "result": getattr(result_msg, "result", None),
+                        }
+                        await self.backend.update_session_status(self.session_name, summary_payload)
+                    _asyncio.run(_send())
+                except RuntimeError:
+                    pass
+                except Exception as e:
+                    logger.warning(f"Failed to send result summary: {e}")
+
+            self._update_status("Completed", message="Session completed", completed=True, result_msg=result_msg)
+            logger.info("Session completed successfully")
+            return 0
 
         except Exception as e:
-            logger.error(f"Error updating session status: {str(e)}")
-            # Don't raise here as this shouldn't stop the main process
-
-    async def _handle_agent_rfe_session(self):
-        """Handle an agent-specific RFE workflow session"""
-        logger.info(f"Starting agent RFE session: {self.agent_persona} - {self.workflow_phase}")
-
-        # Update status to indicate we're starting
-        await self.update_session_status(
-            {
-                "phase": "Running",
-                "message": f"Initializing {self.agent_persona} for {self.workflow_phase} phase",
-                "startTime": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-
-        # Set up spek-kit workspace (shared across agents)
-        if not await self.spek_kit.setup_workspace():
-            raise RuntimeError("Failed to setup spek-kit workspace")
-
-        # Get agent-specific prompt for this phase
-        agent_prompt = self.agent_loader.get_agent_prompt(
-            self.agent_persona, self.workflow_phase, self.prompt
-        )
-
-        if not agent_prompt:
-            raise RuntimeError(f"No agent configuration found for: {self.agent_persona}")
-
-        # Update status
-        await self.update_session_status(
-            {
-                "phase": "Running",
-                "message": f"{self.agent_persona} executing /{self.workflow_phase} command",
-            }
-        )
-
-        # Create workspace structure for this RFE and agent
-        agent_workspace = Path(self.shared_workspace) / "agents" / self.workflow_phase
-        agent_workspace.mkdir(parents=True, exist_ok=True)
-
-        # Create agent-specific prompt that combines persona with spek-kit command
-        logger.info(f"Running {self.agent_persona} with spek-kit /{self.workflow_phase}...")
-
-        # Execute with Claude Code
-        result, cost, all_messages = await self._run_claude_code(agent_prompt)
-
-        logger.info(f"Agent {self.agent_persona} completed {self.workflow_phase} phase")
-
-        # Save agent-specific result to shared workspace
-        agent_result_file = agent_workspace / f"{self.agent_persona.lower().replace('_', '-')}.md"
-        agent_result_file.write_text(result)
-
-        # Log the complete agent results to console
-        print("\n" + "=" * 80)
-        print(f"🤖 AGENT RESULTS: {self.agent_persona} - {self.workflow_phase.upper()}")
-        print("=" * 80)
-        print(result)
-        print("=" * 80 + "\n")
-
-        # Collect project artifacts from spek-kit
-        artifacts = self.spek_kit.get_project_artifacts()
-
-        # Update the session with the final result
-        await self.update_session_status(
-            {
-                "phase": "Completed",
-                "message": f"{self.agent_persona} completed {self.workflow_phase} phase successfully",
-                "completionTime": datetime.now(timezone.utc).isoformat(),
-                "finalOutput": result,
-                "cost": cost,
-                "messages": all_messages,
-                "artifacts": artifacts,
-                "agentResultFile": str(agent_result_file),
-            }
-        )
-
-        logger.info(f"Agent RFE session completed: {self.agent_persona}")
+            logger.error(f"Session failed: {e}")
+            self._update_status("Failed", message=str(e), completed=True)
+            return 1
 
 
-async def main():
-    """Main entry point"""
-    logger.info("Claude Agentic Runner with Claude Code starting...")
-
-    # Validate required environment variables
-    required_vars = [
-        "AGENTIC_SESSION_NAME",
-        "PROMPT",
-        "ANTHROPIC_API_KEY",
-    ]
-
-    # WEBSITE_URL is now optional for all session types
-
-    missing_vars = [var for var in required_vars if not os.getenv(var)]
-
-    if missing_vars:
-        logger.error(
-            f"Missing required environment variables: {', '.join(missing_vars)}"
-        )
-        sys.exit(1)
-
+def main() -> None:
     try:
-        runner = ClaudeRunner()
-        await runner.run_agentic_session()
-
-    except KeyboardInterrupt:
-        logger.info("Agentic session interrupted by user")
-        sys.exit(0)
-
+        rc = SimpleClaudeRunner().run()
+        sys.exit(rc)
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(f"Fatal error: {e}")
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
+
+ 

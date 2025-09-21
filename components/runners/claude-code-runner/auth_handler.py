@@ -33,7 +33,6 @@ class AuthHandler:
         if self.auth_mode == "bot_token" and self.bot_token:
             # Use provided bot token (for webhook-triggered sessions)
             headers["Authorization"] = f"Bearer {self.bot_token}"
-            logger.info("Using bot token authentication")
 
         elif os.path.exists(self.service_account_token_path):
             # Use Kubernetes ServiceAccount token
@@ -155,10 +154,39 @@ class BackendClient:
         """
         import aiohttp
         import json
+        import os
 
         endpoint = self.get_api_endpoint(f"/agentic-sessions/{session_name}/status")
         headers = self.get_request_headers()
+        auth_headers = self.auth_handler.get_auth_headers()
 
+        # Intercept messages: write directly to PVC proxy and strip from status
+        messages = None
+        if isinstance(status_data, dict) and "messages" in status_data:
+            messages = status_data.get("messages")
+            try:
+                # Best-effort write to PVC proxy if configured
+                pvc_base = os.getenv("PVC_PROXY_API_URL", "").rstrip("/")
+                msg_path = os.getenv("MESSAGE_STORE_PATH", f"/sessions/{session_name}/messages.json")
+                if pvc_base and messages is not None:
+                    body = {"path": msg_path, "content": json.dumps(messages), "encoding": "utf8"}
+                    async with aiohttp.ClientSession() as sess2:
+                        async with sess2.post(
+                            f"{pvc_base}/content/write",
+                            headers={**auth_headers, "Content-Type": "application/json"},
+                            data=json.dumps(body),
+                        ) as resp2:
+                            _ = await resp2.text()
+            except Exception as e:
+                logger.warning(f"Failed to write messages to PVC proxy: {e}")
+            # Remove messages from status payload
+            try:
+                status_data = dict(status_data)
+                status_data.pop("messages", None)
+            except Exception:
+                pass
+
+        # Filter allowed fields only
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.put(
@@ -174,4 +202,38 @@ class BackendClient:
                         return False
         except Exception as e:
             logger.error(f"Error updating session status: {e}")
+            return False
+
+    async def update_session_display_name(self, session_name: str, display_name: str) -> bool:
+        """
+        Update only the display name for a given session.
+
+        Args:
+            session_name: Name of the session to update
+            display_name: New display name
+
+        Returns:
+            True if successful, False otherwise
+        """
+        import aiohttp
+        import json
+
+        endpoint = self.get_api_endpoint(f"/agentic-sessions/{session_name}/displayname")
+        headers = self.get_request_headers()
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.put(
+                    endpoint,
+                    headers=headers,
+                    data=json.dumps({"displayName": display_name}),
+                ) as response:
+                    if response.status == 200:
+                        logger.info("Successfully updated session display name")
+                        return True
+                    else:
+                        logger.error(f"Failed to update display name: {response.status}")
+                        return False
+        except Exception as e:
+            logger.error(f"Error updating session display name: {e}")
             return False

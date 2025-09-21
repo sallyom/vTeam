@@ -35,15 +35,82 @@ export type AgenticSessionSpec = {
 	displayName?: string;
 	gitConfig?: GitConfig;
 	project?: string;
+	interactive?: boolean;
 };
 
-export type MessageObject = {
-	content?: string;
-	tool_use_id?: string;
-	tool_use_name?: string;
-	tool_use_input?: string;
-	tool_use_is_error?: boolean;
+// -----------------------------
+// Content Block Types
+// -----------------------------
+export type TextBlock = {
+	type: "text_block";
+	text: string;
+}
+export type ThinkingBlock = {
+	type: "thinking_block";
+	thinking: string;
+	signature: string;
+}
+export type ToolUseBlock = {
+	type: "tool_use_block";
+	id: string;
+	name: string;
+	input: Record<string, any>;
+}
+export type ToolResultBlock = {
+	type: "tool_result_block";
+	tool_use_id: string;
+	content?: string | Array<Record<string, any>> | null;
+	is_error?: boolean | null;
 };
+
+export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock;
+
+export type ToolUseMessages = {
+	type: "tool_use_messages";
+	toolUseBlock: ToolUseBlock;
+	resultBlock: ToolResultBlock;
+	timestamp: string;
+}
+	
+// -----------------------------
+// Message Types
+// -----------------------------
+export type Message = UserMessage | AssistantMessage | SystemMessage | ResultMessage | ToolUseMessages;
+
+export type UserMessage = {
+	type: "user_message";
+	content: ContentBlock | string;
+	timestamp: string;
+}
+export type AssistantMessage = {
+	type: "assistant_message";
+	content: ContentBlock;
+	model: string;
+	timestamp: string;
+}
+export type SystemMessage = {
+	type: "system_message";
+	subtype: string;
+	data: Record<string, any>;
+	timestamp: string;
+}
+export type ResultMessage = {
+	type: "result_message";
+	subtype: string;
+	duration_ms: number;
+	duration_api_ms: number;
+	is_error: boolean;
+	num_turns: number;
+	session_id: string;
+	total_cost_usd?: number | null;
+	usage?: Record<string, any> | null;
+	result?: string | null;
+	timestamp: string;
+}
+
+// Backwards-compatible message type consumed by frontend components.
+// Prefer using StreamMessage going forward.
+export type MessageObject = Message;
 
 export type AgenticSessionStatus = {
 	phase: AgenticSessionPhase;
@@ -51,9 +118,16 @@ export type AgenticSessionStatus = {
 	startTime?: string;
 	completionTime?: string;
 	jobName?: string;
-	finalOutput?: string;
-	cost?: number;
-	messages?: MessageObject[];
+  	// Storage & counts (align with CRD)
+  	stateDir?: string;
+	// Runner result summary fields
+	subtype?: string;
+	is_error?: boolean;
+	num_turns?: number;
+	session_id?: string;
+	total_cost_usd?: number | null;
+	usage?: Record<string, any> | null;
+	result?: string | null;
 };
 
 export type AgenticSession = {
@@ -73,6 +147,8 @@ export type CreateAgenticSessionRequest = {
 	timeout?: number;
 	gitConfig?: GitConfig;
 	project?: string;
+  	environmentVariables?: Record<string, string>;
+	interactive?: boolean;
 	// New fields for agent sessions
 	agentPersona?: string;
 	workflowPhase?: string;
@@ -118,8 +194,8 @@ export type RFEWorkflow = {
 	description: string;
   currentPhase?: WorkflowPhase; // derived in UI
   status?: "active" | "completed" | "failed" | "paused"; // derived in UI
-	targetRepoUrl: string;
-	targetRepoBranch: string;
+  repositories?: GitRepository[]; // CRD-aligned optional array
+  workspacePath?: string; // CRD-aligned optional path
   agentSessions?: RFESession[];
   artifacts?: ArtifactFile[];
 	createdAt: string;
@@ -130,10 +206,8 @@ export type RFEWorkflow = {
 export type CreateRFEWorkflowRequest = {
 	title: string;
 	description: string;
-	targetRepoUrl: string;
-	targetRepoBranch: string;
-	gitUserName?: string;
-	gitUserEmail?: string;
+  repositories?: GitRepository[];
+  workspacePath?: string;
 };
 
 export type PhaseResult = {
