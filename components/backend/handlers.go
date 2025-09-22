@@ -2811,6 +2811,18 @@ func rfeFromUnstructured(item *unstructured.Unstructured) *RFEWorkflow {
 		}
 	}
 
+	// Parse jiraLinks
+	if links, ok := spec["jiraLinks"].([]interface{}); ok {
+		for _, it := range links {
+			if m, ok := it.(map[string]interface{}); ok {
+				path := fmt.Sprintf("%v", m["path"])
+				jiraKey := fmt.Sprintf("%v", m["jiraKey"])
+				if strings.TrimSpace(path) != "" && strings.TrimSpace(jiraKey) != "" {
+					wf.JiraLinks = append(wf.JiraLinks, WorkflowJiraLink{Path: path, JiraKey: jiraKey})
+				}
+			}
+		}
+	}
 	return wf
 }
 
@@ -3081,6 +3093,13 @@ func getProjectRFEWorkflow(c *gin.Context) {
 		"createdAt":     wf.CreatedAt,
 		"updatedAt":     wf.UpdatedAt,
 	}
+	if len(wf.JiraLinks) > 0 {
+		links := make([]map[string]interface{}, 0, len(wf.JiraLinks))
+		for _, l := range wf.JiraLinks {
+			links = append(links, map[string]interface{}{"path": l.Path, "jiraKey": l.JiraKey})
+		}
+		resp["jiraLinks"] = links
+	}
 	if len(wf.Repositories) > 0 {
 		repos := make([]map[string]interface{}, 0, len(wf.Repositories))
 		for _, r := range wf.Repositories {
@@ -3232,6 +3251,153 @@ func deleteProjectRFEWorkflow(c *gin.Context) {
 		_ = reqDyn.Resource(gvr).Namespace(c.Param("projectName")).Delete(context.TODO(), id, v1.DeleteOptions{})
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Workflow deleted successfully"})
+}
+
+// POST /api/projects/:projectName/rfe-workflows/:id/jira { path }
+// Creates a Jira issue from a workspace file and updates the RFEWorkflow CR with the linkage
+func publishWorkflowFileToJira(c *gin.Context) {
+	project := c.Param("projectName")
+	id := c.Param("id")
+
+	var req struct {
+		Path string `json:"path" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Path) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+		return
+	}
+
+	// Load runner secrets for Jira config
+	// Reuse listRunnerSecrets helpers indirectly by reading the Secret directly
+	_, reqDyn := getK8sClientsForRequest(c)
+	reqK8s, _ := getK8sClientsForRequest(c)
+	if reqK8s == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid user token"})
+		return
+	}
+
+	// Determine configured secret name
+	secretName := ""
+	if reqDyn != nil {
+		gvr := getProjectSettingsResource()
+		if obj, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), "projectsettings", v1.GetOptions{}); err == nil {
+			if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
+				if v, ok := spec["runnerSecretsName"].(string); ok {
+					secretName = strings.TrimSpace(v)
+				}
+			}
+		}
+	}
+	if secretName == "" {
+		secretName = "ambient-runner-secrets"
+	}
+
+	sec, err := reqK8s.CoreV1().Secrets(project).Get(c.Request.Context(), secretName, v1.GetOptions{})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read runner secret", "details": err.Error()})
+		return
+	}
+	get := func(k string) string {
+		if b, ok := sec.Data[k]; ok {
+			return string(b)
+		}
+		return ""
+	}
+	jiraURL := strings.TrimSpace(get("JIRA_URL"))
+	jiraProject := strings.TrimSpace(get("JIRA_PROJECT"))
+	jiraEmail := strings.TrimSpace(get("JIRA_EMAIL"))
+	jiraToken := strings.TrimSpace(get("JIRA_API_TOKEN"))
+	if jiraURL == "" || jiraProject == "" || jiraEmail == "" || jiraToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing Jira configuration in runner secret"})
+		return
+	}
+
+	// Load workflow for title
+	gvrWf := getRFEWorkflowResource()
+	if reqDyn == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid user token"})
+		return
+	}
+	item, err := reqDyn.Resource(gvrWf).Namespace(project).Get(c.Request.Context(), id, v1.GetOptions{})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+	wf := rfeFromUnstructured(item)
+
+	// Read file content
+	absPath := resolveWorkflowWorkspaceAbsPath(id, req.Path)
+	b, ferr := readProjectContentFile(c, project, absPath)
+	if ferr != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Failed to read workspace file"})
+		return
+	}
+	content := string(b)
+
+	// Derive summary from file extension and workflow title
+	filename := filepath.Base(absPath)
+	phaseName := strings.TrimSuffix(filename, filepath.Ext(filename))
+	if phaseName == "spec" {
+		phaseName = "specify"
+	}
+	summary := fmt.Sprintf("[RFE] %s - %s", wf.Title, phaseName)
+
+	// Create Jira issue (v2 API)
+	jiraBase := strings.TrimRight(jiraURL, "/")
+	jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue", jiraBase)
+	reqBody := map[string]interface{}{
+		"fields": map[string]interface{}{
+			"project":     map[string]string{"key": jiraProject},
+			"summary":     summary,
+			"description": content,
+			"issuetype":   map[string]string{"name": "Task"},
+			"labels":      []string{"rfe", phaseName, id},
+		},
+	}
+	payload, _ := json.Marshal(reqBody)
+	httpReq, _ := http.NewRequest("POST", jiraEndpoint, bytes.NewReader(payload))
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(jiraEmail+":"+jiraToken)))
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	httpResp, httpErr := httpClient.Do(httpReq)
+	if httpErr != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Jira request failed", "details": httpErr.Error()})
+		return
+	}
+	defer httpResp.Body.Close()
+	respBody, _ := io.ReadAll(httpResp.Body)
+	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+		c.Data(httpResp.StatusCode, "application/json", respBody)
+		return
+	}
+	var created struct {
+		Key string `json:"key"`
+	}
+	_ = json.Unmarshal(respBody, &created)
+	if strings.TrimSpace(created.Key) == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Jira creation returned no key"})
+		return
+	}
+
+	// Update CR: append jiraLinks entry
+	obj := item.DeepCopy()
+	spec, _ := obj.Object["spec"].(map[string]interface{})
+	if spec == nil {
+		spec = map[string]interface{}{}
+		obj.Object["spec"] = spec
+	}
+	var links []interface{}
+	if existing, ok := spec["jiraLinks"].([]interface{}); ok {
+		links = existing
+	}
+	links = append(links, map[string]interface{}{"path": req.Path, "jiraKey": created.Key})
+	spec["jiraLinks"] = links
+	if _, err := reqDyn.Resource(gvrWf).Namespace(project).Update(c.Request.Context(), obj, v1.UpdateOptions{}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update workflow with Jira link", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"key": created.Key, "url": fmt.Sprintf("%s/browse/%s", jiraBase, created.Key)})
 }
 
 // List sessions linked to a project-scoped RFE workflow by label selector

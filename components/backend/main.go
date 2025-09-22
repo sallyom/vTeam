@@ -111,6 +111,8 @@ func main() {
 			// Workflow workspace APIs
 			projectGroup.GET("/rfe-workflows/:id/workspace", getRFEWorkflowWorkspace)
 			projectGroup.GET("/rfe-workflows/:id/workspace/*path", getRFEWorkflowWorkspaceFile)
+			// Publish a workspace file to Jira and record linkage on the CR
+			projectGroup.POST("/rfe-workflows/:id/jira", publishWorkflowFileToJira)
 			// Sessions linkage within an RFE
 			projectGroup.GET("/rfe-workflows/:id/sessions", listProjectRFEWorkflowSessions)
 			projectGroup.POST("/rfe-workflows/:id/sessions", addProjectRFEWorkflowSession)
@@ -325,14 +327,20 @@ type CloneSessionRequest struct {
 
 // RFE Workflow Data Structures
 type RFEWorkflow struct {
-	ID            string          `json:"id"`
-	Title         string          `json:"title"`
-	Description   string          `json:"description"`
-	Repositories  []GitRepository `json:"repositories,omitempty"`
-	Project       string          `json:"project,omitempty"`
-	WorkspacePath string          `json:"workspacePath"`
-	CreatedAt     string          `json:"createdAt"`
-	UpdatedAt     string          `json:"updatedAt"`
+	ID            string             `json:"id"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description"`
+	Repositories  []GitRepository    `json:"repositories,omitempty"`
+	Project       string             `json:"project,omitempty"`
+	WorkspacePath string             `json:"workspacePath"`
+	CreatedAt     string             `json:"createdAt"`
+	UpdatedAt     string             `json:"updatedAt"`
+	JiraLinks     []WorkflowJiraLink `json:"jiraLinks,omitempty"`
+}
+
+type WorkflowJiraLink struct {
+	Path    string `json:"path"`
+	JiraKey string `json:"jiraKey"`
 }
 
 type CreateRFEWorkflowRequest struct {
@@ -416,6 +424,13 @@ func rfeWorkflowToCRObject(workflow *RFEWorkflow) map[string]interface{} {
 		"title":         workflow.Title,
 		"description":   workflow.Description,
 		"workspacePath": workflow.WorkspacePath,
+	}
+	if len(workflow.JiraLinks) > 0 {
+		links := make([]map[string]interface{}, 0, len(workflow.JiraLinks))
+		for _, l := range workflow.JiraLinks {
+			links = append(links, map[string]interface{}{"path": l.Path, "jiraKey": l.JiraKey})
+		}
+		spec["jiraLinks"] = links
 	}
 
 	if len(workflow.Repositories) > 0 {

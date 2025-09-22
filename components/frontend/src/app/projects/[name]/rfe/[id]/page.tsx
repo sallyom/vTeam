@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AgenticSession, CreateAgenticSessionRequest, RFEWorkflow, WorkflowPhase } from "@/types/agentic-session";
 import { WORKFLOW_PHASE_LABELS } from "@/lib/agents";
 import { ArrowLeft, Play, Loader2, FolderTree, Plus } from "lucide-react";
+import { Upload } from "lucide-react";
 import { FileTree, type FileTreeNode } from "@/components/file-tree";
 
 function phaseProgress(w: RFEWorkflow, phase: WorkflowPhase) {
@@ -40,9 +41,37 @@ export default function ProjectRFEDetailPage() {
   const [wsFileContent, setWsFileContent] = useState<string>("");
   const [wsLoading, setWsLoading] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("overview");
-  const [specExists, setSpecExists] = useState<boolean>(false);
-  const [planExists, setPlanExists] = useState<boolean>(false);
-  const [tasksExists, setTasksExists] = useState<boolean>(false);
+
+ 
+  const [publishingPhase, setPublishingPhase] = useState<WorkflowPhase | null>(null);
+
+  const [specKitDir, setSpecKitDir] = useState<{
+    spec: {
+      exists: boolean;
+      content: string;
+    },
+    plan: {
+      exists: boolean;
+      content: string;
+    },
+    tasks: {
+      exists: boolean;
+      content: string;
+    }
+  }>({
+    spec: {
+      exists: false,
+      content: "",
+    },
+    plan: {
+      exists: false,
+      content: "",
+    },
+    tasks: {
+      exists: false,
+      content: "",
+    }
+  });
 
   const load = useCallback(async () => {
     try {
@@ -95,11 +124,30 @@ export default function ProjectRFEDetailPage() {
   }, [project, id]);
 
   const probeWorkspaceAndPhase = useCallback(async () => {
-    const items = await listWsPath("specs");
-    const names = new Set(items.map((i: any) => i.name));
-    setSpecExists(names.has("spec.md"));
-    setPlanExists(names.has("plan.md"));
-    setTasksExists(names.has("tasks.md"));
+    const features = await listWsPath("specs");
+    const firstFeature = features[0];
+
+    // Probe spec.md, plan.md, tasks.md
+    const spec = await listWsPath(`${firstFeature.path}/spec.md`);
+    const plan = await listWsPath(`${firstFeature.path}/plan.md`);
+    const tasks = await listWsPath(`${firstFeature.path}/tasks.md`);
+    
+    setSpecKitDir({
+      spec: {
+        exists: spec.length > 0,
+        content: spec[0].content,
+      },
+      plan: {
+        exists: plan.length > 0,
+        content: plan[0].content,
+      },
+      tasks: {
+        exists: tasks.length > 0,
+        content: tasks[0].content,
+      },
+    });
+
+
   }, [listWsPath]);
 
   useEffect(() => {
@@ -197,7 +245,7 @@ export default function ProjectRFEDetailPage() {
     </div>
   );
 
-  const currentPhase: WorkflowPhase = (!specExists && !planExists && !tasksExists) ? "pre" : (!specExists ? "specify" : (!planExists ? "plan" : (!tasksExists ? "tasks" : "completed")));
+  const currentPhase: WorkflowPhase = (!specKitDir.spec.exists && !specKitDir.plan.exists && !specKitDir.tasks.exists) ? "pre" : (!specKitDir.spec.exists ? "specify" : (!specKitDir.plan.exists ? "plan" : (!specKitDir.tasks.exists ? "tasks" : "completed")));
   const workflowWorkspace = workflow.workspacePath || `/rfe-workflows/${id}/workspace`;
   const phases: WorkflowPhase[] = ["pre", "specify", "plan", "tasks"];
   const idx = phases.indexOf(currentPhase);
@@ -241,7 +289,7 @@ export default function ProjectRFEDetailPage() {
               <CardTitle className="text-sm font-medium">Phase Files</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{(specExists ? 1 : 0) + (planExists ? 1 : 0) + (tasksExists ? 1 : 0)}</div>
+              <div className="text-2xl font-bold">{(specKitDir.spec.exists ? 1 : 0) + (specKitDir.plan.exists ? 1 : 0) + (specKitDir.tasks.exists ? 1 : 0)}</div>
             </CardContent>
           </Card>
         </div>
@@ -271,7 +319,7 @@ export default function ProjectRFEDetailPage() {
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="sessions">Sessions</TabsTrigger>
-            <TabsTrigger value="workspace">Workspace</TabsTrigger>
+            {hasWorkspace ? <TabsTrigger value="workspace">Workspace</TabsTrigger> : null}
           </TabsList>
 
           <TabsContent value="overview">
@@ -285,17 +333,14 @@ export default function ProjectRFEDetailPage() {
                     const phaseList = ["specify","plan","tasks"] as WorkflowPhase[];
                     return phaseList.map(phase => {
                       const expected = (() => {
-                        // Derive expected path under specs/. If subfolder exists, prefer it.
-                        // We only know existence booleans here, so use conventional relative names.
-                        // The backend summary already handles subfolder detection for existence.
-                        if (phase === "specify") return "specs/spec.md";
-                        if (phase === "plan") return "specs/plan.md";
-                        return "specs/tasks.md";
+                        if (phase === "specify") return "spec.md";
+                        if (phase === "plan") return "plan.md";
+                        return "tasks.md";
                       })();
-                      const exists = phase === "specify" ? specExists : phase === "plan" ? planExists : tasksExists;
+                      const exists = phase === "specify" ? specKitDir.spec.exists : phase === "plan" ? specKitDir.plan.exists : specKitDir.tasks.exists;
                       const sessionForPhase = rfeSessions.find(s => (s.metadata.labels)?.["rfe-phase"] === phase);
                      
-                      const prerequisitesMet = phase === "specify" ? true : phase === "plan" ? specExists : (specExists && planExists);
+                      const prerequisitesMet = phase === "specify" ? true : phase === "plan" ? specKitDir.spec.exists : (specKitDir.spec.exists && specKitDir.plan.exists);
                       const sessionDisplay = ((sessionForPhase as any)?.spec?.displayName) || sessionForPhase?.metadata.name;
                       return (
                         <div key={phase} className="p-4 rounded-lg border flex items-center justify-between">
@@ -358,6 +403,26 @@ export default function ProjectRFEDetailPage() {
                                 }
                               }} disabled={startingPhase === phase || !prerequisitesMet}>
                                 {startingPhase === phase ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Starting…</>) : (<><Play className="mr-2 h-4 w-4" />Generate</>)}
+                              </Button>
+                            )}
+                            {exists && (
+                              <Button size="sm" variant="secondary" onClick={async () => {
+                                try {
+                                  setPublishingPhase(phase);
+                                  const resp = await fetch(`/api/projects/${encodeURIComponent(project)}/rfe/${encodeURIComponent(id)}/jira`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ phase }),
+                                  });
+                                  const data = await resp.json().catch(() => ({}));
+                                  if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+                                } catch (e) {
+                                  setError(e instanceof Error ? e.message : "Failed to publish to Jira");
+                                } finally {
+                                  setPublishingPhase(null);
+                                }
+                              }} disabled={publishingPhase === phase}>
+                                {publishingPhase === phase ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Publishing…</>) : (<><Upload className="mr-2 h-4 w-4" />Publish to Jira</>)}
                               </Button>
                             )}
                           </div>
