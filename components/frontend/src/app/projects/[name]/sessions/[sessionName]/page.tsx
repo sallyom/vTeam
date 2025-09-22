@@ -276,6 +276,8 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     }
     return  `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
   }, [session?.spec?.paths?.workspace]);
+
+  console.log(workspaceBasePath)
   
 
   const allMessages = useMemo(() => {
