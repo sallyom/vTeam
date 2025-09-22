@@ -372,7 +372,7 @@ export default function ProjectRFEDetailPage() {
                     <CardTitle>Agentic Sessions ({rfeSessions.length})</CardTitle>
                     <CardDescription>Sessions scoped to this RFE</CardDescription>
                   </div>
-                  <Link href={`/projects/${encodeURIComponent(project)}/sessions/new?workspacePath=${encodeURIComponent(workflowWorkspace)}`}>
+                  <Link href={`/projects/${encodeURIComponent(project)}/sessions/new?workspacePath=${encodeURIComponent(workflowWorkspace)}&rfeWorkflow=${encodeURIComponent(workflow.id)}`}>
                     <Button variant="default" size="sm">
                       <Plus className="w-4 h-4 mr-2" />
                       Create Session

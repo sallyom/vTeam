@@ -51,6 +51,7 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
   const [error, setError] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [prefillWorkspacePath, setPrefillWorkspacePath] = useState<string | undefined>(undefined);
+  const [rfeWorkflowId, setRfeWorkflowId] = useState<string | undefined>(undefined);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
 
   useEffect(() => {
@@ -60,6 +61,8 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
   useEffect(() => {
     const ws = searchParams?.get("workspacePath");
     if (ws) setPrefillWorkspacePath(ws);
+    const rfe = searchParams?.get("rfeWorkflow");
+    if (rfe) setRfeWorkflowId(rfe);
   }, [searchParams]);
 
   const form = useForm<FormValues>({
@@ -115,6 +118,15 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
 
       if (prefillWorkspacePath) {
         request.workspacePath = prefillWorkspacePath;
+      }
+
+      // Apply labels if rfeWorkflowId is present
+      if (rfeWorkflowId || projectName) {
+        request.labels = {
+          ...(request.labels || {}),
+          ...(projectName ? { project: projectName } : {}),
+          ...(rfeWorkflowId ? { "rfe-workflow": rfeWorkflowId } : {}),
+        };
       }
 
       // Add Git configuration if provided
