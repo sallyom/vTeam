@@ -46,6 +46,8 @@ class SimpleClaudeRunner:
         self.workdir = Path("/tmp/workdir")
         self.artifacts_dir = self.workdir / "artifacts"
         self.messages: List[Dict[str, Any]] = []
+        # Track last pushed file state to send only deltas (path -> (mtime, size))
+        self._last_push_index: Dict[str, tuple[float, int]] = {}
 
         if not self.session_name or not self.prompt or not self.api_key:
             missing = [k for k, v in {
@@ -280,17 +282,30 @@ class SimpleClaudeRunner:
 
     # ---------------- Chat inbox helpers ----------------
     async def _read_inbox_lines(self, last_offset: int) -> tuple[list[dict[str, Any]], int]:
+        """Read inbox.jsonl locally when present, fallback to content service. last_offset is line count processed."""
         try:
-            data = self.content_read(self.inbox_store_path) or b""
-            if not data:
+            p = Path(self.inbox_store_path)
+            text = ""
+            if p.exists():
+                try:
+                    text = p.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    text = ""
+            else:
+                data = self.content_read(self.inbox_store_path) or b""
+                text = data.decode("utf-8", errors="ignore") if data else ""
+
+            if not text:
                 return [], last_offset
-            text = data.decode("utf-8", errors="ignore")
             lines = text.splitlines()
             if last_offset >= len(lines):
                 return [], len(lines)
             new_lines = lines[last_offset:]
             msgs: list[dict[str, Any]] = []
             for ln in new_lines:
+                ln = ln.strip()
+                if not ln:
+                    continue
                 try:
                     obj = json.loads(ln)
                     if isinstance(obj, dict):
@@ -301,6 +316,45 @@ class SimpleClaudeRunner:
         except Exception as e:
             logger.debug(f"read inbox error: {e}")
             return [], last_offset
+
+    def _push_workspace_deltas(self) -> None:
+        """Mirror only changed/new files from workdir to PVC path."""
+        try:
+            if not self.workspace_store_path:
+                return
+            updated_index: Dict[str, tuple[float, int]] = {}
+            files_to_push: list[Path] = []
+            for path in self.workdir.rglob("*"):
+                if path.is_dir():
+                    continue
+                try:
+                    st = path.stat()
+                    mtime = st.st_mtime
+                    size = st.st_size
+                    rel = str(path.relative_to(self.workdir))
+                    updated_index[rel] = (mtime, size)
+                    prev = self._last_push_index.get(rel)
+                    if prev is None or prev[0] != mtime or prev[1] != size:
+                        files_to_push.append(path)
+                except Exception:
+                    continue
+
+            for path in files_to_push:
+                rel = path.relative_to(self.workdir)
+                pvc_path = str(Path(self.workspace_store_path) / rel)
+                try:
+                    content = path.read_text(encoding="utf-8")
+                    self.content_write(pvc_path, content, "utf8")
+                except Exception:
+                    try:
+                        import base64
+                        self.content_write(pvc_path, base64.b64encode(path.read_bytes()).decode("ascii"), "base64")
+                    except Exception as e:
+                        logger.warning(f"Failed to push file {path} -> {pvc_path}: {e}")
+
+            self._last_push_index = updated_index
+        except Exception as e:
+            logger.debug(f"push deltas failed: {e}")
 
     async def _chat_mode(self) -> None:
         from claude_code_sdk import (
@@ -349,30 +403,27 @@ class SimpleClaudeRunner:
                     for msg in inbox:
                         text = str(msg.get("content", ""))
                         norm = text.strip().lower()
-                        if norm in ("/end", "/stop", "/quit", "/exit", "/finish"):
+                        if norm in ("/end"):
                             # Graceful end of interactive session
                             try:
                                 self._append_message("User requested session end")
+                                client.disconnect()
                             except Exception:
                                 pass
-                            await _push_workspace_async()
                             self._update_status("Completed", message="Session ended by user", completed=True)
-                            await _push_workspace_async()
                             return
+                       
                         # Mirror user message into outbox
                         self.messages.append({
                             "type": "user_message",
                             "content": text,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         })
-                        self._flush_messages()
-
-                        # Ensure any recent local changes are visible in UI before next run
-                        await _push_workspace_async()
 
                         # Send to Claude and stream results
                         await client.query(text)
                         async for message in client.receive_response():
+                            logger.info(f"Message: {message}")
                             if isinstance(message, AssistantMessage):
                                 message_type_map = {
                             AssistantMessage: "assistant_message",
@@ -416,8 +467,17 @@ class SimpleClaudeRunner:
                                 **asdict(message),
                             }
                             self.messages.append(payload)
+                        
+                        # Ensure any recent local changes are visible in UI before next run (deltas only)
+                        try:
+                            self._push_workspace_deltas()
+                        except Exception:
+                            await _push_workspace_async()
+                        try:
+                            self._push_workspace_deltas()
+                        except Exception:
+                            await _push_workspace_async()
                         self._flush_messages()
-                        await _push_workspace_async()
 
                     # Commit cursor
                     last_offset = new_offset
@@ -511,7 +571,6 @@ class SimpleClaudeRunner:
                         }
                         message_type = message_type_map.get(type(message), "unknown_message")
                         if isinstance(message, AssistantMessage) or isinstance(message, UserMessage):
-
                             if isinstance(message.content, str):
                                 payload = {
                                     "type": message_type,
@@ -519,7 +578,6 @@ class SimpleClaudeRunner:
                                     "timestamp": datetime.now(timezone.utc).isoformat(),
                                 }
                                 self.messages.append(payload)
-                                self._flush_messages()
                             else:
                                 for block in message.content:
                                     content_type_map = {
@@ -538,7 +596,6 @@ class SimpleClaudeRunner:
                                         },
                                     }
                                     self.messages.append(payload)
-                                    self._flush_messages()
                         else:
                             payload = {
                                 "type": message_type,
@@ -546,9 +603,13 @@ class SimpleClaudeRunner:
                                 **asdict(message),
                             }
                             self.messages.append(payload)
-                            self._flush_messages()
                             if isinstance(message, ResultMessage):
                                 result_message = message
+                    
+                    # push workspace and flush messages
+                    self._push_workspace_to_pvc()
+                    self._flush_messages()
+                    
             except GeneratorExit:
                 logger.debug("Stream generator closed (GeneratorExit)")
             except Exception as e:  # noqa: BLE001
@@ -628,7 +689,7 @@ class SimpleClaudeRunner:
             chat_enabled = os.getenv("INTERACTIVE", "").lower() in ("true", "1", "yes")
             if chat_enabled:
                 logger.info("Entering chat mode")
-                self._update_status("Waiting for user input", message="Claude is running in interactive mode")
+                self._update_status("Running", message="Waiting for user input")
                 import asyncio as _asyncio
                 _asyncio.run(self._chat_mode())
                 # Chat mode is long-running; we won't push workspace or mark completed here

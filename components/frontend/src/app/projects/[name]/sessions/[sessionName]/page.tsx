@@ -622,40 +622,6 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
                   <StreamMessage key={`msg-${index}`} message={message} onGoToResults={() => setActiveTab("results")} />
               ))}
 
-              {/* Chat composer (shown only when interactive) */}
-              {session.spec?.interactive && (
-                <div className="sticky bottom-0 border-t bg-white">
-                  <div className="p-3">
-                    <div className="border rounded-md p-3 space-y-2 bg-white">
-                      <textarea
-                        className="w-full border rounded p-2 text-sm"
-                        placeholder="Type a message to the agent... (use /end to finish)"
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        rows={3}
-                      />
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-muted-foreground">Type <span className="font-mono">/end</span> to end the session</div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={async () => {
-                              setChatInput("/end")
-                              await sendChat()
-                            }}
-                          >
-                            End session
-                          </Button>
-                          <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()}>
-                            Send
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {(session.status?.phase === "Running" ||
                 session.status?.phase === "Pending" ||
@@ -690,6 +656,41 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
                     <p>No messages yet</p>
                   </div>
                 )}
+
+                {/* Chat composer (shown only when interactive) */}
+              {session.spec?.interactive && (
+                <div className="sticky bottom-0 border-t bg-white">
+                  <div className="p-3">
+                    <div className="border rounded-md p-3 space-y-2 bg-white">
+                      <textarea
+                        className="w-full border rounded p-2 text-sm"
+                        placeholder="Type a message to the agent... (use /end to finish)"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        rows={3}
+                      />
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-muted-foreground">Type <span className="font-mono">/end</span> to end the session</div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={async () => {
+                              setChatInput("/end")
+                              await sendChat()
+                            }}
+                          >
+                            End session
+                          </Button>
+                          <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()}>
+                            Send
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </TabsContent>
 

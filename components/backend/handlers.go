@@ -2904,32 +2904,50 @@ func initSpecKitInWorkspace(c *gin.Context, project, workspaceRoot string) error
 		return err
 	}
 	// Extract files
+	total := len(zr.File)
+	var filesWritten, skippedDirs, openErrors, readErrors, writeErrors int
+	log.Printf("initSpecKitInWorkspace: extracting spec-kit template: %d entries", total)
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
+			skippedDirs++
+			log.Printf("spec-kit: skipping directory: %s", f.Name)
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
+			openErrors++
+			log.Printf("spec-kit: open failed: %s: %v", f.Name, err)
 			continue
 		}
 		b, err := io.ReadAll(rc)
 		rc.Close()
 		if err != nil {
+			readErrors++
+			log.Printf("spec-kit: read failed: %s: %v", f.Name, err)
 			continue
 		}
 		// Normalize path: strip any leading directory components to place at workspace root
 		rel := f.Name
+		origRel := rel
 		rel = strings.TrimLeft(rel, "./")
 		// Ensure we do not write outside workspace
 		rel = strings.ReplaceAll(rel, "\\", "/")
 		for strings.Contains(rel, "../") {
 			rel = strings.ReplaceAll(rel, "../", "")
 		}
+		if rel != origRel {
+			log.Printf("spec-kit: normalized path %q -> %q", origRel, rel)
+		}
 		target := filepath.Join(workspaceRoot, rel)
 		if err := writeProjectContentFile(c, project, target, b); err != nil {
+			writeErrors++
 			log.Printf("write spec-kit file failed: %s: %v", target, err)
+		} else {
+			filesWritten++
+			log.Printf("spec-kit: wrote %s (%d bytes)", target, len(b))
 		}
 	}
+	log.Printf("initSpecKitInWorkspace: extraction summary: written=%d, skipped_dirs=%d, open_errors=%d, read_errors=%d, write_errors=%d", filesWritten, skippedDirs, openErrors, readErrors, writeErrors)
 	return nil
 }
 
