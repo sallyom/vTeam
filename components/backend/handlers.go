@@ -538,14 +538,19 @@ func createSession(c *gin.Context) {
 				"temperature": llmSettings.Temperature,
 				"maxTokens":   llmSettings.MaxTokens,
 			},
-			"paths": map[string]interface{}{
-				"workspace": req.WorkspacePath,
-			},
 			"timeout": timeout,
 		},
 		"status": map[string]interface{}{
 			"phase": "Pending",
 		},
+	}
+
+	// Only include paths if a workspacePath was provided
+	if strings.TrimSpace(req.WorkspacePath) != "" {
+		spec := session["spec"].(map[string]interface{})
+		spec["paths"] = map[string]interface{}{
+			"workspace": req.WorkspacePath,
+		}
 	}
 
 	// Optional environment variables passthrough (always, independent of git config presence)

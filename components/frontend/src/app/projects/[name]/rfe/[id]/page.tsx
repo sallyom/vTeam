@@ -10,7 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getApiUrl } from "@/lib/config";
 import { formatDistanceToNow } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RFEWorkflow, WorkflowPhase } from "@/types/agentic-session";
+import { CreateAgenticSessionRequest, RFEWorkflow, WorkflowPhase } from "@/types/agentic-session";
 import { WORKFLOW_PHASE_LABELS } from "@/lib/agents";
 import { ArrowLeft, Edit, Play, Loader2, RefreshCw, FolderTree } from "lucide-react";
 import { FileTree, type FileTreeNode } from "@/components/file-tree";
@@ -216,11 +216,6 @@ export default function ProjectRFEDetailPage() {
               <p className="text-muted-foreground mt-1">{workflow.description}</p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <Link href={`/projects/${encodeURIComponent(project)}/rfe/${encodeURIComponent(id)}/edit`}>
-              <Button variant="outline" size="sm"><Edit className="mr-2 h-4 w-4" />Edit</Button>
-            </Link>
-          </div>
         </div>
 
         <div className="grid gap-6 md:grid-cols-3">
@@ -299,28 +294,36 @@ export default function ProjectRFEDetailPage() {
                       })();
                       const exists = phase === "specify" ? specExists : phase === "plan" ? planExists : tasksExists;
                       const sessionForPhase = rfeSessions.find(s => (s.labels as any)?.["rfe-phase"] === phase);
-                      const running = (sessionForPhase?.phase || "").toLowerCase() === "running";
-                      const completed = (sessionForPhase?.phase || "").toLowerCase() === "completed";
+                     
                       const prerequisitesMet = phase === "specify" ? true : phase === "plan" ? specExists : (specExists && planExists);
+                      const sessionDisplay = ((sessionForPhase as any)?.spec?.displayName) || sessionForPhase?.name;
                       return (
                         <div key={phase} className="p-4 rounded-lg border flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <Badge variant="outline">{WORKFLOW_PHASE_LABELS[phase]}</Badge>
-                            <span className="text-sm text-muted-foreground">{expected}</span>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-3">
+                              <Badge variant="outline">{WORKFLOW_PHASE_LABELS[phase]}</Badge>
+                              <span className="text-sm text-muted-foreground">{expected}</span>
+                            </div>
+                            {sessionForPhase && (
+                              <div className="flex items-center gap-2">
+                                <Link href={`/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(sessionForPhase.name)}`}>
+                                  <Button variant="link" size="sm" className="px-0 h-auto">{sessionDisplay}</Button>
+                                </Link>
+                                {sessionForPhase?.phase && <Badge variant="outline">{sessionForPhase.phase}</Badge>}
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-3">
                             <Badge variant={exists ? "outline" : "secondary"}>{exists ? "Exists" : (prerequisitesMet ? "Missing" : "Blocked")}</Badge>
-                            {running && <Badge variant="outline">Running</Badge>}
-                            {completed && <Badge variant="outline">Completed</Badge>}
-                            {!exists && !running && (
+                            {!exists && sessionForPhase?.phase !== "Running" && (
                               <Button size="sm" onClick={async () => {
                                 try {
                                   setStartingPhase(phase);
-                              const payload = {
+                                  const payload: CreateAgenticSessionRequest = {
                                     prompt: `/${phase} ${workflow.description}`,
                                     displayName: `${workflow.title} - ${phase}`,
-                                interactive: false,
-                                sharedWorkspace: workflowWorkspace,
+                                    interactive: false,
+                                    workspacePath: workflowWorkspace,
                                     environmentVariables: {
                                       WORKFLOW_PHASE: phase,
                                       PARENT_RFE: workflow.id,
