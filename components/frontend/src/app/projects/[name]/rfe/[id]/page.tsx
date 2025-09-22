@@ -13,15 +13,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AgenticSession, CreateAgenticSessionRequest, RFEWorkflow, WorkflowPhase } from "@/types/agentic-session";
 import { WORKFLOW_PHASE_LABELS } from "@/lib/agents";
 import { ArrowLeft, Play, Loader2, FolderTree, Plus } from "lucide-react";
-import { Upload } from "lucide-react";
+import { Upload, CheckCircle2 } from "lucide-react";
 import { FileTree, type FileTreeNode } from "@/components/file-tree";
-
-function phaseProgress(w: RFEWorkflow, phase: WorkflowPhase) {
-  const inPhase = (w.agentSessions || []).filter(s => s.phase === phase);
-  if (!inPhase.length) return 0;
-  const done = inPhase.filter(s => s.status.toLowerCase() === "completed").length;
-  return (done / inPhase.length) * 100;
-}
 
 export default function ProjectRFEDetailPage() {
   const params = useParams();
@@ -143,6 +136,20 @@ export default function ProjectRFEDetailPage() {
     }
   }, [project, id]);
 
+  const saveWsFile = useCallback(async (relPath: string, content: string) => {
+    if (!project || !id) return false;
+    try {
+      const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(project)}/rfe-workflows/${encodeURIComponent(id)}/workspace/${encodeURIComponent(relPath)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        body: content,
+      });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  }, [project, id]);
+
   const probeWorkspaceAndPhase = useCallback(async () => {
     const features = await listWsPath("specs");
     const firstFeature = features && features.length > 0 ? features[0] : undefined;
@@ -245,6 +252,23 @@ export default function ProjectRFEDetailPage() {
     }
   }, [project, id]);
 
+  const openJiraForPath = useCallback(async (relPath: string) => {
+    try {
+      const resp = await fetch(`/api/projects/${encodeURIComponent(project)}/rfe/${encodeURIComponent(id)}/jira?path=${encodeURIComponent(relPath)}`);
+      if (!resp.ok) return;
+      const data = await resp.json().catch(() => null);
+      if (!data) return;
+      const selfUrl = typeof data.self === 'string' ? data.self : '';
+      const key = typeof data.key === 'string' ? data.key : '';
+      if (selfUrl && key) {
+        const origin = (() => { try { return new URL(selfUrl).origin; } catch { return ''; } })();
+        if (origin) window.open(`${origin}/browse/${encodeURIComponent(key)}`, '_blank');
+      }
+    } catch {
+      // noop
+    }
+  }, [project, id]);
+
 
   if (loading) return <div className="container mx-auto py-8">Loading…</div>;
   if (error || !workflow) return (
@@ -264,7 +288,29 @@ export default function ProjectRFEDetailPage() {
   const workflowWorkspace = workflow.workspacePath || `/rfe-workflows/${id}/workspace`;
   const phases: WorkflowPhase[] = ["pre", "specify", "plan", "tasks"];
   const idx = phases.indexOf(currentPhase);
-  const canAdvance = (currentPhase === "pre") || (phaseProgress(workflow, currentPhase) === 100 && idx < phases.length - 1);
+  const totalCostUsd = (rfeSessions || []).reduce((sum, s) => sum + (typeof s.status?.total_cost_usd === "number" ? s.status.total_cost_usd : 0), 0);
+  const workflowSessions = (workflow.agentSessions || []);
+  const totalSessionsCount = workflowSessions.length;
+  const completedSessionsCount = workflowSessions.filter(s => (s.status || '').toLowerCase() === 'completed').length;
+  const runningSessionsCount = workflowSessions.filter(s => (s.status || '').toLowerCase() === 'running').length;
+  const failedSessionsCount = workflowSessions.filter(s => (s.status || '').toLowerCase() === 'failed').length;
+
+  const phaseProgress = (phase: WorkflowPhase): number => {
+    // If the expected document for the phase exists, treat as complete
+    if (phase === "specify" && specKitDir.spec.exists) return 100;
+    if (phase === "plan" && specKitDir.plan.exists) return 100;
+    if (phase === "tasks" && specKitDir.tasks.exists) return 100;
+    // For pre phase, nothing produced yet
+    if (phase === "pre") return 0;
+
+    // Otherwise, use the session status for that phase if present
+    const sessionForPhase = rfeSessions.find(s => (s.metadata.labels)?.["rfe-phase"] === phase);
+    const status = sessionForPhase?.status?.phase;
+    if (status === "Completed") return 100;
+    if (status === "Running" || status === "Creating") return 50;
+    if (status === "Failed" || status === "Error" || status === "Stopped") return 0;
+    return 0;
+  };
 
   return (
     <div className="container mx-auto py-8">
@@ -281,22 +327,25 @@ export default function ProjectRFEDetailPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-3">
+        <div className="grid gap-6 md:grid-cols-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Current Phase</CardTitle>
               <Badge className="bg-blue-100 text-blue-800">{WORKFLOW_PHASE_LABELS[currentPhase]}</Badge>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{phaseProgress(workflow, currentPhase).toFixed(0)}%</div>
+              <div className="text-2xl font-bold">{phaseProgress(currentPhase).toFixed(0)}%</div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Agent Progress</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Sessions</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{(workflow.agentSessions || []).filter(s => s.status.toLowerCase() === "completed").length}/{(workflow.agentSessions || []).length}</div>
+              <div className="text-2xl font-bold">{totalSessionsCount}</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Completed: {completedSessionsCount} • Running: {runningSessionsCount} • Failed: {failedSessionsCount}
+              </div>
             </CardContent>
           </Card>
           <Card>
@@ -305,6 +354,14 @@ export default function ProjectRFEDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">{(specKitDir.spec.exists ? 1 : 0) + (specKitDir.plan.exists ? 1 : 0) + (specKitDir.tasks.exists ? 1 : 0)}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">Total Cost</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">${totalCostUsd.toFixed(4)}</div>
             </CardContent>
           </Card>
         </div>
@@ -353,12 +410,13 @@ export default function ProjectRFEDetailPage() {
                         return "tasks.md";
                       })();
                       const exists = phase === "specify" ? specKitDir.spec.exists : phase === "plan" ? specKitDir.plan.exists : specKitDir.tasks.exists;
+                      const linkedKey = Array.isArray((workflow as any).jiraLinks) ? ((workflow as any).jiraLinks as Array<{ path: string; jiraKey: string }>).find(l => l.path === expected)?.jiraKey : undefined;
                       const sessionForPhase = rfeSessions.find(s => (s.metadata.labels)?.["rfe-phase"] === phase);
                      
                       const prerequisitesMet = phase === "specify" ? true : phase === "plan" ? specKitDir.spec.exists : (specKitDir.spec.exists && specKitDir.plan.exists);
                       const sessionDisplay = ((sessionForPhase as any)?.spec?.displayName) || sessionForPhase?.metadata.name;
                       return (
-                        <div key={phase} className="p-4 rounded-lg border flex items-center justify-between">
+                        <div key={phase} className={`p-4 rounded-lg border flex items-center justify-between ${exists ? "bg-green-50 border-green-200" : ""}`}>
                           <div className="flex flex-col gap-1">
                             <div className="flex items-center gap-3">
                               <Badge variant="outline">{WORKFLOW_PHASE_LABELS[phase]}</Badge>
@@ -380,7 +438,14 @@ export default function ProjectRFEDetailPage() {
                             )}
                           </div>
                           <div className="flex items-center gap-3">
-                            <Badge variant={exists ? "outline" : "secondary"}>{exists ? "Exists" : (prerequisitesMet ? "Missing" : "Blocked")}</Badge>
+                            {exists ? (
+                              <div className="flex items-center gap-2 text-green-700">
+                                <CheckCircle2 className="h-5 w-5 text-green-600" />
+                                <span className="text-sm font-medium">Ready</span>
+                              </div>
+                            ) : (
+                              <Badge variant="secondary">{prerequisitesMet ? "Missing" : "Blocked"}</Badge>
+                            )}
                             {!exists && sessionForPhase?.status?.phase !== "Running" && (
                               <Button size="sm" onClick={async () => {
                                 try {
@@ -427,18 +492,29 @@ export default function ProjectRFEDetailPage() {
                                   const resp = await fetch(`/api/projects/${encodeURIComponent(project)}/rfe/${encodeURIComponent(id)}/jira`, {
                                     method: "POST",
                                     headers: { "Content-Type": "application/json" },
-                                    body: JSON.stringify({ phase }),
+                                    body: JSON.stringify({ path: expected }),
                                   });
                                   const data = await resp.json().catch(() => ({}));
                                   if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
+                                  await load();
                                 } catch (e) {
                                   setError(e instanceof Error ? e.message : "Failed to publish to Jira");
                                 } finally {
                                   setPublishingPhase(null);
                                 }
                               }} disabled={publishingPhase === phase}>
-                                {publishingPhase === phase ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Publishing…</>) : (<><Upload className="mr-2 h-4 w-4" />Publish to Jira</>)}
+                                {publishingPhase === phase ? (
+                                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Publishing…</>
+                                ) : (
+                                  <><Upload className="mr-2 h-4 w-4" />{linkedKey ? 'Resync with Jira' : 'Publish to Jira'}</>
+                                )}
                               </Button>
+                            )}
+                            {exists && linkedKey && (
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline">{linkedKey}</Badge>
+                                <Button variant="link" size="sm" className="px-0 h-auto" onClick={() => openJiraForPath(expected)}>Open in Jira</Button>
+                              </div>
                             )}
                           </div>
                         </div>
@@ -539,7 +615,17 @@ export default function ProjectRFEDetailPage() {
                       wsLoading ? (
                         <div className="text-sm text-muted-foreground">Loading file…</div>
                       ) : (
-                        <pre className="text-sm whitespace-pre-wrap break-words">{wsFileContent}</pre>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="text-xs text-muted-foreground">{wsSelectedPath}</div>
+                            <Button size="sm" onClick={async () => { await saveWsFile(wsSelectedPath!, wsFileContent); }}>Save</Button>
+                          </div>
+                          <textarea
+                            className="w-full h-[60vh] text-sm font-mono border rounded p-3"
+                            value={wsFileContent}
+                            onChange={(e) => setWsFileContent(e.target.value)}
+                          />
+                        </div>
                       )
                     ) : (
                       <div className="text-sm text-muted-foreground">Select a file to view its contents</div>

@@ -40,4 +40,23 @@ export async function POST(
   }
 }
 
+// GET /api/projects/[name]/rfe/[id]/jira?path=...
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ name: string; id: string }> }
+) {
+  try {
+    const { name, id } = await params
+    const headers = await buildForwardHeadersAsync(request)
+    const url = new URL(request.url)
+    const pathParam = url.searchParams.get('path') || ''
+    const backendResp = await fetch(`${BACKEND_URL}/projects/${encodeURIComponent(name)}/rfe-workflows/${encodeURIComponent(id)}/jira?path=${encodeURIComponent(pathParam)}`, { headers })
+    const text = await backendResp.text()
+    return new Response(text, { status: backendResp.status, headers: { 'Content-Type': 'application/json' } })
+  } catch (error) {
+    console.error('Error fetching Jira issue:', error)
+    return Response.json({ error: 'Failed to fetch Jira issue' }, { status: 500 })
+  }
+}
+
 

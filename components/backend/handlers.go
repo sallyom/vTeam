@@ -1010,6 +1010,29 @@ func getSessionWorkspaceFile(c *gin.Context) {
 	c.Data(http.StatusOK, "application/octet-stream", b)
 }
 
+// PUT /api/projects/:projectName/agentic-sessions/:sessionName/workspace/*path
+// Writes a file into a session's workspace via the per-project content service
+func putSessionWorkspaceFile(c *gin.Context) {
+	project := c.GetString("project")
+	sessionName := c.Param("sessionName")
+	pathParam := c.Param("path")
+
+	absPath := resolveWorkspaceAbsPath(sessionName, pathParam)
+
+	// Read raw request body and forward as-is (treat as text/binary pass-through)
+	data, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+
+	if err := writeProjectContentFile(c, project, absPath, data); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to write workspace file"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
 // resolveWorkflowWorkspaceAbsPath normalizes a workspace-relative or absolute path to the
 // absolute workspace path for a given RFE workflow.
 func resolveWorkflowWorkspaceAbsPath(workflowID string, relOrAbs string) string {
@@ -1093,6 +1116,29 @@ func getRFEWorkflowWorkspaceFile(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/octet-stream", b)
+}
+
+// PUT /api/projects/:projectName/rfe-workflows/:id/workspace/*path
+// Writes a file into a workflow's workspace via the per-project content service
+func putRFEWorkflowWorkspaceFile(c *gin.Context) {
+	project := c.GetString("project")
+	workflowID := c.Param("id")
+	pathParam := c.Param("path")
+
+	absPath := resolveWorkflowWorkspaceAbsPath(workflowID, pathParam)
+
+	// Read raw request body and forward as-is (treat as text/binary pass-through)
+	data, err := ioutil.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return
+	}
+
+	if err := writeProjectContentFile(c, project, absPath, data); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to write workspace file"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
 
 // --- Git helpers (project-scoped) ---
@@ -3342,20 +3388,43 @@ func publishWorkflowFileToJira(c *gin.Context) {
 	}
 	summary := fmt.Sprintf("[RFE] %s - %s", wf.Title, phaseName)
 
-	// Create Jira issue (v2 API)
+	// Create or update Jira issue (v2 API)
 	jiraBase := strings.TrimRight(jiraURL, "/")
-	jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue", jiraBase)
-	reqBody := map[string]interface{}{
-		"fields": map[string]interface{}{
-			"project":     map[string]string{"key": jiraProject},
-			"summary":     summary,
-			"description": content,
-			"issuetype":   map[string]string{"name": "Task"},
-			"labels":      []string{"rfe", phaseName, id},
-		},
+	// Check existing link for this path
+	existingKey := ""
+	for _, jl := range wf.JiraLinks {
+		if strings.TrimSpace(jl.Path) == strings.TrimSpace(req.Path) {
+			existingKey = jl.JiraKey
+			break
+		}
 	}
-	payload, _ := json.Marshal(reqBody)
-	httpReq, _ := http.NewRequest("POST", jiraEndpoint, bytes.NewReader(payload))
+	var httpReq *http.Request
+	if existingKey == "" {
+		// Create
+		jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue", jiraBase)
+		reqBody := map[string]interface{}{
+			"fields": map[string]interface{}{
+				"project":     map[string]string{"key": jiraProject},
+				"summary":     summary,
+				"description": content,
+				"issuetype":   map[string]string{"name": "Task"},
+				"labels":      []string{"rfe", phaseName, id},
+			},
+		}
+		payload, _ := json.Marshal(reqBody)
+		httpReq, _ = http.NewRequest("POST", jiraEndpoint, bytes.NewReader(payload))
+	} else {
+		// Update existing
+		jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue/%s", jiraBase, url.PathEscape(existingKey))
+		reqBody := map[string]interface{}{
+			"fields": map[string]interface{}{
+				"summary":     summary,
+				"description": content,
+			},
+		}
+		payload, _ := json.Marshal(reqBody)
+		httpReq, _ = http.NewRequest("PUT", jiraEndpoint, bytes.NewReader(payload))
+	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(jiraEmail+":"+jiraToken)))
 	httpClient := &http.Client{Timeout: 30 * time.Second}
@@ -3370,13 +3439,19 @@ func publishWorkflowFileToJira(c *gin.Context) {
 		c.Data(httpResp.StatusCode, "application/json", respBody)
 		return
 	}
-	var created struct {
-		Key string `json:"key"`
-	}
-	_ = json.Unmarshal(respBody, &created)
-	if strings.TrimSpace(created.Key) == "" {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "Jira creation returned no key"})
-		return
+	var outKey string
+	if existingKey == "" {
+		var created struct {
+			Key string `json:"key"`
+		}
+		_ = json.Unmarshal(respBody, &created)
+		if strings.TrimSpace(created.Key) == "" {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "Jira creation returned no key"})
+			return
+		}
+		outKey = created.Key
+	} else {
+		outKey = existingKey
 	}
 
 	// Update CR: append jiraLinks entry
@@ -3390,14 +3465,27 @@ func publishWorkflowFileToJira(c *gin.Context) {
 	if existing, ok := spec["jiraLinks"].([]interface{}); ok {
 		links = existing
 	}
-	links = append(links, map[string]interface{}{"path": req.Path, "jiraKey": created.Key})
+	// Add only if new; if exists, update key
+	found := false
+	for _, li := range links {
+		if m, ok := li.(map[string]interface{}); ok {
+			if fmt.Sprintf("%v", m["path"]) == req.Path {
+				m["jiraKey"] = outKey
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		links = append(links, map[string]interface{}{"path": req.Path, "jiraKey": outKey})
+	}
 	spec["jiraLinks"] = links
 	if _, err := reqDyn.Resource(gvrWf).Namespace(project).Update(c.Request.Context(), obj, v1.UpdateOptions{}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update workflow with Jira link", "details": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"key": created.Key, "url": fmt.Sprintf("%s/browse/%s", jiraBase, created.Key)})
+	c.JSON(http.StatusOK, gin.H{"key": outKey, "url": fmt.Sprintf("%s/browse/%s", jiraBase, outKey)})
 }
 
 // List sessions linked to a project-scoped RFE workflow by label selector
@@ -3511,6 +3599,84 @@ func removeProjectRFEWorkflowSession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Session unlinked from RFE", "session": sessionName, "rfe": id})
+}
+
+// GET /api/projects/:projectName/rfe-workflows/:id/jira?path=...
+// Proxies Jira issue fetch for a linked path
+func getWorkflowJira(c *gin.Context) {
+	project := c.Param("projectName")
+	id := c.Param("id")
+	reqPath := strings.TrimSpace(c.Query("path"))
+	if reqPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
+		return
+	}
+	_, reqDyn := getK8sClientsForRequest(c)
+	reqK8s, _ := getK8sClientsForRequest(c)
+	if reqDyn == nil || reqK8s == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid user token"})
+		return
+	}
+	// Load workflow to find key
+	gvrWf := getRFEWorkflowResource()
+	item, err := reqDyn.Resource(gvrWf).Namespace(project).Get(c.Request.Context(), id, v1.GetOptions{})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		return
+	}
+	wf := rfeFromUnstructured(item)
+	var key string
+	for _, jl := range wf.JiraLinks {
+		if strings.TrimSpace(jl.Path) == reqPath {
+			key = jl.JiraKey
+			break
+		}
+	}
+	if key == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No Jira linked for path"})
+		return
+	}
+	// Load Jira creds
+	// Determine secret name
+	secretName := "ambient-runner-secrets"
+	if obj, err := reqDyn.Resource(getProjectSettingsResource()).Namespace(project).Get(c.Request.Context(), "projectsettings", v1.GetOptions{}); err == nil {
+		if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
+			if v, ok := spec["runnerSecretsName"].(string); ok && strings.TrimSpace(v) != "" {
+				secretName = strings.TrimSpace(v)
+			}
+		}
+	}
+	sec, err := reqK8s.CoreV1().Secrets(project).Get(c.Request.Context(), secretName, v1.GetOptions{})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read runner secret", "details": err.Error()})
+		return
+	}
+	get := func(k string) string {
+		if b, ok := sec.Data[k]; ok {
+			return string(b)
+		}
+		return ""
+	}
+	jiraURL := strings.TrimSpace(get("JIRA_URL"))
+	jiraEmail := strings.TrimSpace(get("JIRA_EMAIL"))
+	jiraToken := strings.TrimSpace(get("JIRA_API_TOKEN"))
+	if jiraURL == "" || jiraEmail == "" || jiraToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing Jira configuration in runner secret"})
+		return
+	}
+	jiraBase := strings.TrimRight(jiraURL, "/")
+	endpoint := fmt.Sprintf("%s/rest/api/2/issue/%s", jiraBase, url.PathEscape(key))
+	httpReq, _ := http.NewRequest("GET", endpoint, nil)
+	httpReq.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(jiraEmail+":"+jiraToken)))
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	httpResp, httpErr := httpClient.Do(httpReq)
+	if httpErr != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Jira request failed", "details": httpErr.Error()})
+		return
+	}
+	defer httpResp.Body.Close()
+	respBody, _ := io.ReadAll(httpResp.Body)
+	c.Data(httpResp.StatusCode, "application/json", respBody)
 }
 
 // Runner secrets management

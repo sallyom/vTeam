@@ -379,6 +379,15 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     return text;
   }, [projectName, sessionName, workspaceBasePath]);
 
+  const writeWsFile = useCallback(async (rel: string, content: string) => {
+    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}/${encodeURIComponent(rel)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: content,
+    });
+    if (!resp.ok) throw new Error("Failed to save file");
+  }, [projectName, workspaceBasePath]);
+
   const buildWsRoot = useCallback(async () => {
     if (!hasWorkspace) return;
     setWsLoading(true);
@@ -753,8 +762,21 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
                                 <span className="font-medium">{wsSelectedPath.split('/').pop()}</span>
                                 <Badge variant="outline" className="ml-2">{wsSelectedPath}</Badge>
                               </div>
+                              <div className="flex items-center gap-2">
+                                <Button size="sm" onClick={async () => {
+                                  try {
+                                    await writeWsFile(wsSelectedPath, wsFileContent);
+                                  } catch {
+                                    // noop for now
+                                  }
+                                }}>Save</Button>
+                              </div>
                             </div>
-                            <pre className="bg-gray-900 text-gray-100 p-4 rounded overflow-auto text-sm">{wsFileContent}</pre>
+                            <textarea
+                              className="w-full h-[60vh] bg-gray-900 text-gray-100 p-4 rounded overflow-auto text-sm font-mono"
+                              value={wsFileContent}
+                              onChange={(e) => setWsFileContent(e.target.value)}
+                            />
                           </>
                         ) : (
                           <div className="text-sm text-muted-foreground p-4">Select a file to preview</div>

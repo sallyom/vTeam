@@ -101,6 +101,7 @@ func main() {
 			// Session workspace APIs
 			projectGroup.GET("/agentic-sessions/:sessionName/workspace", getSessionWorkspace)
 			projectGroup.GET("/agentic-sessions/:sessionName/workspace/*path", getSessionWorkspaceFile)
+			projectGroup.PUT("/agentic-sessions/:sessionName/workspace/*path", putSessionWorkspaceFile)
 
 			// RFE workflow endpoints (project-scoped)
 			projectGroup.GET("/rfe-workflows", listProjectRFEWorkflows)
@@ -111,8 +112,10 @@ func main() {
 			// Workflow workspace APIs
 			projectGroup.GET("/rfe-workflows/:id/workspace", getRFEWorkflowWorkspace)
 			projectGroup.GET("/rfe-workflows/:id/workspace/*path", getRFEWorkflowWorkspaceFile)
+			projectGroup.PUT("/rfe-workflows/:id/workspace/*path", putRFEWorkflowWorkspaceFile)
 			// Publish a workspace file to Jira and record linkage on the CR
 			projectGroup.POST("/rfe-workflows/:id/jira", publishWorkflowFileToJira)
+			projectGroup.GET("/rfe-workflows/:id/jira", getWorkflowJira)
 			// Sessions linkage within an RFE
 			projectGroup.GET("/rfe-workflows/:id/sessions", listProjectRFEWorkflowSessions)
 			projectGroup.POST("/rfe-workflows/:id/sessions", addProjectRFEWorkflowSession)
