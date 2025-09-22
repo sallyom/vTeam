@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Info } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getApiUrl } from "@/lib/config";
 import type { CreateAgenticSessionRequest, AgentPersona as AgentSummary } from "@/types/agentic-session";
 import { Checkbox } from "@/components/ui/checkbox";
+import { AgentSelection } from "@/components/agent-selection";
 
 const formSchema = z.object({
   prompt: z.string().min(10, "Prompt must be at least 10 characters long"),
@@ -44,14 +45,22 @@ const models = [
 
 export default function NewProjectSessionPage({ params }: { params: Promise<{ name: string }> }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [projectName, setProjectName] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [prefillWorkspacePath, setPrefillWorkspacePath] = useState<string | undefined>(undefined);
+  const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
 
   useEffect(() => {
     params.then(({ name }) => setProjectName(name));
   }, [params]);
+
+  useEffect(() => {
+    const ws = searchParams?.get("workspacePath");
+    if (ws) setPrefillWorkspacePath(ws);
+  }, [searchParams]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -104,6 +113,10 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
         interactive: values.interactive,
       };
 
+      if (prefillWorkspacePath) {
+        request.workspacePath = prefillWorkspacePath;
+      }
+
       // Add Git configuration if provided
       if (values.gitUserName || values.gitUserEmail || values.gitRepoUrl) {
         request.gitConfig = {};
@@ -125,8 +138,14 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
         }
       }
 
-      // No user-configurable storage paths; backend/operator provide defaults
-      if (values.agentPersona) {
+      // Inject selected agents via environment variables
+      if (selectedAgents.length > 0) {
+        request.environmentVariables = {
+          ...(request.environmentVariables || {}),
+          AGENT_PERSONAS: selectedAgents.join(","),
+        };
+      } else if (values.agentPersona) {
+        // Fallback to single-agent support if provided
         request.environmentVariables = {
           ...(request.environmentVariables || {}),
           AGENT_PERSONA: values.agentPersona,
@@ -233,6 +252,20 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                       <FormMessage />
                     </FormItem>
                   )}
+                />
+              </div>
+
+              {/* Multi-agent selection */}
+              <div className="space-y-2">
+                <FormLabel>Select Agents (optional)</FormLabel>
+                <FormDescription>
+                  Choose one or more agents to inject their knowledge into the session at start.
+                </FormDescription>
+                <AgentSelection
+                  selectedAgents={selectedAgents}
+                  onSelectionChange={setSelectedAgents}
+                  maxAgents={8}
+                  disabled={isSubmitting}
                 />
               </div>
 

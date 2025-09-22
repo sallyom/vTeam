@@ -175,7 +175,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       // Probe workspace existence via API proxy
       try {
         const wsResp = await fetch(
-          `${apiUrl}/projects/${encodeURIComponent(projectName)}/${workspaceBasePath}/${encodeURIComponent(sessionName)}/workspace`
+          `${apiUrl}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`
         );
         setHasWorkspace(wsResp.ok);
       } catch {
@@ -271,10 +271,10 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   };
 
   const workspaceBasePath = useMemo(() => {
-    if (!session?.spec?.paths?.workspace?.includes('rfe-workflows')) {
-      return 'rfe-workflows'
+    if (session?.spec?.paths?.workspace) {
+      return session.spec.paths.workspace
     }
-    return 'agentic-sessions'
+    return  `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
   }, [session?.spec?.paths?.workspace]);
   
 
@@ -340,7 +340,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   // Workspace helpers (loaded when Workspace tab opens)
   type ListItem = { name: string; path: string; isDir: boolean; size: number; modifiedAt: string };
   const listWsPath = useCallback(async (relPath?: string) => {
-    const url = new URL(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/${workspaceBasePath}/${encodeURIComponent(sessionName)}/workspace`, window.location.origin);
+    const url = new URL(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`, window.location.origin);
     if (relPath) url.searchParams.set("path", relPath);
     const resp = await fetch(url.toString());
     if (!resp.ok) throw new Error("Failed to list workspace");
@@ -350,7 +350,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   }, [projectName, sessionName]);
 
   const readWsFile = useCallback(async (rel: string) => {
-    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/${workspaceBasePath}/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(rel)}`);
+    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}/${encodeURIComponent(rel)}`);
     if (!resp.ok) throw new Error("Failed to fetch file");
     const text = await resp.text();
     return text;
@@ -519,7 +519,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="messages">Messages</TabsTrigger>
             {hasWorkspace ? <TabsTrigger value="workspace">Workspace</TabsTrigger> : null}
-            <TabsTrigger value="results">Results</TabsTrigger>
+            {!session.spec.interactive ? <TabsTrigger value="results">Results</TabsTrigger> : null}
           </TabsList>
 
           {/* Overview */}

@@ -12,7 +12,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AgenticSession, CreateAgenticSessionRequest, RFEWorkflow, WorkflowPhase } from "@/types/agentic-session";
 import { WORKFLOW_PHASE_LABELS } from "@/lib/agents";
-import { ArrowLeft, Play, Loader2, RefreshCw, FolderTree } from "lucide-react";
+import { ArrowLeft, Play, Loader2, FolderTree, Plus } from "lucide-react";
 import { FileTree, type FileTreeNode } from "@/components/file-tree";
 
 function phaseProgress(w: RFEWorkflow, phase: WorkflowPhase) {
@@ -372,10 +372,12 @@ export default function ProjectRFEDetailPage() {
                     <CardTitle>Agentic Sessions ({rfeSessions.length})</CardTitle>
                     <CardDescription>Sessions scoped to this RFE</CardDescription>
                   </div>
-                  <Button variant="outline" size="sm" onClick={loadSessions} disabled={sessionsLoading}>
-                    <RefreshCw className={`w-4 h-4 mr-2 ${sessionsLoading ? "animate-spin" : ""}`} />
-                    Refresh
-                  </Button>
+                  <Link href={`/projects/${encodeURIComponent(project)}/sessions/new?workspacePath=${encodeURIComponent(workflowWorkspace)}`}>
+                    <Button variant="default" size="sm">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create Session
+                    </Button>
+                  </Link>
                 </div>
               </CardHeader>
               <CardContent>

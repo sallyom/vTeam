@@ -397,6 +397,9 @@ class SimpleClaudeRunner:
                 except Exception as e:  # noqa: BLE001
                     logger.debug(f"async push workspace failed: {e}")
 
+
+            client.connect(prompt=self.prompt)
+
             while True:
                 inbox, new_offset = await self._read_inbox_lines(last_offset)
                 if inbox:
