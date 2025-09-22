@@ -175,7 +175,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       // Probe workspace existence via API proxy
       try {
         const wsResp = await fetch(
-          `${apiUrl}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
+          `${apiUrl}/projects/${encodeURIComponent(projectName)}/${workspaceBasePath}/${encodeURIComponent(sessionName)}/workspace`
         );
         setHasWorkspace(wsResp.ok);
       } catch {
@@ -269,6 +269,13 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       setActionLoading(null);
     }
   };
+
+  const workspaceBasePath = useMemo(() => {
+    if (!session?.spec?.paths?.workspace?.includes('rfe-workflows')) {
+      return 'rfe-workflows'
+    }
+    return 'agentic-sessions'
+  }, [session?.spec?.paths?.workspace]);
   
 
   const allMessages = useMemo(() => {
@@ -304,8 +311,9 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       }
     }
 
-    return [...agenticMessages, ...toolUseMessages];
-  }, [messages]);
+    const all = [...agenticMessages, ...toolUseMessages]
+    return session?.spec?.interactive ? all.filter((m) => m.type !== "result_message") : all;
+  }, [messages, session?.spec?.interactive]);
 
   const latestDisplayMessage = useMemo(() => {
     if (allMessages.length === 0) return null;
@@ -332,7 +340,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   // Workspace helpers (loaded when Workspace tab opens)
   type ListItem = { name: string; path: string; isDir: boolean; size: number; modifiedAt: string };
   const listWsPath = useCallback(async (relPath?: string) => {
-    const url = new URL(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`, window.location.origin);
+    const url = new URL(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/${workspaceBasePath}/${encodeURIComponent(sessionName)}/workspace`, window.location.origin);
     if (relPath) url.searchParams.set("path", relPath);
     const resp = await fetch(url.toString());
     if (!resp.ok) throw new Error("Failed to list workspace");
@@ -342,7 +350,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   }, [projectName, sessionName]);
 
   const readWsFile = useCallback(async (rel: string) => {
-    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(rel)}`);
+    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/${workspaceBasePath}/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(rel)}`);
     if (!resp.ok) throw new Error("Failed to fetch file");
     const text = await resp.text();
     return text;
@@ -474,7 +482,6 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
 
             {session.status?.phase === "Pending" || session.status?.phase === "Creating" || session.status?.phase === "Running" && (
               <div>
-                <div className="text-xs font-semibold text-muted-foreground mb-2">Controls</div>
                 <Button variant="secondary" onClick={handleStop} disabled={!!actionLoading}>
                   <Square className="w-4 h-4 mr-2" />
                   {actionLoading === "stopping" ? "Stopping..." : "Stop"}

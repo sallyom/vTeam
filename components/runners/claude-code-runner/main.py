@@ -420,6 +420,7 @@ class SimpleClaudeRunner:
                             "content": text,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         })
+                        self._flush_messages()
 
                         # Send to Claude and stream results
                         await client.query(text)

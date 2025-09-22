@@ -12,7 +12,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CreateAgenticSessionRequest, RFEWorkflow, WorkflowPhase } from "@/types/agentic-session";
 import { WORKFLOW_PHASE_LABELS } from "@/lib/agents";
-import { ArrowLeft, Edit, Play, Loader2, RefreshCw, FolderTree } from "lucide-react";
+import { ArrowLeft, Play, Loader2, RefreshCw, FolderTree } from "lucide-react";
 import { FileTree, type FileTreeNode } from "@/components/file-tree";
 
 function phaseProgress(w: RFEWorkflow, phase: WorkflowPhase) {

@@ -36,6 +36,9 @@ export type AgenticSessionSpec = {
 	gitConfig?: GitConfig;
 	project?: string;
 	interactive?: boolean;
+	paths?: {
+		workspace?: string;
+	}
 };
 
 // -----------------------------
