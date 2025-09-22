@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { AgentPersona } from "@/types/agentic-session";
-import { AVAILABLE_AGENTS, DEFAULT_AGENT_SELECTIONS, groupAgentsByRole } from "@/lib/agents";
+import { DEFAULT_AGENT_SELECTIONS } from "@/lib/agents";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Users, Zap, Target, Palette, FileText, Settings } from "lucide-react";
 
 interface AgentSelectionProps {
+  agents: AgentPersona[];
   selectedAgents: string[];
   onSelectionChange: (selectedAgents: string[]) => void;
   maxAgents?: number;
@@ -26,6 +27,7 @@ const categoryIcons = {
 };
 
 export function AgentSelection({
+  agents,
   selectedAgents,
   onSelectionChange,
   maxAgents = 8,
@@ -36,7 +38,23 @@ export function AgentSelection({
   // Ensure selectedAgents is always an array to prevent filter errors
   const safeSelectedAgents = selectedAgents || [];
 
-  const agentGroups = groupAgentsByRole();
+  const getCategoryForRole = (role: string): string => {
+    if (role.includes("Engineering") || role.includes("Technical")) return "Engineering";
+    if (role.includes("UX") || role.includes("Design")) return "Design";
+    if (role.includes("Product") || role.includes("Strategy")) return "Product";
+    if (role.includes("Content") || role.includes("Documentation")) return "Content";
+    return "Process & Leadership";
+  };
+
+  const agentGroups = useMemo(() => {
+    const groups: { [role: string]: AgentPersona[] } = {};
+    (agents || []).forEach(agent => {
+      const category = getCategoryForRole(agent.role || "");
+      if (!groups[category]) groups[category] = [];
+      groups[category].push(agent);
+    });
+    return groups;
+  }, [agents]);
 
   const handleAgentToggle = (persona: string) => {
     if (disabled) return;
@@ -60,14 +78,14 @@ export function AgentSelection({
     try {
       setPresetType(type);
 
-      // Filter out any invalid persona IDs that don't exist in AVAILABLE_AGENTS
+      // Filter out any invalid persona IDs that don't exist in provided agents
       const validAgents = DEFAULT_AGENT_SELECTIONS[type].filter(persona =>
-        AVAILABLE_AGENTS.some(agent => agent.persona === persona)
+        (agents || []).some(agent => agent.persona === persona)
       );
 
       console.log(`Applying preset ${type}:`, DEFAULT_AGENT_SELECTIONS[type]);
       console.log(`Filtered to valid agents:`, validAgents);
-      console.log(`Available agents count:`, AVAILABLE_AGENTS.length);
+      console.log(`Available agents count:`, (agents || []).length);
 
       // Validate that validAgents is an array and contains strings
       if (!Array.isArray(validAgents)) {
@@ -99,7 +117,7 @@ export function AgentSelection({
   const selectAll = () => {
     if (disabled) return;
     try {
-      const allAgents = AVAILABLE_AGENTS.slice(0, maxAgents).map(a => a.persona);
+      const allAgents = (agents || []).slice(0, maxAgents).map(a => a.persona);
       onSelectionChange(allAgents);
     } catch (error) {
       console.error('Error selecting all agents:', error);
@@ -169,7 +187,7 @@ export function AgentSelection({
 
         <TabsContent value="all" className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-            {AVAILABLE_AGENTS.map(agent => (
+            {(agents || []).map(agent => (
               <AgentCard
                 key={agent.persona}
                 agent={agent}
@@ -197,7 +215,7 @@ export function AgentSelection({
               <Badge variant="secondary">{agents.length} agents</Badge>
             </div>
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {agents.map(agent => (
+              {(agents || []).map(agent => (
                 <AgentCard
                   key={agent.persona}
                   agent={agent}
@@ -220,7 +238,7 @@ export function AgentSelection({
           <CardContent>
             <div className="flex flex-wrap gap-2">
               {safeSelectedAgents.map(persona => {
-                const agent = AVAILABLE_AGENTS.find(a => a.persona === persona);
+                const agent = (agents || []).find(a => a.persona === persona);
                 return agent ? (
                   <Badge
                     key={persona}
@@ -262,7 +280,7 @@ function AgentCard({ agent, selected, onToggle, disabled }: AgentCardProps) {
       } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       onClick={disabled ? undefined : onToggle}
     >
-      <CardHeader className="pb-2">
+      <CardHeader>
         <div className="flex items-start justify-between">
           <div className="flex-1">
             <CardTitle className="text-sm font-medium">{agent.name}</CardTitle>
@@ -286,11 +304,6 @@ function AgentCard({ agent, selected, onToggle, disabled }: AgentCardProps) {
               {skill.replace(/-/g, ' ')}
             </Badge>
           ))}
-          {agent.expertise.length > 2 && (
-            <Badge variant="outline" className="text-xs px-1 py-0">
-              +{agent.expertise.length - 2}
-            </Badge>
-          )}
         </div>
       </CardContent>
     </Card>

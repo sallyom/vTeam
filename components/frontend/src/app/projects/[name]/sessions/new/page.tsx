@@ -274,6 +274,7 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                   Choose one or more agents to inject their knowledge into the session at start.
                 </FormDescription>
                 <AgentSelection
+                  agents={agents}
                   selectedAgents={selectedAgents}
                   onSelectionChange={setSelectedAgents}
                   maxAgents={8}
@@ -281,55 +282,6 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                 />
               </div>
 
-              <FormField
-                control={form.control}
-                name="agentPersona"
-                render={({ field }) => {
-                  const selected = agents.find((a) => a.persona === field.value);
-                  return (
-                    <FormItem>
-                      <FormLabel className="flex items-center gap-2">
-                        Agent Persona
-                        {selected && (
-                          <span className="relative group inline-block">
-                            <Info className="w-4 h-4 text-muted-foreground" />
-                            <div className="absolute z-10 hidden group-hover:block bg-popover text-popover-foreground border rounded-md p-3 shadow-md w-72 left-1/2 -translate-x-1/2 mt-2">
-                              <div className="text-sm font-medium mb-1">{selected.name}</div>
-                              <div className="text-xs text-muted-foreground mb-2">{selected.role}</div>
-                              <ul className="list-disc pl-5 space-y-1 text-sm">
-                                {selected.expertise?.map((e, i) => (
-                                  <li key={i}>{e}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          </span>
-                        )}
-                      </FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select an agent (optional)" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {agents.map((a) => (
-                            <SelectItem key={a.persona} value={a.persona}>
-                              <div className="flex flex-col">
-                                <span>{a.name}</span>
-                                <span className="text-xs text-muted-foreground">{a.role}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>
-                        Optionally inject a persona’s knowledge into the session at start.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  );
-                }}
-              />
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField
