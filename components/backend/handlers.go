@@ -3159,18 +3159,10 @@ func listProjectRFEWorkflowSessions(c *gin.Context) {
 		return
 	}
 
-	// Build a thin DTO for UI
+	// Return full session objects for UI
 	sessions := make([]map[string]interface{}, 0, len(list.Items))
 	for _, item := range list.Items {
-		meta, _ := item.Object["metadata"].(map[string]interface{})
-		status, _ := item.Object["status"].(map[string]interface{})
-		name, _ := meta["name"].(string)
-		phase, _ := status["phase"].(string)
-		sessions = append(sessions, map[string]interface{}{
-			"name":   name,
-			"phase":  phase,
-			"labels": meta["labels"],
-		})
+		sessions = append(sessions, item.Object)
 	}
 	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
 }

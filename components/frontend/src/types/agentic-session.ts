@@ -139,6 +139,8 @@ export type AgenticSession = {
 		namespace: string;
 		creationTimestamp: string;
 		uid: string;
+		labels?: Record<string, string>;
+		annotations?: Record<string, string>;
 	};
 	spec: AgenticSessionSpec;
 	status?: AgenticSessionStatus;
