@@ -123,32 +123,63 @@ export default function ProjectRFEDetailPage() {
     }
   }, [project, id]);
 
+  const fetchWsFile = useCallback(async (relPath: string): Promise<{ exists: boolean; content: string }> => {
+    if (!project || !id) return { exists: false, content: "" };
+    try {
+      const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(project)}/rfe-workflows/${encodeURIComponent(id)}/workspace/${encodeURIComponent(relPath)}`);
+      if (!resp.ok) {
+        if (resp.status === 404) return { exists: false, content: "" };
+        return { exists: false, content: "" };
+      }
+      const contentType = resp.headers.get("content-type") || "";
+      if (contentType.startsWith("application/json")) {
+        const data = await resp.json();
+        return { exists: true, content: JSON.stringify(data, null, 2) };
+      }
+      const text = await resp.text();
+      return { exists: true, content: text };
+    } catch {
+      return { exists: false, content: "" };
+    }
+  }, [project, id]);
+
   const probeWorkspaceAndPhase = useCallback(async () => {
     const features = await listWsPath("specs");
-    const firstFeature = features[0];
+    const firstFeature = features && features.length > 0 ? features[0] : undefined;
 
-    // Probe spec.md, plan.md, tasks.md
-    const spec = await listWsPath(`${firstFeature.path}/spec.md`);
-    const plan = await listWsPath(`${firstFeature.path}/plan.md`);
-    const tasks = await listWsPath(`${firstFeature.path}/tasks.md`);
-    
+    if (!firstFeature || !firstFeature.path) {
+      setSpecKitDir({
+        spec: { exists: false, content: "" },
+        plan: { exists: false, content: "" },
+        tasks: { exists: false, content: "" },
+      });
+      return;
+    }
+
+    // Probe spec.md, plan.md, tasks.md by fetching files
+    const [spec, plan, tasks] = await Promise.all([
+      fetchWsFile(`${firstFeature.path}/spec.md`),
+      fetchWsFile(`${firstFeature.path}/plan.md`),
+      fetchWsFile(`${firstFeature.path}/tasks.md`),
+    ]);
+
     setSpecKitDir({
       spec: {
-        exists: spec.length > 0,
-        content: spec[0].content,
+        exists: spec.exists,
+        content: spec.content,
       },
       plan: {
-        exists: plan.length > 0,
-        content: plan[0].content,
+        exists: plan.exists,
+        content: plan.content,
       },
       tasks: {
-        exists: tasks.length > 0,
-        content: tasks[0].content,
+        exists: tasks.exists,
+        content: tasks.content,
       },
     });
 
 
-  }, [listWsPath]);
+  }, [listWsPath, fetchWsFile]);
 
   useEffect(() => {
     (async () => {
@@ -214,22 +245,6 @@ export default function ProjectRFEDetailPage() {
     }
   }, [project, id]);
 
-  const advancePhase = useCallback(async () => {
-    try {
-      setAdvancing(true);
-      const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(project)}/rfe-workflows/${encodeURIComponent(id)}/advance-phase`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to advance phase");
-    } finally {
-      setAdvancing(false);
-    }
-  }, [project, id, load]);
 
   if (loading) return <div className="container mx-auto py-8">Loading…</div>;
   if (error || !workflow) return (
