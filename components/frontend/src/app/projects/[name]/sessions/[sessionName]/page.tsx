@@ -138,6 +138,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   const [wsFileContent, setWsFileContent] = useState<string>("");
   const [wsLoading, setWsLoading] = useState<boolean>(false);
   const [usageExpanded, setUsageExpanded] = useState(false);
+  const [promptExpanded, setPromptExpanded] = useState(false);
 
   const [chatInput, setChatInput] = useState("")
 
@@ -360,6 +361,38 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     return start ? Math.max(0, end - start) : undefined;
   }, [session?.status?.startTime, session?.status?.completionTime]);
 
+  // Subagent aggregation from tool_use messages
+  const subagentStats = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const orderedTypes: string[] = [];
+    for (const message of messages) {
+      if (message.type === "assistant_message") {
+        const content = message.content;
+        if (content && typeof content === "object" && (content as any).type === "tool_use_block") {
+          const block = content as ToolUseBlock;
+          const input = block.input as unknown as Record<string, unknown> | undefined;
+          const subagentType = (input?.subagent_type as string) || undefined;
+          if (block.name === "Task" && typeof subagentType === "string" && subagentType.trim().length > 0) {
+            counts[subagentType] = (counts[subagentType] || 0) + 1;
+            if (!orderedTypes.includes(subagentType)) orderedTypes.push(subagentType);
+          }
+        }
+      } else if (message.type === "user_message") {
+        const content = message.content;
+        if (content && typeof content === "object" && (content as any).type === "tool_use_block") {
+          const block = content as ToolUseBlock;
+          const input = block.input as unknown as Record<string, unknown> | undefined;
+          const subagentType = (input?.subagent_type as string) || undefined;
+          if (block.name === "Task" && typeof subagentType === "string" && subagentType.trim().length > 0) {
+            counts[subagentType] = (counts[subagentType] || 0) + 1;
+            if (!orderedTypes.includes(subagentType)) orderedTypes.push(subagentType);
+          }
+        }
+      }
+    }
+    return { uniqueCount: orderedTypes.length, orderedTypes, counts };
+  }, [messages]);
+
   // Workspace helpers (loaded when Workspace tab opens)
   type ListItem = { name: string; path: string; isDir: boolean; size: number; modifiedAt: string };
   const listWsPath = useCallback(async (relPath?: string) => {
@@ -466,7 +499,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   }
 
   return (
-    <div className="container mx-auto p-6 max-w-5xl">
+    <div className="container mx-auto p-6">
       <div className="flex items-center justify-start mb-6">
         <Link href={backHref || `/projects/${encodeURIComponent(projectName)}/sessions`}>
           <Button variant="ghost" size="sm">
@@ -524,7 +557,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
         </div>
 
         {/* Top compact stat cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <Card className="py-4">
             <CardContent>
               <div className="text-xs text-muted-foreground">Cost</div>
@@ -543,11 +576,20 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
               <div className="text-lg font-semibold">{allMessages.length}</div>
             </CardContent>
           </Card>
+          <Card className="py-4">
+            <CardContent>
+              <div className="text-xs text-muted-foreground">Agents</div>
+              <div className="text-lg font-semibold">{subagentStats.uniqueCount > 0 ? subagentStats.uniqueCount : "-"}</div>
+              {subagentStats.orderedTypes.length > 0 ? (
+                <div className="text-xs text-muted-foreground mt-1 truncate" title={subagentStats.orderedTypes.join(", ")}>{subagentStats.orderedTypes.join(", ")}</div>
+              ) : null}
+            </CardContent>
+          </Card>
         </div>
 
         {/* Tabbed content */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className={`grid ${hasWorkspace ? "grid-cols-4" : "grid-cols-3"} w-full`}>
+          <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="messages">Messages</TabsTrigger>
             {hasWorkspace ? <TabsTrigger value="workspace">Workspace</TabsTrigger> : null}
@@ -562,11 +604,39 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
                 <CardHeader>
                   <CardTitle className="flex items-center">
                     <Brain className="w-5 h-5 mr-2" />
-                    InitialPrompt
+                    Initial Prompt
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="whitespace-pre-wrap text-sm">{session.spec.prompt}</p>
+                  {(() => {
+                    const promptText = session.spec.prompt || "";
+                    const promptIsLong = promptText.length > 400;
+                    return (
+                      <>
+                        <div
+                          className={cn(
+                            "relative",
+                            !promptExpanded && promptIsLong ? "max-h-40 overflow-hidden" : ""
+                          )}
+                        >
+                          <p className="whitespace-pre-wrap text-sm">{promptText}</p>
+                          {!promptExpanded && promptIsLong ? (
+                            <div className="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-white to-transparent pointer-events-none" />
+                          ) : null}
+                        </div>
+                        {promptIsLong && (
+                          <button
+                            className="mt-2 text-xs text-blue-600 hover:underline"
+                            onClick={() => setPromptExpanded((e) => !e)}
+                            aria-expanded={promptExpanded}
+                            aria-controls="initial-prompt"
+                          >
+                            {promptExpanded ? "View less" : "View more"}
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                 </CardContent>
               </Card>
               {/* Latest Message */}
@@ -618,7 +688,12 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
                           {session.status.jobName && (
                             <div>
                               <p className="font-semibold">K8s Job</p>
-                              <p className="text-muted-foreground font-mono text-xs">{session.status.jobName}</p>
+                              <div className="flex items-center gap-2">
+                                <p className="text-muted-foreground font-mono text-xs">{session.status.jobName}</p>
+                                <Badge variant="outline" className={session.spec?.interactive ? "bg-green-50 text-green-700 border-green-200" : "bg-gray-50 text-gray-700 border-gray-200"}>
+                                  {session.spec?.interactive ? "Interactive" : "Headless"}
+                                </Badge>
+                              </div>
                             </div>
                           )}
                         </div>

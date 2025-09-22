@@ -370,13 +370,14 @@ class SimpleClaudeRunner:
             ResultMessage,
         )
 
-        allowed_tools_env = os.getenv("CLAUDE_ALLOWED_TOOLS", "Read,Write,Bash").strip()
+        allowed_tools_env = os.getenv("CLAUDE_ALLOWED_TOOLS", "Read,Write,Bash,Glob,Grep,Edit,MultiEdit,WebSearch,WebFetch").strip()
         allowed_tools = [t.strip() for t in allowed_tools_env.split(",") if t.strip()]
 
         options = ClaudeCodeOptions(
             permission_mode=os.getenv("CLAUDE_PERMISSION_MODE", "acceptEdits"),
             allowed_tools=allowed_tools if allowed_tools else None,
             cwd=str(self.workdir),
+            append_system_prompt=self.prompt + "\n\nALWAYS consult sub agents to help with this task.",
         )
 
         # Restore cursor if present
@@ -398,7 +399,7 @@ class SimpleClaudeRunner:
                     logger.debug(f"async push workspace failed: {e}")
 
 
-            client.connect(prompt=self.prompt)
+            client.connect()
 
             while True:
                 inbox, new_offset = await self._read_inbox_lines(last_offset)
@@ -411,10 +412,11 @@ class SimpleClaudeRunner:
                             # Graceful end of interactive session
                             try:
                                 self._append_message("User requested session end")
-                                client.disconnect()
+                                await self.update_status_async("Completed", message="Session ended by user", completed=True)
+                                await client.disconnect()
+                                return
                             except Exception:
                                 pass
-                            self._update_status("Completed", message="Session ended by user", completed=True)
                             return
                        
                         # Mirror user message into outbox
@@ -491,6 +493,7 @@ class SimpleClaudeRunner:
                         pass
 
                 await __import__("asyncio").sleep(float(os.getenv("INBOX_POLL_INTERVAL_SEC", "0.5")))
+       
 
     # ---------------- Status ----------------
     def _update_status(self, phase: str, message: str | None = None, completed: bool = False, result_msg: ResultMessage | None = None) -> None:
@@ -523,11 +526,32 @@ class SimpleClaudeRunner:
         except Exception as e:
             logger.warning(f"Failed to update status: {e}")
 
+
+    async def update_status_async(self, phase: str, message: str | None = None, completed: bool = False, result_msg: ResultMessage | None = None) -> None:
+        payload: Dict[str, Any] = {"phase": phase}
+        if message:
+            payload["message"] = message
+
+        if result_msg:
+            payload["result"] = result_msg.result
+            payload["subtype"] = result_msg.subtype
+            payload["is_error"] = result_msg.is_error
+            payload["num_turns"] = result_msg.num_turns
+            payload["session_id"] = result_msg.session_id
+            payload["total_cost_usd"] = result_msg.total_cost_usd
+            payload["usage"] = result_msg.usage
+
+        if completed:
+            payload["completionTime"] = datetime.now(timezone.utc).isoformat()
+        try:
+            await self.backend.update_session_status(self.session_name, payload)
+        except Exception as e:
+            logger.warning(f"Failed to update status: {e}")
+
     # ---------------- LLM call (streaming) ----------------
     def _run_llm_streaming(self, prompt: str) -> ResultMessage | None:
         """Run the LLM with streaming via Claude Code SDK, emitting structured messages for the UI."""
         # Nudge the agent to write files to artifacts folder
-        full_prompt = prompt + "\n\nIMPORTANT: Save any file outputs into the 'artifacts' folder of the working directory."
 
         result_message: ResultMessage | None = None
 
@@ -549,7 +573,7 @@ class SimpleClaudeRunner:
             nonlocal result_message
 
             # Allow configuring tools via env; default to common ones
-            allowed_tools_env = os.getenv("CLAUDE_ALLOWED_TOOLS", "Read,Write,Bash").strip()
+            allowed_tools_env = os.getenv("CLAUDE_ALLOWED_TOOLS", "Read,Write,Bash,WebSearch").strip()
             allowed_tools = [t.strip() for t in allowed_tools_env.split(",") if t.strip()]
 
             options = ClaudeCodeOptions(
@@ -559,7 +583,7 @@ class SimpleClaudeRunner:
                 # include_partial_messages=True, # TODO add incremental messages
             )
 
-            stream = query(prompt=full_prompt, options=options)
+            stream = query(prompt=prompt, options=options)
             try:
                 async for message in stream:
                     logger.info(f"Message: {message}")
