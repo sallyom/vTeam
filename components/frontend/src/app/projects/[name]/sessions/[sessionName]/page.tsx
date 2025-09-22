@@ -141,12 +141,24 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
 
   const [chatInput, setChatInput] = useState("")
 
+  // Optional back link support via URL search params: backLabel, backHref
+  const [backHref, setBackHref] = useState<string | null>(null);
+  const [backLabel, setBackLabel] = useState<string | null>(null);
+
   useEffect(() => {
     params.then(({ name, sessionName }) => {
       setProjectName(name);
       setSessionName(sessionName);
+      try {
+        const url = new URL(window.location.href);
+        const bh = url.searchParams.get("backHref");
+        const bl = url.searchParams.get("backLabel");
+        setBackHref(bh);
+        setBackLabel(bl);
+      } catch {}
     });
   }, [params]);
+
 
   const fetchSession = useCallback(async () => {
     if (!projectName || !sessionName) return;
@@ -172,15 +184,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
         if (Array.isArray(msgData)) setMessages(msgData);
       }
 
-      // Probe workspace existence via API proxy
-      try {
-        const wsResp = await fetch(
-          `${apiUrl}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`
-        );
-        setHasWorkspace(wsResp.ok);
-      } catch {
-        setHasWorkspace(false);
-      }
+
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -218,6 +222,30 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       return () => clearInterval(interval);
     }
   }, [projectName, sessionName, session?.status?.phase, fetchSession]);
+
+
+  const workspaceBasePath = session?.spec?.paths?.workspace || `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
+
+    
+  const probeWorkspace = useCallback(async () => {
+    // Probe workspace existence via API proxy
+    try {
+      const apiUrl = getApiUrl();
+      const wsResp = await fetch(
+        `${apiUrl}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`
+      );
+      setHasWorkspace(wsResp.ok);
+    } catch {
+      setHasWorkspace(false);
+    }
+  }, [projectName, workspaceBasePath]);
+
+  useEffect(() => {
+    if (projectName && sessionName) {
+      probeWorkspace();
+    }
+  }, [projectName, sessionName, probeWorkspace]);
+
 
  
   const handleStop = async () => {
@@ -263,21 +291,14 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
         throw new Error("Failed to delete session");
       }
       // Redirect back to project sessions after successful deletion
-      window.location.href = `/projects/${encodeURIComponent(projectName)}?tab=sessions`;
+      window.location.href = backHref || `/projects/${encodeURIComponent(projectName)}?tab=sessions`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete session");
       setActionLoading(null);
     }
   };
 
-  const workspaceBasePath = useMemo(() => {
-    if (session?.spec?.paths?.workspace) {
-      return session.spec.paths.workspace
-    }
-    return  `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
-  }, [session?.spec?.paths?.workspace]);
 
-  console.log(workspaceBasePath)
   
 
   const allMessages = useMemo(() => {
@@ -349,14 +370,23 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     const data = await resp.json();
     const items: ListItem[] = Array.isArray(data.items) ? data.items : [];
     return items;
-  }, [projectName, sessionName]);
+  }, [projectName, sessionName, workspaceBasePath]);
 
   const readWsFile = useCallback(async (rel: string) => {
     const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}/${encodeURIComponent(rel)}`);
     if (!resp.ok) throw new Error("Failed to fetch file");
     const text = await resp.text();
     return text;
-  }, [projectName, sessionName]);
+  }, [projectName, sessionName, workspaceBasePath]);
+
+  const writeWsFile = useCallback(async (rel: string, content: string) => {
+    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}/${encodeURIComponent(rel)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      body: content,
+    });
+    if (!resp.ok) throw new Error("Failed to save file");
+  }, [projectName, workspaceBasePath]);
 
   const buildWsRoot = useCallback(async () => {
     if (!hasWorkspace) return;
@@ -419,10 +449,10 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     return (
       <div className="container mx-auto p-6">
         <div className="flex items-center mb-6">
-          <Link href={`/projects/${encodeURIComponent(projectName)}/sessions`}>
+          <Link href={backHref || `/projects/${encodeURIComponent(projectName)}/sessions`}>
             <Button variant="ghost" size="sm">
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Sessions
+              {backLabel || "Back to Sessions"}
             </Button>
           </Link>
         </div>
@@ -438,10 +468,10 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   return (
     <div className="container mx-auto p-6 max-w-5xl">
       <div className="flex items-center justify-start mb-6">
-        <Link href={`/projects/${encodeURIComponent(projectName)}/sessions`}>
+        <Link href={backHref || `/projects/${encodeURIComponent(projectName)}/sessions`}>
           <Button variant="ghost" size="sm">
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Sessions
+            {backLabel || "Back to Sessions"}
           </Button>
         </Link>
       </div>
@@ -732,8 +762,21 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
                                 <span className="font-medium">{wsSelectedPath.split('/').pop()}</span>
                                 <Badge variant="outline" className="ml-2">{wsSelectedPath}</Badge>
                               </div>
+                              <div className="flex items-center gap-2">
+                                <Button size="sm" onClick={async () => {
+                                  try {
+                                    await writeWsFile(wsSelectedPath, wsFileContent);
+                                  } catch {
+                                    // noop for now
+                                  }
+                                }}>Save</Button>
+                              </div>
                             </div>
-                            <pre className="bg-gray-900 text-gray-100 p-4 rounded overflow-auto text-sm">{wsFileContent}</pre>
+                            <textarea
+                              className="w-full h-[60vh] bg-gray-900 text-gray-100 p-4 rounded overflow-auto text-sm font-mono"
+                              value={wsFileContent}
+                              onChange={(e) => setWsFileContent(e.target.value)}
+                            />
                           </>
                         ) : (
                           <div className="text-sm text-muted-foreground p-4">Select a file to preview</div>

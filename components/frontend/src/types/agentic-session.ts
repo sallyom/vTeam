@@ -205,6 +205,7 @@ export type RFEWorkflow = {
 	createdAt: string;
 	updatedAt: string;
   phaseResults?: { [phase: string]: PhaseResult };
+  jiraLinks?: Array<{ path: string; jiraKey: string }>;
 };
 
 export type CreateRFEWorkflowRequest = {
