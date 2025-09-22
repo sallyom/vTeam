@@ -93,11 +93,28 @@ func getAgentMarkdown(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "persona required"})
 		return
 	}
+	md, err := renderAgentMarkdownContent(persona)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			c.JSON(http.StatusNotFound, gin.H{"error": "persona not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to render agent markdown: %v", err)})
+		return
+	}
+	c.Data(http.StatusOK, "text/markdown; charset=utf-8", []byte(md))
+}
+
+// renderAgentMarkdownContent builds the markdown content for a given agent persona
+// by reading its YAML definition from the configured agents directory.
+func renderAgentMarkdownContent(persona string) (string, error) {
+	if strings.TrimSpace(persona) == "" {
+		return "", fmt.Errorf("persona required")
+	}
 	dir := resolveAgentsDir()
 	agents, err := readAllAgentYAMLs(dir)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to read agents: %v", err)})
-		return
+		return "", fmt.Errorf("failed to read agents: %w", err)
 	}
 	var found *yamlAgent
 	for i := range agents {
@@ -107,8 +124,7 @@ func getAgentMarkdown(c *gin.Context) {
 		}
 	}
 	if found == nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "persona not found"})
-		return
+		return "", fmt.Errorf("persona not found")
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# %s (%s)\n\n", found.Name, found.Persona)
@@ -124,5 +140,5 @@ func getAgentMarkdown(c *gin.Context) {
 	if found.SystemMessage != "" {
 		fmt.Fprintf(&sb, "\n## System message\n\n%s\n", found.SystemMessage)
 	}
-	c.Data(http.StatusOK, "text/markdown; charset=utf-8", []byte(sb.String()))
+	return sb.String(), nil
 }

@@ -141,10 +141,21 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
 
   const [chatInput, setChatInput] = useState("")
 
+  // Optional back link support via URL search params: backLabel, backHref
+  const [backHref, setBackHref] = useState<string | null>(null);
+  const [backLabel, setBackLabel] = useState<string | null>(null);
+
   useEffect(() => {
     params.then(({ name, sessionName }) => {
       setProjectName(name);
       setSessionName(sessionName);
+      try {
+        const url = new URL(window.location.href);
+        const bh = url.searchParams.get("backHref");
+        const bl = url.searchParams.get("backLabel");
+        setBackHref(bh);
+        setBackLabel(bl);
+      } catch {}
     });
   }, [params]);
 
@@ -223,7 +234,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       const wsResp = await fetch(
         `${apiUrl}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`
       );
-      setHasWorkspace(wsResp.ok || true);
+      setHasWorkspace(wsResp.ok);
     } catch {
       setHasWorkspace(false);
     }
@@ -280,7 +291,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
         throw new Error("Failed to delete session");
       }
       // Redirect back to project sessions after successful deletion
-      window.location.href = `/projects/${encodeURIComponent(projectName)}?tab=sessions`;
+      window.location.href = backHref || `/projects/${encodeURIComponent(projectName)}?tab=sessions`;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to delete session");
       setActionLoading(null);
@@ -429,10 +440,10 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     return (
       <div className="container mx-auto p-6">
         <div className="flex items-center mb-6">
-          <Link href={`/projects/${encodeURIComponent(projectName)}/sessions`}>
+          <Link href={backHref || `/projects/${encodeURIComponent(projectName)}/sessions`}>
             <Button variant="ghost" size="sm">
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Sessions
+              {backLabel || "Back to Sessions"}
             </Button>
           </Link>
         </div>
@@ -448,10 +459,10 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   return (
     <div className="container mx-auto p-6 max-w-5xl">
       <div className="flex items-center justify-start mb-6">
-        <Link href={`/projects/${encodeURIComponent(projectName)}/sessions`}>
+        <Link href={backHref || `/projects/${encodeURIComponent(projectName)}/sessions`}>
           <Button variant="ghost" size="sm">
             <ArrowLeft className="w-4 h-4 mr-2" />
-            Back to Sessions
+            {backLabel || "Back to Sessions"}
           </Button>
         </Link>
       </div>

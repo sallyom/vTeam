@@ -306,7 +306,13 @@ export default function ProjectRFEDetailPage() {
                             </div>
                             {sessionForPhase && (
                               <div className="flex items-center gap-2">
-                                <Link href={`/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(sessionForPhase.metadata.name)}`}>
+                                <Link href={{
+                                  pathname: `/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(sessionForPhase.metadata.name)}`,
+                                  query: {
+                                    backHref: `/projects/${encodeURIComponent(project)}/rfe/${encodeURIComponent(id)}?tab=overview`,
+                                    backLabel: `Back to RFE`
+                                  }
+                                } as any}>
                                   <Button variant="link" size="sm" className="px-0 h-auto">{sessionDisplay}</Button>
                                 </Link>
                                 {sessionForPhase?.status?.phase && <Badge variant="outline">{sessionForPhase.status.phase}</Badge>}
@@ -408,7 +414,13 @@ export default function ProjectRFEDetailPage() {
                           return (
                             <TableRow key={name}>
                               <TableCell className="font-medium min-w-[180px]">
-                                <Link href={`/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(name)}`} className="text-blue-600 hover:underline hover:text-blue-800 transition-colors block">
+                                <Link href={{
+                                  pathname: `/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(name)}`,
+                                  query: {
+                                    backHref: `/projects/${encodeURIComponent(project)}/rfe/${encodeURIComponent(id)}?tab=sessions`,
+                                    backLabel: `Back to RFE`
+                                  }
+                                } as any} className="text-blue-600 hover:underline hover:text-blue-800 transition-colors block">
                                   <div className="font-medium">{display}</div>
                                   {display !== name && (<div className="text-xs text-gray-500">{name}</div>)}
                                 </Link>

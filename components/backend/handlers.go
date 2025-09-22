@@ -8,11 +8,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -657,6 +659,42 @@ func createSession(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create agentic session"})
 		return
 	}
+
+	// Best-effort prefill of agent markdown into PVC workspace for immediate UI availability
+	// Uses AGENT_PERSONAS or AGENT_PERSONA if provided in request environment variables
+	func() {
+		defer func() { _ = recover() }()
+		personasCsv := ""
+		if v, ok := req.EnvironmentVariables["AGENT_PERSONAS"]; ok && strings.TrimSpace(v) != "" {
+			personasCsv = v
+		} else if v, ok := req.EnvironmentVariables["AGENT_PERSONA"]; ok && strings.TrimSpace(v) != "" {
+			personasCsv = v
+		}
+		if strings.TrimSpace(personasCsv) == "" {
+			return
+		}
+		// Determine workspace base path in PVC
+		workspaceBase := req.WorkspacePath
+		if strings.TrimSpace(workspaceBase) == "" {
+			workspaceBase = fmt.Sprintf("/sessions/%s/workspace", name)
+		}
+		// Write each agent markdown
+		for _, p := range strings.Split(personasCsv, ",") {
+			persona := strings.TrimSpace(p)
+			if persona == "" {
+				continue
+			}
+			md, err := renderAgentMarkdownContent(persona)
+			if err != nil {
+				log.Printf("agent prefill: failed to render persona %s: %v", persona, err)
+				continue
+			}
+			path := fmt.Sprintf("%s/.claude/agents/%s.md", workspaceBase, persona)
+			if err := writeProjectContentFile(c, project, path, []byte(md)); err != nil {
+				log.Printf("agent prefill: write failed for %s: %v", path, err)
+			}
+		}
+	}()
 
 	// Preferred method: provision a per-session ServiceAccount token for the runner
 	if err := provisionRunnerTokenForSession(c, reqK8s, reqDyn, project, name); err != nil {
@@ -2861,18 +2899,70 @@ func createProjectRFEWorkflow(c *gin.Context) {
 		log.Printf("spec-kit init failed for %s/%s: %v", project, workflowID, err)
 	}
 
-	// Placeholder for repositories: create directories; actual cloning can be handled by runner/jobs later (or future go-git)
+	// Clone repositories into workspace (full repo contents); preserve dot-prefixed paths
 	for _, r := range workflow.Repositories {
-		dir := ""
+		targetDir := ""
 		if r.ClonePath != nil && strings.TrimSpace(*r.ClonePath) != "" {
-			dir = *r.ClonePath
+			targetDir = *r.ClonePath
 		} else {
-			// derive from repo url
 			name := filepath.Base(strings.TrimSuffix(strings.TrimSuffix(r.URL, ".git"), "/"))
-			dir = filepath.Join("repos", name)
+			targetDir = filepath.Join("repos", name)
 		}
-		full := filepath.Join(workspaceRoot, dir, ".gitkeep")
-		_ = writeProjectContentFile(c, project, full, []byte(""))
+		absTarget := filepath.Join(workspaceRoot, targetDir)
+
+		// Ensure target directory exists in content service
+		_ = writeProjectContentFile(c, project, filepath.Join(absTarget, ".keep"), []byte(""))
+
+		// Perform shallow clone to a temp dir on backend container filesystem
+		tmpDir, terr := os.MkdirTemp("", "clone-*")
+		if terr != nil {
+			log.Printf("repo clone: temp dir failed for %s: %v", r.URL, terr)
+			continue
+		}
+		defer os.RemoveAll(tmpDir)
+
+		// Use git CLI for shallow clone
+		args := []string{"clone", "--depth", "1"}
+		if r.Branch != nil && strings.TrimSpace(*r.Branch) != "" {
+			args = append(args, "--branch", strings.TrimSpace(*r.Branch))
+		}
+		args = append(args, r.URL, tmpDir)
+		cmd := exec.Command("git", args...)
+		cmd.Env = os.Environ()
+		if out, cerr := cmd.CombinedOutput(); cerr != nil {
+			log.Printf("repo clone failed: %s: %v output=%s", r.URL, cerr, string(out))
+			continue
+		}
+
+		// Walk cloned files and write each to content service (skip .git directory)
+		_ = filepath.WalkDir(tmpDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			rel, rerr := filepath.Rel(tmpDir, path)
+			if rerr != nil {
+				return nil
+			}
+			unixRel := strings.ReplaceAll(rel, "\\", "/")
+			// skip git metadata and root
+			if unixRel == "." || strings.HasPrefix(unixRel, ".git/") || unixRel == ".git" {
+				return nil
+			}
+			if d.IsDir() {
+				// ensure directory exists by placing a marker (harmless if overwritten later)
+				_ = writeProjectContentFile(c, project, filepath.Join(absTarget, unixRel, ".keep"), []byte(""))
+				return nil
+			}
+			// file: read and write
+			b, rerr2 := os.ReadFile(path)
+			if rerr2 != nil {
+				return nil
+			}
+			if werr := writeProjectContentFile(c, project, filepath.Join(absTarget, unixRel), b); werr != nil {
+				log.Printf("repo write failed: %s -> %s: %v", path, filepath.Join(absTarget, unixRel), werr)
+			}
+			return nil
+		})
 	}
 
 	c.JSON(http.StatusCreated, workflow)
@@ -2934,10 +3024,12 @@ func initSpecKitInWorkspace(c *gin.Context, project, workspaceRoot string) error
 			log.Printf("spec-kit: read failed: %s: %v", f.Name, err)
 			continue
 		}
-		// Normalize path: strip any leading directory components to place at workspace root
+		// Normalize path: keep leading dots intact; only trim explicit "./" prefix
 		rel := f.Name
 		origRel := rel
-		rel = strings.TrimLeft(rel, "./")
+		if strings.HasPrefix(rel, "./") {
+			rel = strings.TrimPrefix(rel, "./")
+		}
 		// Ensure we do not write outside workspace
 		rel = strings.ReplaceAll(rel, "\\", "/")
 		for strings.Contains(rel, "../") {
