@@ -87,25 +87,29 @@ export const Message = React.forwardRef<HTMLDivElement, MessageProps>(
     const isBot = role === "bot";
     const avatarBg = isBot ? "bg-blue-600" : "bg-green-600";
     const avatarText = isBot ? "AI" : "U";
-    const displayName = name || (isBot ? "Claude AI" : "User");
+    const displayName = isBot ? "Claude AI" : "User";
+
+    const avatar = (
+      <div className="flex-shrink-0">
+      <div
+        className={cn(
+          "w-8 h-8 rounded-full flex items-center justify-center",
+          avatarBg,
+          isLoading && "animate-pulse"
+        )}
+      >
+        <span className="text-white text-xs font-semibold">
+          {avatarText}
+        </span>
+      </div>
+    </div>
+    )
 
     return (
       <div ref={ref} className={cn("mb-4", className)} {...props}>
         <div className="flex items-start space-x-3">
           {/* Avatar */}
-          <div className="flex-shrink-0">
-            <div
-              className={cn(
-                "w-8 h-8 rounded-full flex items-center justify-center",
-                avatarBg,
-                isLoading && "animate-pulse"
-              )}
-            >
-              <span className="text-white text-xs font-semibold">
-                {avatarText}
-              </span>
-            </div>
-          </div>
+         {isBot ? avatar : null}
 
           {/* Message Content */}
           <div className="flex-1 min-w-0">
@@ -142,6 +146,8 @@ export const Message = React.forwardRef<HTMLDivElement, MessageProps>(
               ) : null}
             </div>
           </div>
+
+          {isBot ? null : avatar}
         </div>
       </div>
     );

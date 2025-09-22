@@ -401,6 +401,7 @@ class SimpleClaudeRunner:
                 inbox, new_offset = await self._read_inbox_lines(last_offset)
                 if inbox:
                     for msg in inbox:
+                        logger.info(f"Inbox message: {msg}")
                         text = str(msg.get("content", ""))
                         norm = text.strip().lower()
                         if norm in ("/end"):
@@ -424,49 +425,48 @@ class SimpleClaudeRunner:
                         await client.query(text)
                         async for message in client.receive_response():
                             logger.info(f"Message: {message}")
-                            if isinstance(message, AssistantMessage):
-                                message_type_map = {
-                            AssistantMessage: "assistant_message",
-                            UserMessage: "user_message",
-                            SystemMessage: "system_message",
-                            ResultMessage: "result_message",
-                        }
-                        message_type = message_type_map.get(type(message), "unknown_message")
-                        if isinstance(message, AssistantMessage) or isinstance(message, UserMessage):
-                            if isinstance(message.content, str):
-                                payload = {
-                                    "type": message_type,
-                                    "content": message.content,
-                                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                                }
-                                self.messages.append(payload)
-                                self._flush_messages()
-                            else:
-                                for block in message.content:
-                                    content_type_map = {
-                                        TextBlock: "text_block",
-                                        ThinkingBlock: "thinking_block",
-                                        ToolUseBlock: "tool_use_block",
-                                        ToolResultBlock: "tool_result_block",
-                                    }
-                                    content_type = content_type_map.get(type(block), "unknown_block")
+                            message_type_map = {
+                                AssistantMessage: "assistant_message",
+                                UserMessage: "user_message",
+                                SystemMessage: "system_message",
+                                ResultMessage: "result_message",
+                            }
+                            message_type = message_type_map.get(type(message), "unknown_message")
+                            if isinstance(message, AssistantMessage) or isinstance(message, UserMessage):
+                                if isinstance(message.content, str):
                                     payload = {
                                         "type": message_type,
+                                        "content": message.content,
                                         "timestamp": datetime.now(timezone.utc).isoformat(),
-                                        "content": {
-                                            "type": content_type,
-                                            **asdict(block),
-                                        },
                                     }
                                     self.messages.append(payload)
                                     self._flush_messages()
-                        else:
-                            payload = {
-                                "type": message_type,
-                                "timestamp": datetime.now(timezone.utc).isoformat(),
-                                **asdict(message),
-                            }
-                            self.messages.append(payload)
+                                else:
+                                    for block in message.content:
+                                        content_type_map = {
+                                            TextBlock: "text_block",
+                                            ThinkingBlock: "thinking_block",
+                                            ToolUseBlock: "tool_use_block",
+                                            ToolResultBlock: "tool_result_block",
+                                        }
+                                        content_type = content_type_map.get(type(block), "unknown_block")
+                                        payload = {
+                                            "type": message_type,
+                                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                                            "content": {
+                                                "type": content_type,
+                                                **asdict(block),
+                                            },
+                                        }
+                                        self.messages.append(payload)
+                                        self._flush_messages()
+                            else:
+                                payload = {
+                                    "type": message_type,
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                                    **asdict(message),
+                                }
+                                self.messages.append(payload)
                         
                         # Ensure any recent local changes are visible in UI before next run (deltas only)
                         try:

@@ -538,6 +538,9 @@ func createSession(c *gin.Context) {
 				"temperature": llmSettings.Temperature,
 				"maxTokens":   llmSettings.MaxTokens,
 			},
+			"paths": map[string]interface{}{
+				"workspace": req.WorkspacePath,
+			},
 			"timeout": timeout,
 		},
 		"status": map[string]interface{}{

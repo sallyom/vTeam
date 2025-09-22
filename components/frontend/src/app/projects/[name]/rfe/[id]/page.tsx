@@ -119,6 +119,18 @@ export default function ProjectRFEDetailPage() {
     })();
   }, [project, id, listWsPath, probeWorkspaceAndPhase]);
 
+  const updateChildrenByPath = useCallback((nodes: FileTreeNode[], targetPath: string, children: FileTreeNode[]): FileTreeNode[] => {
+    return nodes.map((n) => {
+      if (n.path === targetPath) {
+        return { ...n, children };
+      }
+      if (n.type === "folder" && n.children && n.children.length > 0) {
+        return { ...n, children: updateChildrenByPath(n.children, targetPath, children) };
+      }
+      return n;
+    });
+  }, []);
+
   const onWsToggle = useCallback(async (node: FileTreeNode) => {
     if (node.type !== "folder") return;
     const items = await listWsPath(node.path);
@@ -129,8 +141,8 @@ export default function ProjectRFEDetailPage() {
       expanded: false,
       sizeKb: typeof it.size === "number" ? it.size / 1024 : undefined,
     }));
-    setWsTree(prev => prev.map(n => n.path === node.path ? { ...n, children } : n));
-  }, [listWsPath]);
+    setWsTree(prev => updateChildrenByPath(prev, node.path, children));
+  }, [listWsPath, updateChildrenByPath]);
 
   const onWsSelect = useCallback(async (node: FileTreeNode) => {
     if (node.type !== "file") return;
