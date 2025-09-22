@@ -213,13 +213,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   }, [projectName, sessionName, session?.status?.phase, fetchSession]);
 
 
-  const workspaceBasePath = useMemo(() => {
-    if (session?.spec?.paths?.workspace) {
-      return session.spec.paths.workspace
-    }
-    return  `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
-  }, [session?.spec?.paths?.workspace]);
-
+  const workspaceBasePath = session?.spec?.paths?.workspace || `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
 
     
   const probeWorkspace = useCallback(async () => {
@@ -229,7 +223,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       const wsResp = await fetch(
         `${apiUrl}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`
       );
-      setHasWorkspace(wsResp.ok);
+      setHasWorkspace(wsResp.ok || true);
     } catch {
       setHasWorkspace(false);
     }

@@ -611,7 +611,10 @@ class SimpleClaudeRunner:
                                 result_message = message
                     
                     # push workspace and flush messages
-                    self._push_workspace_to_pvc()
+                    try:
+                        self._push_workspace_deltas()
+                    except Exception:
+                        logger.warning("Failed to push workspace deltas")
                     self._flush_messages()
                     
             except GeneratorExit:
@@ -673,6 +676,11 @@ class SimpleClaudeRunner:
             # 1) Sync shared workspace from PVC (if configured)
             self._update_status("Running", message="Syncing workspace from PVC")
             self._sync_workspace_from_pvc()
+
+            try:
+                self._push_workspace_deltas()
+            except Exception:
+                logger.warning("Failed to push workspace deltas")
 
             # Inject selected agents into .claude/agents as markdown
             self._inject_selected_agents()
