@@ -10,9 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getApiUrl } from "@/lib/config";
 import { formatDistanceToNow } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { RFEWorkflow, WorkflowPhase } from "@/types/agentic-session";
+import { AgenticSession, CreateAgenticSessionRequest, RFEWorkflow, WorkflowPhase } from "@/types/agentic-session";
 import { WORKFLOW_PHASE_LABELS } from "@/lib/agents";
-import { ArrowLeft, Edit, Play, Loader2, RefreshCw, FolderTree } from "lucide-react";
+import { ArrowLeft, Play, Loader2, FolderTree, Plus } from "lucide-react";
 import { FileTree, type FileTreeNode } from "@/components/file-tree";
 
 function phaseProgress(w: RFEWorkflow, phase: WorkflowPhase) {
@@ -32,7 +32,7 @@ export default function ProjectRFEDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [advancing, setAdvancing] = useState(false);
   const [startingPhase, setStartingPhase] = useState<WorkflowPhase | null>(null);
-  const [rfeSessions, setRfeSessions] = useState<Array<{ name: string; phase?: string; labels?: Record<string, unknown> }>>([]);
+  const [rfeSessions, setRfeSessions] = useState<AgenticSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [hasWorkspace, setHasWorkspace] = useState<boolean | null>(null);
   const [wsTree, setWsTree] = useState<FileTreeNode[]>([]);
@@ -119,6 +119,18 @@ export default function ProjectRFEDetailPage() {
     })();
   }, [project, id, listWsPath, probeWorkspaceAndPhase]);
 
+  const updateChildrenByPath = useCallback((nodes: FileTreeNode[], targetPath: string, children: FileTreeNode[]): FileTreeNode[] => {
+    return nodes.map((n) => {
+      if (n.path === targetPath) {
+        return { ...n, children };
+      }
+      if (n.type === "folder" && n.children && n.children.length > 0) {
+        return { ...n, children: updateChildrenByPath(n.children, targetPath, children) };
+      }
+      return n;
+    });
+  }, []);
+
   const onWsToggle = useCallback(async (node: FileTreeNode) => {
     if (node.type !== "folder") return;
     const items = await listWsPath(node.path);
@@ -129,8 +141,8 @@ export default function ProjectRFEDetailPage() {
       expanded: false,
       sizeKb: typeof it.size === "number" ? it.size / 1024 : undefined,
     }));
-    setWsTree(prev => prev.map(n => n.path === node.path ? { ...n, children } : n));
-  }, [listWsPath]);
+    setWsTree(prev => updateChildrenByPath(prev, node.path, children));
+  }, [listWsPath, updateChildrenByPath]);
 
   const onWsSelect = useCallback(async (node: FileTreeNode) => {
     if (node.type !== "file") return;
@@ -203,11 +215,6 @@ export default function ProjectRFEDetailPage() {
               <h1 className="text-3xl font-bold">{workflow.title}</h1>
               <p className="text-muted-foreground mt-1">{workflow.description}</p>
             </div>
-          </div>
-          <div className="flex gap-2">
-            <Link href={`/projects/${encodeURIComponent(project)}/rfe/${encodeURIComponent(id)}/edit`}>
-              <Button variant="outline" size="sm"><Edit className="mr-2 h-4 w-4" />Edit</Button>
-            </Link>
           </div>
         </div>
 
@@ -286,29 +293,37 @@ export default function ProjectRFEDetailPage() {
                         return "specs/tasks.md";
                       })();
                       const exists = phase === "specify" ? specExists : phase === "plan" ? planExists : tasksExists;
-                      const sessionForPhase = rfeSessions.find(s => (s.labels as any)?.["rfe-phase"] === phase);
-                      const running = (sessionForPhase?.phase || "").toLowerCase() === "running";
-                      const completed = (sessionForPhase?.phase || "").toLowerCase() === "completed";
+                      const sessionForPhase = rfeSessions.find(s => (s.metadata.labels)?.["rfe-phase"] === phase);
+                     
                       const prerequisitesMet = phase === "specify" ? true : phase === "plan" ? specExists : (specExists && planExists);
+                      const sessionDisplay = ((sessionForPhase as any)?.spec?.displayName) || sessionForPhase?.metadata.name;
                       return (
                         <div key={phase} className="p-4 rounded-lg border flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <Badge variant="outline">{WORKFLOW_PHASE_LABELS[phase]}</Badge>
-                            <span className="text-sm text-muted-foreground">{expected}</span>
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-3">
+                              <Badge variant="outline">{WORKFLOW_PHASE_LABELS[phase]}</Badge>
+                              <span className="text-sm text-muted-foreground">{expected}</span>
+                            </div>
+                            {sessionForPhase && (
+                              <div className="flex items-center gap-2">
+                                <Link href={`/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(sessionForPhase.metadata.name)}`}>
+                                  <Button variant="link" size="sm" className="px-0 h-auto">{sessionDisplay}</Button>
+                                </Link>
+                                {sessionForPhase?.status?.phase && <Badge variant="outline">{sessionForPhase.status.phase}</Badge>}
+                              </div>
+                            )}
                           </div>
                           <div className="flex items-center gap-3">
                             <Badge variant={exists ? "outline" : "secondary"}>{exists ? "Exists" : (prerequisitesMet ? "Missing" : "Blocked")}</Badge>
-                            {running && <Badge variant="outline">Running</Badge>}
-                            {completed && <Badge variant="outline">Completed</Badge>}
-                            {!exists && !running && (
+                            {!exists && sessionForPhase?.status?.phase !== "Running" && (
                               <Button size="sm" onClick={async () => {
                                 try {
                                   setStartingPhase(phase);
-                              const payload = {
+                                  const payload: CreateAgenticSessionRequest = {
                                     prompt: `/${phase} ${workflow.description}`,
                                     displayName: `${workflow.title} - ${phase}`,
-                                interactive: false,
-                                sharedWorkspace: workflowWorkspace,
+                                    interactive: false,
+                                    workspacePath: workflowWorkspace,
                                     environmentVariables: {
                                       WORKFLOW_PHASE: phase,
                                       PARENT_RFE: workflow.id,
@@ -357,10 +372,12 @@ export default function ProjectRFEDetailPage() {
                     <CardTitle>Agentic Sessions ({rfeSessions.length})</CardTitle>
                     <CardDescription>Sessions scoped to this RFE</CardDescription>
                   </div>
-                  <Button variant="outline" size="sm" onClick={loadSessions} disabled={sessionsLoading}>
-                    <RefreshCw className={`w-4 h-4 mr-2 ${sessionsLoading ? "animate-spin" : ""}`} />
-                    Refresh
-                  </Button>
+                  <Link href={`/projects/${encodeURIComponent(project)}/sessions/new?workspacePath=${encodeURIComponent(workflowWorkspace)}&rfeWorkflow=${encodeURIComponent(workflow.id)}`}>
+                    <Button variant="default" size="sm">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Create Session
+                    </Button>
+                  </Link>
                 </div>
               </CardHeader>
               <CardContent>
@@ -380,14 +397,14 @@ export default function ProjectRFEDetailPage() {
                       {rfeSessions.length === 0 ? (
                         <TableRow><TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No agent sessions yet</TableCell></TableRow>
                       ) : (
-                        rfeSessions.map((s: any) => {
-                          const labels = (s.labels || {}) as Record<string, unknown>;
-                          const name = s.name;
+                        rfeSessions.map((s) => {
+                          const labels = (s.metadata.labels || {}) as Record<string, unknown>;
+                          const name = s.metadata.name;
                           const display = s.spec?.displayName || name;
                           const rfePhase = typeof labels["rfe-phase"] === "string" ? String(labels["rfe-phase"]) : '';
                           const model = s.spec?.llmSettings?.model;
                           const created = s.metadata?.creationTimestamp ? formatDistanceToNow(new Date(s.metadata.creationTimestamp), { addSuffix: true }) : '';
-                          const cost = s.status?.cost;
+                          const cost = s.status?.total_cost_usd;
                           return (
                             <TableRow key={name}>
                               <TableCell className="font-medium min-w-[180px]">
@@ -397,7 +414,7 @@ export default function ProjectRFEDetailPage() {
                                 </Link>
                               </TableCell>
                               <TableCell>{WORKFLOW_PHASE_LABELS[rfePhase as WorkflowPhase] || rfePhase || '—'}</TableCell>
-                              <TableCell><span className="text-sm">{s.phase || 'Pending'}</span></TableCell>
+                              <TableCell><span className="text-sm">{s.status?.phase || 'Pending'}</span></TableCell>
                               <TableCell className="hidden md:table-cell"><span className="text-sm text-gray-600 truncate max-w-[160px] block">{model || '—'}</span></TableCell>
                               <TableCell className="hidden lg:table-cell">{created || <span className="text-gray-400">—</span>}</TableCell>
                               <TableCell className="hidden xl:table-cell">{cost ? <span className="text-sm font-mono">${cost.toFixed?.(4) ?? cost}</span> : <span className="text-gray-400">—</span>}</TableCell>
@@ -442,68 +459,6 @@ export default function ProjectRFEDetailPage() {
           </TabsContent>
         </Tabs>
 
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>Agentic Sessions ({rfeSessions.length})</CardTitle>
-                <CardDescription>Sessions scoped to this RFE</CardDescription>
-              </div>
-              <Button variant="outline" size="sm" onClick={loadSessions} disabled={sessionsLoading}>
-                <RefreshCw className={`w-4 h-4 mr-2 ${sessionsLoading ? "animate-spin" : ""}`} />
-                Refresh
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[220px]">Name</TableHead>
-                    <TableHead>Stage</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="hidden md:table-cell">Model</TableHead>
-                    <TableHead className="hidden lg:table-cell">Created</TableHead>
-                    <TableHead className="hidden xl:table-cell">Cost</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rfeSessions.length === 0 ? (
-                    <TableRow><TableCell colSpan={6} className="py-6 text-center text-muted-foreground">No agent sessions yet</TableCell></TableRow>
-                  ) : (
-                    rfeSessions.map((s: any) => {
-                      const labels = (s.labels || {}) as Record<string, unknown>;
-                      const name = s.name;
-                      const display = s.spec?.displayName || name;
-                      const rfePhase = typeof labels["rfe-phase"] === "string" ? String(labels["rfe-phase"]) : '';
-                      const model = s.spec?.llmSettings?.model;
-                      const created = s.metadata?.creationTimestamp ? formatDistanceToNow(new Date(s.metadata.creationTimestamp), { addSuffix: true }) : '';
-                      const cost = s.status?.cost;
-                      return (
-                        <TableRow key={name}>
-                          <TableCell className="font-medium min-w-[180px]">
-                            <Link href={`/projects/${encodeURIComponent(project)}/sessions/${encodeURIComponent(name)}`} className="text-blue-600 hover:underline hover:text-blue-800 transition-colors block">
-                              <div className="font-medium">{display}</div>
-                              {display !== name && (<div className="text-xs text-gray-500">{name}</div>)}
-                            </Link>
-                          </TableCell>
-                          <TableCell>{WORKFLOW_PHASE_LABELS[rfePhase as WorkflowPhase] || rfePhase || '—'}</TableCell>
-                          <TableCell><span className="text-sm">{s.phase || 'Pending'}</span></TableCell>
-                          <TableCell className="hidden md:table-cell"><span className="text-sm text-gray-600 truncate max-w-[160px] block">{model || '—'}</span></TableCell>
-                          <TableCell className="hidden lg:table-cell">{created || <span className="text-gray-400">—</span>}</TableCell>
-                          <TableCell className="hidden xl:table-cell">{cost ? <span className="text-sm font-mono">${cost.toFixed?.(4) ?? cost}</span> : <span className="text-gray-400">—</span>}</TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Artifacts grid omitted; use Workspace tab */}
       </div>
     </div>
   );

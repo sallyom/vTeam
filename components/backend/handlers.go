@@ -545,6 +545,14 @@ func createSession(c *gin.Context) {
 		},
 	}
 
+	// Only include paths if a workspacePath was provided
+	if strings.TrimSpace(req.WorkspacePath) != "" {
+		spec := session["spec"].(map[string]interface{})
+		spec["paths"] = map[string]interface{}{
+			"workspace": req.WorkspacePath,
+		}
+	}
+
 	// Optional environment variables passthrough (always, independent of git config presence)
 	if len(req.EnvironmentVariables) > 0 {
 		spec := session["spec"].(map[string]interface{})
@@ -2904,32 +2912,50 @@ func initSpecKitInWorkspace(c *gin.Context, project, workspaceRoot string) error
 		return err
 	}
 	// Extract files
+	total := len(zr.File)
+	var filesWritten, skippedDirs, openErrors, readErrors, writeErrors int
+	log.Printf("initSpecKitInWorkspace: extracting spec-kit template: %d entries", total)
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
+			skippedDirs++
+			log.Printf("spec-kit: skipping directory: %s", f.Name)
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
+			openErrors++
+			log.Printf("spec-kit: open failed: %s: %v", f.Name, err)
 			continue
 		}
 		b, err := io.ReadAll(rc)
 		rc.Close()
 		if err != nil {
+			readErrors++
+			log.Printf("spec-kit: read failed: %s: %v", f.Name, err)
 			continue
 		}
 		// Normalize path: strip any leading directory components to place at workspace root
 		rel := f.Name
+		origRel := rel
 		rel = strings.TrimLeft(rel, "./")
 		// Ensure we do not write outside workspace
 		rel = strings.ReplaceAll(rel, "\\", "/")
 		for strings.Contains(rel, "../") {
 			rel = strings.ReplaceAll(rel, "../", "")
 		}
+		if rel != origRel {
+			log.Printf("spec-kit: normalized path %q -> %q", origRel, rel)
+		}
 		target := filepath.Join(workspaceRoot, rel)
 		if err := writeProjectContentFile(c, project, target, b); err != nil {
+			writeErrors++
 			log.Printf("write spec-kit file failed: %s: %v", target, err)
+		} else {
+			filesWritten++
+			log.Printf("spec-kit: wrote %s (%d bytes)", target, len(b))
 		}
 	}
+	log.Printf("initSpecKitInWorkspace: extraction summary: written=%d, skipped_dirs=%d, open_errors=%d, read_errors=%d, write_errors=%d", filesWritten, skippedDirs, openErrors, readErrors, writeErrors)
 	return nil
 }
 
@@ -3133,18 +3159,10 @@ func listProjectRFEWorkflowSessions(c *gin.Context) {
 		return
 	}
 
-	// Build a thin DTO for UI
+	// Return full session objects for UI
 	sessions := make([]map[string]interface{}, 0, len(list.Items))
 	for _, item := range list.Items {
-		meta, _ := item.Object["metadata"].(map[string]interface{})
-		status, _ := item.Object["status"].(map[string]interface{})
-		name, _ := meta["name"].(string)
-		phase, _ := status["phase"].(string)
-		sessions = append(sessions, map[string]interface{}{
-			"name":   name,
-			"phase":  phase,
-			"labels": meta["labels"],
-		})
+		sessions = append(sessions, item.Object)
 	}
 	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
 }

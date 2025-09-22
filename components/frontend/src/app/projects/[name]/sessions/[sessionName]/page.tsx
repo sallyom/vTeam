@@ -175,7 +175,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       // Probe workspace existence via API proxy
       try {
         const wsResp = await fetch(
-          `${apiUrl}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
+          `${apiUrl}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`
         );
         setHasWorkspace(wsResp.ok);
       } catch {
@@ -269,6 +269,15 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       setActionLoading(null);
     }
   };
+
+  const workspaceBasePath = useMemo(() => {
+    if (session?.spec?.paths?.workspace) {
+      return session.spec.paths.workspace
+    }
+    return  `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
+  }, [session?.spec?.paths?.workspace]);
+
+  console.log(workspaceBasePath)
   
 
   const allMessages = useMemo(() => {
@@ -304,8 +313,9 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       }
     }
 
-    return [...agenticMessages, ...toolUseMessages];
-  }, [messages]);
+    const all = [...agenticMessages, ...toolUseMessages]
+    return session?.spec?.interactive ? all.filter((m) => m.type !== "result_message") : all;
+  }, [messages, session?.spec?.interactive]);
 
   const latestDisplayMessage = useMemo(() => {
     if (allMessages.length === 0) return null;
@@ -332,7 +342,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   // Workspace helpers (loaded when Workspace tab opens)
   type ListItem = { name: string; path: string; isDir: boolean; size: number; modifiedAt: string };
   const listWsPath = useCallback(async (relPath?: string) => {
-    const url = new URL(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`, window.location.origin);
+    const url = new URL(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`, window.location.origin);
     if (relPath) url.searchParams.set("path", relPath);
     const resp = await fetch(url.toString());
     if (!resp.ok) throw new Error("Failed to list workspace");
@@ -342,7 +352,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
   }, [projectName, sessionName]);
 
   const readWsFile = useCallback(async (rel: string) => {
-    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(rel)}`);
+    const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}/${encodeURIComponent(rel)}`);
     if (!resp.ok) throw new Error("Failed to fetch file");
     const text = await resp.text();
     return text;
@@ -474,7 +484,6 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
 
             {session.status?.phase === "Pending" || session.status?.phase === "Creating" || session.status?.phase === "Running" && (
               <div>
-                <div className="text-xs font-semibold text-muted-foreground mb-2">Controls</div>
                 <Button variant="secondary" onClick={handleStop} disabled={!!actionLoading}>
                   <Square className="w-4 h-4 mr-2" />
                   {actionLoading === "stopping" ? "Stopping..." : "Stop"}
@@ -512,7 +521,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="messages">Messages</TabsTrigger>
             {hasWorkspace ? <TabsTrigger value="workspace">Workspace</TabsTrigger> : null}
-            <TabsTrigger value="results">Results</TabsTrigger>
+            {!session.spec.interactive ? <TabsTrigger value="results">Results</TabsTrigger> : null}
           </TabsList>
 
           {/* Overview */}
@@ -622,40 +631,6 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
                   <StreamMessage key={`msg-${index}`} message={message} onGoToResults={() => setActiveTab("results")} />
               ))}
 
-              {/* Chat composer (shown only when interactive) */}
-              {session.spec?.interactive && (
-                <div className="sticky bottom-0 border-t bg-white">
-                  <div className="p-3">
-                    <div className="border rounded-md p-3 space-y-2 bg-white">
-                      <textarea
-                        className="w-full border rounded p-2 text-sm"
-                        placeholder="Type a message to the agent... (use /end to finish)"
-                        value={chatInput}
-                        onChange={(e) => setChatInput(e.target.value)}
-                        rows={3}
-                      />
-                      <div className="flex items-center justify-between">
-                        <div className="text-xs text-muted-foreground">Type <span className="font-mono">/end</span> to end the session</div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="secondary"
-                            size="sm"
-                            onClick={async () => {
-                              setChatInput("/end")
-                              await sendChat()
-                            }}
-                          >
-                            End session
-                          </Button>
-                          <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()}>
-                            Send
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {(session.status?.phase === "Running" ||
                 session.status?.phase === "Pending" ||
@@ -690,6 +665,41 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
                     <p>No messages yet</p>
                   </div>
                 )}
+
+                {/* Chat composer (shown only when interactive) */}
+              {session.spec?.interactive && (
+                <div className="sticky bottom-0 border-t bg-white">
+                  <div className="p-3">
+                    <div className="border rounded-md p-3 space-y-2 bg-white">
+                      <textarea
+                        className="w-full border rounded p-2 text-sm"
+                        placeholder="Type a message to the agent... (use /end to finish)"
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        rows={3}
+                      />
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs text-muted-foreground">Type <span className="font-mono">/end</span> to end the session</div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={async () => {
+                              setChatInput("/end")
+                              await sendChat()
+                            }}
+                          >
+                            End session
+                          </Button>
+                          <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()}>
+                            Send
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </TabsContent>
 

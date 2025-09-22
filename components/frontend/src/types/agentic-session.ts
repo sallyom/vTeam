@@ -36,6 +36,9 @@ export type AgenticSessionSpec = {
 	gitConfig?: GitConfig;
 	project?: string;
 	interactive?: boolean;
+	paths?: {
+		workspace?: string;
+	}
 };
 
 // -----------------------------
@@ -136,6 +139,8 @@ export type AgenticSession = {
 		namespace: string;
 		creationTimestamp: string;
 		uid: string;
+		labels?: Record<string, string>;
+		annotations?: Record<string, string>;
 	};
 	spec: AgenticSessionSpec;
 	status?: AgenticSessionStatus;
@@ -144,16 +149,15 @@ export type AgenticSession = {
 export type CreateAgenticSessionRequest = {
 	prompt: string;
 	llmSettings?: Partial<LLMSettings>;
+	displayName?: string;
 	timeout?: number;
 	gitConfig?: GitConfig;
 	project?: string;
   	environmentVariables?: Record<string, string>;
 	interactive?: boolean;
-	// New fields for agent sessions
-	agentPersona?: string;
-	workflowPhase?: string;
-	parentRFE?: string;
-	sharedWorkspace?: string;
+	workspacePath?: string;
+	labels?: Record<string, string>;
+	annotations?: Record<string, string>;
 };
 
 // New types for RFE workflows

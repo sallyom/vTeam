@@ -308,6 +308,7 @@ type CreateAgenticSessionRequest struct {
 	LLMSettings          *LLMSettings       `json:"llmSettings,omitempty"`
 	Timeout              *int               `json:"timeout,omitempty"`
 	Interactive          *bool              `json:"interactive,omitempty"`
+	WorkspacePath        string             `json:"workspacePath,omitempty"`
 	GitConfig            *GitConfig         `json:"gitConfig,omitempty"`
 	UserContext          *UserContext       `json:"userContext,omitempty"`
 	BotAccount           *BotAccountRef     `json:"botAccount,omitempty"`

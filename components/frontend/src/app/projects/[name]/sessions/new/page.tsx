@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Info } from "lucide-react";
 import { useForm } from "react-hook-form";
@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getApiUrl } from "@/lib/config";
 import type { CreateAgenticSessionRequest, AgentPersona as AgentSummary } from "@/types/agentic-session";
 import { Checkbox } from "@/components/ui/checkbox";
+import { AgentSelection } from "@/components/agent-selection";
 
 const formSchema = z.object({
   prompt: z.string().min(10, "Prompt must be at least 10 characters long"),
@@ -44,14 +45,25 @@ const models = [
 
 export default function NewProjectSessionPage({ params }: { params: Promise<{ name: string }> }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [projectName, setProjectName] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [prefillWorkspacePath, setPrefillWorkspacePath] = useState<string | undefined>(undefined);
+  const [rfeWorkflowId, setRfeWorkflowId] = useState<string | undefined>(undefined);
+  const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
 
   useEffect(() => {
     params.then(({ name }) => setProjectName(name));
   }, [params]);
+
+  useEffect(() => {
+    const ws = searchParams?.get("workspacePath");
+    if (ws) setPrefillWorkspacePath(ws);
+    const rfe = searchParams?.get("rfeWorkflow");
+    if (rfe) setRfeWorkflowId(rfe);
+  }, [searchParams]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -104,6 +116,19 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
         interactive: values.interactive,
       };
 
+      if (prefillWorkspacePath) {
+        request.workspacePath = prefillWorkspacePath;
+      }
+
+      // Apply labels if rfeWorkflowId is present
+      if (rfeWorkflowId || projectName) {
+        request.labels = {
+          ...(request.labels || {}),
+          ...(projectName ? { project: projectName } : {}),
+          ...(rfeWorkflowId ? { "rfe-workflow": rfeWorkflowId } : {}),
+        };
+      }
+
       // Add Git configuration if provided
       if (values.gitUserName || values.gitUserEmail || values.gitRepoUrl) {
         request.gitConfig = {};
@@ -125,8 +150,14 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
         }
       }
 
-      // No user-configurable storage paths; backend/operator provide defaults
-      if (values.agentPersona) {
+      // Inject selected agents via environment variables
+      if (selectedAgents.length > 0) {
+        request.environmentVariables = {
+          ...(request.environmentVariables || {}),
+          AGENT_PERSONAS: selectedAgents.join(","),
+        };
+      } else if (values.agentPersona) {
+        // Fallback to single-agent support if provided
         request.environmentVariables = {
           ...(request.environmentVariables || {}),
           AGENT_PERSONA: values.agentPersona,
@@ -236,55 +267,21 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                 />
               </div>
 
-              <FormField
-                control={form.control}
-                name="agentPersona"
-                render={({ field }) => {
-                  const selected = agents.find((a) => a.persona === field.value);
-                  return (
-                    <FormItem>
-                      <FormLabel className="flex items-center gap-2">
-                        Agent Persona
-                        {selected && (
-                          <span className="relative group inline-block">
-                            <Info className="w-4 h-4 text-muted-foreground" />
-                            <div className="absolute z-10 hidden group-hover:block bg-popover text-popover-foreground border rounded-md p-3 shadow-md w-72 left-1/2 -translate-x-1/2 mt-2">
-                              <div className="text-sm font-medium mb-1">{selected.name}</div>
-                              <div className="text-xs text-muted-foreground mb-2">{selected.role}</div>
-                              <ul className="list-disc pl-5 space-y-1 text-sm">
-                                {selected.expertise?.map((e, i) => (
-                                  <li key={i}>{e}</li>
-                                ))}
-                              </ul>
-                            </div>
-                          </span>
-                        )}
-                      </FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select an agent (optional)" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {agents.map((a) => (
-                            <SelectItem key={a.persona} value={a.persona}>
-                              <div className="flex flex-col">
-                                <span>{a.name}</span>
-                                <span className="text-xs text-muted-foreground">{a.role}</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormDescription>
-                        Optionally inject a persona’s knowledge into the session at start.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  );
-                }}
-              />
+              {/* Multi-agent selection */}
+              <div className="space-y-2">
+                <FormLabel>Select Agents (optional)</FormLabel>
+                <FormDescription>
+                  Choose one or more agents to inject their knowledge into the session at start.
+                </FormDescription>
+                <AgentSelection
+                  agents={agents}
+                  selectedAgents={selectedAgents}
+                  onSelectionChange={setSelectedAgents}
+                  maxAgents={8}
+                  disabled={isSubmitting}
+                />
+              </div>
+
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField
