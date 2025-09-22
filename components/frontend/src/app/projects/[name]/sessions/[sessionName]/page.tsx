@@ -365,14 +365,14 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     const data = await resp.json();
     const items: ListItem[] = Array.isArray(data.items) ? data.items : [];
     return items;
-  }, [projectName, sessionName]);
+  }, [projectName, sessionName, workspaceBasePath]);
 
   const readWsFile = useCallback(async (rel: string) => {
     const resp = await fetch(`${getApiUrl()}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}/${encodeURIComponent(rel)}`);
     if (!resp.ok) throw new Error("Failed to fetch file");
     const text = await resp.text();
     return text;
-  }, [projectName, sessionName]);
+  }, [projectName, sessionName, workspaceBasePath]);
 
   const buildWsRoot = useCallback(async () => {
     if (!hasWorkspace) return;
