@@ -148,6 +148,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     });
   }, [params]);
 
+
   const fetchSession = useCallback(async () => {
     if (!projectName || !sessionName) return;
     try {
@@ -172,15 +173,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
         if (Array.isArray(msgData)) setMessages(msgData);
       }
 
-      // Probe workspace existence via API proxy
-      try {
-        const wsResp = await fetch(
-          `${apiUrl}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`
-        );
-        setHasWorkspace(wsResp.ok);
-      } catch {
-        setHasWorkspace(false);
-      }
+
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -218,6 +211,36 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
       return () => clearInterval(interval);
     }
   }, [projectName, sessionName, session?.status?.phase, fetchSession]);
+
+
+  const workspaceBasePath = useMemo(() => {
+    if (session?.spec?.paths?.workspace) {
+      return session.spec.paths.workspace
+    }
+    return  `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
+  }, [session?.spec?.paths?.workspace]);
+
+
+    
+  const probeWorkspace = useCallback(async () => {
+    // Probe workspace existence via API proxy
+    try {
+      const apiUrl = getApiUrl();
+      const wsResp = await fetch(
+        `${apiUrl}/projects/${encodeURIComponent(projectName)}${workspaceBasePath}`
+      );
+      setHasWorkspace(wsResp.ok);
+    } catch {
+      setHasWorkspace(false);
+    }
+  }, [projectName, workspaceBasePath]);
+
+  useEffect(() => {
+    if (projectName && sessionName) {
+      probeWorkspace();
+    }
+  }, [projectName, sessionName, probeWorkspace]);
+
 
  
   const handleStop = async () => {
@@ -270,14 +293,7 @@ export default function ProjectSessionDetailPage({ params }: { params: Promise<{
     }
   };
 
-  const workspaceBasePath = useMemo(() => {
-    if (session?.spec?.paths?.workspace) {
-      return session.spec.paths.workspace
-    }
-    return  `/agentic-sessions/${encodeURIComponent(sessionName)}/workspace`
-  }, [session?.spec?.paths?.workspace]);
 
-  console.log(workspaceBasePath)
   
 
   const allMessages = useMemo(() => {

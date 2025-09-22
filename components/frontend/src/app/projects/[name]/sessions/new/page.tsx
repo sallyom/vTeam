@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getApiUrl } from "@/lib/config";
 import type { CreateAgenticSessionRequest, AgentPersona as AgentSummary } from "@/types/agentic-session";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AgentSelection } from "@/components/agent-selection";
+import MultiAgentSelection from "@/components/multi-agent-selection";
 
 const formSchema = z.object({
   prompt: z.string().min(10, "Prompt must be at least 10 characters long"),
@@ -273,10 +273,10 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                 <FormDescription>
                   Choose one or more agents to inject their knowledge into the session at start.
                 </FormDescription>
-                <AgentSelection
+                <MultiAgentSelection
                   agents={agents}
                   selectedAgents={selectedAgents}
-                  onSelectionChange={setSelectedAgents}
+                  onChange={setSelectedAgents}
                   maxAgents={8}
                   disabled={isSubmitting}
                 />
