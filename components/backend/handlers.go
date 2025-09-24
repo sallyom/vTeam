@@ -3418,6 +3418,9 @@ func publishWorkflowFileToJira(c *gin.Context) {
 	}
 	content := string(b)
 
+	// Convert Markdown to Jira wiki markup for better formatting
+	jiraContent := convertMarkdownToJiraWiki(content)
+
 	// Extract title from spec content or fallback to workflow title
 	title := extractTitleFromContent(content)
 	if title == "" {
@@ -3448,7 +3451,7 @@ func publishWorkflowFileToJira(c *gin.Context) {
 			"fields": map[string]interface{}{
 				"project":     map[string]string{"key": jiraProject},
 				"summary":     title,
-				"description": content,
+				"description": jiraContent,
 				"issuetype":   map[string]string{"name": issueType},
 			},
 		}
@@ -3460,7 +3463,7 @@ func publishWorkflowFileToJira(c *gin.Context) {
 		reqBody := map[string]interface{}{
 			"fields": map[string]interface{}{
 				"summary":     title,
-				"description": content,
+				"description": jiraContent,
 			},
 		}
 		payload, _ := json.Marshal(reqBody)
