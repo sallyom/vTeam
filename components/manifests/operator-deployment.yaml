@@ -14,7 +14,7 @@ spec:
       labels:
         app: agentic-operator
     spec:
-      serviceAccountName: agentic-operator
+      serviceAccountName: ambient-agentic-operator
       containers:
       - name: agentic-operator
         image: quay.io/ambient_code/vteam_operator:latest

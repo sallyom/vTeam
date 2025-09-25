@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: backend-api
+  name: ambient-backend-api
   namespace: ambient-code
 
 

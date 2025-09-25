@@ -1,19 +1,37 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: backend-api
+  name: ambient-backend-api
 rules:
-# ServiceAccounts (only for updating last-used annotations on access keys)
-- apiGroups: [""]
-  resources: ["serviceaccounts"]
-  verbs: ["get", "patch"]
+# ServiceAccounts: get needed to read SA for JWT parsing, patch for last-used annotations
+- apiGroups:
+  - ""
+  resources:
+  - serviceaccounts
+  verbs:
+  - get
+  - patch
 
-# RFEWorkflow custom resources (full CRUD + status updates)
-- apiGroups: ["vteam.ambient-code"]
-  resources: ["rfeworkflows"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["vteam.ambient-code"]
-  resources: ["rfeworkflows/status"]
-  verbs: ["get", "update", "patch"]
+# RFEWorkflow CRs: CRUD operations for workflow management API endpoints
+- apiGroups:
+  - vteam.ambient-code
+  resources:
+  - rfeworkflows
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+- apiGroups:
+  - vteam.ambient-code
+  resources:
+  - rfeworkflows/status
+  verbs:
+  - get
+  - update
+  - patch
 
 
