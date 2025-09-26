@@ -105,10 +105,8 @@ rules:
   - get
   - list
   - watch
-  - create
   - update
   - patch
-  - delete
 # OpenShift Projects: Cluster-scoped for OpenShift project lifecycle management
 - apiGroups:
   - project.openshift.io
@@ -118,7 +116,5 @@ rules:
   - get
   - list
   - watch
-  - create
   - update
   - patch
-  - delete
