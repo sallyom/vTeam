@@ -404,6 +404,19 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									{Name: "GIT_TOKEN_SECRET", Value: tokenSecret},
 									{Name: "GIT_REPOSITORIES", Value: reposJSON},
 								}
+								// Add OpenTelemetry configuration if enabled in operator env
+								if os.Getenv("CLAUDE_CODE_ENABLE_TELEMETRY") == "1" {
+									otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+									base = append(base,
+										corev1.EnvVar{Name: "CLAUDE_CODE_ENABLE_TELEMETRY", Value: "1"},
+										corev1.EnvVar{Name: "OTEL_METRICS_EXPORTER", Value: "otlp"},
+										corev1.EnvVar{Name: "OTEL_LOGS_EXPORTER", Value: "otlp"},
+										corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_PROTOCOL", Value: "grpc"},
+										corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: otelEndpoint},
+										corev1.EnvVar{Name: "OTEL_METRIC_EXPORT_INTERVAL", Value: "10000"},
+										corev1.EnvVar{Name: "OTEL_LOGS_EXPORT_INTERVAL", Value: "5000"},
+									)
+								}
 								// If backend annotated the session with a runner token secret, inject bot token envs without refetching the CR
 								if meta, ok := currentObj.Object["metadata"].(map[string]interface{}); ok {
 									if anns, ok := meta["annotations"].(map[string]interface{}); ok {

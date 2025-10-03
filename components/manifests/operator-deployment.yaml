@@ -17,7 +17,7 @@ spec:
       serviceAccountName: agentic-operator
       containers:
       - name: agentic-operator
-        image: quay.io/ambient_code/vteam_operator:latest
+        image: quay.io/sallyom/vteam-operator:latest
         imagePullPolicy: Always
         env:
         - name: NAMESPACE
@@ -34,6 +34,12 @@ spec:
           value: "quay.io/ambient_code/vteam_claude_runner:latest"
         - name: IMAGE_PULL_POLICY
           value: "Always"
+        # OpenTelemetry configuration (optional)
+        # Uncomment to enable telemetry for claude-code runners
+        - name: CLAUDE_CODE_ENABLE_TELEMETRY
+          value: "1"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: "http://otel-collector-collector.ambient-observability.svc.cluster.local:4317"
         resources:
           requests:
             cpu: 50m
