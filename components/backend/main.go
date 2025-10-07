@@ -123,6 +123,10 @@ func main() {
 			projectGroup.POST("/agentic-sessions/:sessionName/start", startSession)
 			projectGroup.POST("/agentic-sessions/:sessionName/stop", stopSession)
 			projectGroup.PUT("/agentic-sessions/:sessionName/status", updateSessionStatus)
+			// Agentic session WebSocket and messages (alias for /sessions/:sessionId/...)
+			projectGroup.GET("/agentic-sessions/:sessionName/ws", handleSessionWebSocket)
+			projectGroup.GET("/agentic-sessions/:sessionName/messages", getSessionMessagesWS)
+			projectGroup.POST("/agentic-sessions/:sessionName/messages", postSessionMessageWS)
 
 			// RFE workflow endpoints (project-scoped)
 			projectGroup.GET("/rfe-workflows", listProjectRFEWorkflows)
