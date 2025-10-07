@@ -18,6 +18,17 @@ import RepoBrowser from "@/components/RepoBrowser";
 import type { GitHubFork } from "@/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
+// Helper to extract repo name from GitHub URL
+function extractRepoName(url: string): string {
+  try {
+    const cleanUrl = url.replace(/\.git$/, '');
+    const parts = cleanUrl.split('/').filter(p => p);
+    return parts[parts.length - 1] || 'repo';
+  } catch {
+    return 'repo';
+  }
+}
+
 export default function ProjectRFEDetailPage() {
   const params = useParams();
   const project = params?.name as string;
@@ -427,11 +438,13 @@ export default function ProjectRFEDetailPage() {
                                         // Wire unified repos[] for chat session (input + output same repo for RFE sessions)
                                         if (workflow.umbrellaRepo) {
                                           const repos = [
-                                            { 
+                                            {
+                                              name: extractRepoName(workflow.umbrellaRepo.url),
                                               input: { url: workflow.umbrellaRepo.url, branch: workflow.umbrellaRepo.branch },
                                               output: { url: workflow.umbrellaRepo.url, branch: workflow.umbrellaRepo.branch }
                                             },
-                                            ...((workflow.supportingRepos || []).map((r) => ({ 
+                                            ...((workflow.supportingRepos || []).map((r) => ({
+                                              name: extractRepoName(r.url),
                                               input: { url: r.url, branch: r.branch },
                                               output: { url: r.url, branch: r.branch }
                                             })))
@@ -494,11 +507,13 @@ export default function ProjectRFEDetailPage() {
                                         // Wire unified repos[] for non-interactive generation (input + output same repo for RFE sessions)
                                         if (workflow.umbrellaRepo) {
                                           const repos = [
-                                            { 
+                                            {
+                                              name: extractRepoName(workflow.umbrellaRepo.url),
                                               input: { url: workflow.umbrellaRepo.url, branch: workflow.umbrellaRepo.branch },
                                               output: { url: workflow.umbrellaRepo.url, branch: workflow.umbrellaRepo.branch }
                                             },
-                                            ...((workflow.supportingRepos || []).map((r) => ({ 
+                                            ...((workflow.supportingRepos || []).map((r) => ({
+                                              name: extractRepoName(r.url),
                                               input: { url: r.url, branch: r.branch },
                                               output: { url: r.url, branch: r.branch }
                                             })))
