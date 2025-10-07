@@ -36,6 +36,8 @@ class ClaudeCodeAdapter:
         logging.info(f"Initialized Claude Code adapter for session {context.session_id}")
         # Prepare workspace from input repo if provided
         await self._prepare_workspace()
+        # Validate prerequisite files exist for phase-based commands
+        await self._validate_prerequisites()
 
     async def run(self):
         """Run the Claude Code CLI session."""
@@ -111,12 +113,12 @@ class ClaudeCodeAdapter:
             }
 
     async def _run_claude_agent_sdk(self, prompt: str):
-        """Execute the Claude Agent SDK with the given prompt."""
+        """Execute the Claude Code SDK with the given prompt."""
         try:
-            from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+            from claude_code_sdk import ClaudeSDKClient, ClaudeCodeOptions
             api_key = self.context.get_env('ANTHROPIC_API_KEY', '')
             if not api_key:
-                raise RuntimeError("ANTHROPIC_API_KEY is required for Claude Agent SDK")
+                raise RuntimeError("ANTHROPIC_API_KEY is required for Claude Code SDK")
 
             # Determine cwd and additional dirs from multi-repo config
             repos_cfg = self._get_repos_config()
@@ -146,7 +148,7 @@ class ClaudeCodeAdapter:
                     if p != cwd_path:
                         add_dirs.append(p)
 
-            options = ClaudeAgentOptions(cwd=cwd_path, permission_mode="acceptEdits", allowed_tools=["Read","Write","Bash","Glob","Grep","Edit","MultiEdit","WebSearch","WebFetch"])
+            options = ClaudeCodeOptions(cwd=cwd_path, permission_mode="acceptEdits", allowed_tools=["Read","Write","Bash","Glob","Grep","Edit","MultiEdit","WebSearch","WebFetch"])
             # Best-effort set add_dirs if supported by SDK version
             try:
                 if add_dirs:
@@ -185,7 +187,7 @@ class ClaudeCodeAdapter:
             result_payload = None
             self._turn_count = 0
             # Import SDK message and content types for accurate mapping
-            from claude_agent_sdk import (
+            from claude_code_sdk import (
                 AssistantMessage,
                 UserMessage,
                 SystemMessage,
@@ -311,7 +313,7 @@ class ClaudeCodeAdapter:
                 "stderr": ""
             }
         except Exception as e:
-            logging.error(f"Failed to run Claude Agent SDK: {e}")
+            logging.error(f"Failed to run Claude Code SDK: {e}")
             return {
                 "success": False,
                 "error": str(e)
@@ -400,6 +402,57 @@ class ClaudeCodeAdapter:
         except Exception as e:
             logging.error(f"Failed to prepare workspace: {e}")
             await self._send_log(f"Workspace preparation failed: {e}")
+
+    async def _validate_prerequisites(self):
+        """Validate prerequisite files exist for phase-based slash commands."""
+        prompt = self.context.get_env("PROMPT", "")
+        if not prompt:
+            return
+
+        # Extract slash command from prompt (e.g., "/plan", "/tasks", "/implement")
+        prompt_lower = prompt.strip().lower()
+
+        # Define prerequisite requirements
+        prerequisites = {
+            "/plan": ("spec.md", "Specification file (spec.md) not found. Please run /specify first to generate the specification."),
+            "/tasks": ("plan.md", "Planning file (plan.md) not found. Please run /plan first to generate the implementation plan."),
+            "/implement": ("tasks.md", "Tasks file (tasks.md) not found. Please run /tasks first to generate the task breakdown.")
+        }
+
+        # Check if prompt starts with a slash command that requires prerequisites
+        for cmd, (required_file, error_msg) in prerequisites.items():
+            if prompt_lower.startswith(cmd):
+                # Search for the required file in workspace
+                workspace = Path(self.context.workspace_path)
+                found = False
+
+                # Check in main workspace
+                if (workspace / required_file).exists():
+                    found = True
+                    break
+
+                # Check in multi-repo subdirectories (specs/XXX-feature-name/)
+                for subdir in workspace.rglob("specs/*/"):
+                    if (subdir / required_file).exists():
+                        found = True
+                        break
+
+                if not found:
+                    error_message = f"❌ {error_msg}"
+                    await self._send_log(error_message)
+                    # Mark session as failed
+                    try:
+                        await self._update_cr_status({
+                            "phase": "Failed",
+                            "completionTime": self._utc_iso(),
+                            "message": error_msg,
+                            "is_error": True,
+                        })
+                    except Exception:
+                        logging.debug("CR status update (Failed) skipped")
+                    raise RuntimeError(error_msg)
+
+                break  # Only check the first matching command
 
     async def _push_results_if_any(self):
         """Commit and push changes to output repo/branch if configured."""
