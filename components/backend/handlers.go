@@ -605,6 +605,29 @@ func createSession(c *gin.Context) {
 		}
 	}
 
+	// Auto-populate userContext from authenticated user if not explicitly provided
+	if req.UserContext == nil {
+		if userID, exists := c.Get("userID"); exists && userID.(string) != "" {
+			displayName := userID.(string)
+			if userName, ok := c.Get("userName"); ok && userName.(string) != "" {
+				displayName = userName.(string)
+			}
+
+			groups := []string{}
+			if userGroups, ok := c.Get("userGroups"); ok {
+				if groupList, ok := userGroups.([]string); ok {
+					groups = groupList
+				}
+			}
+
+			req.UserContext = &UserContext{
+				UserID:      userID.(string),
+				DisplayName: displayName,
+				Groups:      groups,
+			}
+		}
+	}
+
 	// Add userContext if provided
 	if req.UserContext != nil {
 		session["spec"].(map[string]interface{})["userContext"] = map[string]interface{}{
