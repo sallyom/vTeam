@@ -243,7 +243,7 @@ func performRepoSeeding(ctx context.Context, wf *RFEWorkflow, githubToken, agent
 		return fmt.Errorf("failed to open spec-kit zip: %w", err)
 	}
 
-	// Extract spec-kit files to umbrella repo (skip if exists)
+	// Extract spec-kit files to umbrella repo (skip if exists, except for .claude/commands/)
 	specKitFilesAdded := 0
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
@@ -258,9 +258,13 @@ func performRepoSeeding(ctx context.Context, wf *RFEWorkflow, githubToken, agent
 
 		targetPath := filepath.Join(umbrellaDir, rel)
 
-		// Skip if file already exists
-		if _, err := os.Stat(targetPath); err == nil {
-			continue
+		// Always overwrite .claude/commands/ files to ensure spec-kit slash commands are present
+		// Skip other files if they already exist
+		isCommandFile := strings.HasPrefix(rel, ".claude/commands/")
+		if !isCommandFile {
+			if _, err := os.Stat(targetPath); err == nil {
+				continue
+			}
 		}
 
 		// Create parent directory
