@@ -62,14 +62,24 @@ class ClaudeCodeAdapter:
 
             # Send completion
             await self._send_log("Claude Code session completed")
-            
 
-            # Push results to output if configured
-            await self._push_results_if_any()
 
-            # Best-effort CR completion update if succeeded
+            # Push results to output if configured - MUST complete before marking session as Completed
+            push_success = True
+            push_error = None
             try:
-                if isinstance(result, dict) and result.get("success"):
+                await self._send_log("Pushing changes to output repository...")
+                await self._push_results_if_any()
+                await self._send_log("Push completed successfully")
+            except Exception as e:
+                push_success = False
+                push_error = str(e)
+                logging.error(f"Failed to push results: {e}")
+                await self._send_log(f"Push failed: {e}")
+
+            # Best-effort CR completion update - ONLY after push succeeds
+            try:
+                if isinstance(result, dict) and result.get("success") and push_success:
                     result_summary = ""
                     if isinstance(result.get("result"), dict):
                         # Prefer subtype and output if present
@@ -80,12 +90,21 @@ class ClaudeCodeAdapter:
                     await self._update_cr_status({
                         "phase": "Completed",
                         "completionTime": self._utc_iso(),
-                        "message": "Runner completed",
+                        "message": "Runner completed and pushed",
                         "subtype": (result.get("result") or {}).get("subtype", "success"),
                         "is_error": False,
                         "num_turns": getattr(self, "_turn_count", 0),
                         "session_id": self.context.session_id,
                         "result": stdout_text[:10000],
+                    })
+                elif not push_success:
+                    # Push failed - mark session as failed
+                    await self._update_cr_status({
+                        "phase": "Failed",
+                        "completionTime": self._utc_iso(),
+                        "message": f"Push failed: {push_error}",
+                        "is_error": True,
+                        "session_id": self.context.session_id,
                     })
             except Exception:
                 logging.debug("CR status update (Completed) skipped")
@@ -268,13 +287,21 @@ class ClaudeCodeAdapter:
 
             async with ClaudeSDKClient(options=options) as client:
                 async def process_one_prompt(text: str):
+                    logging.info(f"Processing prompt: {text[:100]}...")
                     await self.shell._send_message(MessageType.AGENT_RUNNING, {})
+                    logging.info(f"Calling client.query() with prompt")
                     await client.query(text)
+                    logging.info(f"client.query() returned, processing response stream")
                     await process_response_stream(client)
+                    logging.info(f"Response stream processing completed")
 
                 # Initial prompt (if any)
+                logging.info(f"Checking initial prompt: interactive={interactive}, prompt={prompt[:100] if prompt else 'EMPTY'}...")
                 if prompt and prompt.strip():
+                    logging.info(f"Executing initial prompt in non-interactive mode")
                     await process_one_prompt(prompt)
+                else:
+                    logging.warning(f"No initial prompt provided!")
 
                 if interactive:
                     await self._send_log({"level": "system", "message": "Chat ready"})
@@ -440,6 +467,7 @@ class ClaudeCodeAdapter:
             except Exception as e:
                 logging.error(f"Failed to push results: {e}")
                 await self._send_log(f"Push failed: {e}")
+                raise  # Re-raise to signal push failure to caller
             return
 
         # Single-repo legacy flow
@@ -474,6 +502,7 @@ class ClaudeCodeAdapter:
         except Exception as e:
             logging.error(f"Failed to push results: {e}")
             await self._send_log(f"Push failed: {e}")
+            raise  # Re-raise to signal push failure to caller
 
     async def _create_pull_request(self, upstream_repo: str, fork_repo: str, head_branch: str, base_branch: str) -> str | None:
         """Create a GitHub Pull Request from fork_repo:head_branch into upstream_repo:base_branch.
