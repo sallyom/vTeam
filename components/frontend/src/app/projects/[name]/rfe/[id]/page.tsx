@@ -456,8 +456,8 @@ export default function ProjectRFEDetailPage() {
                                     )
                                 )
                                 : (
-                                    <Button 
-                                      size="sm" 
+                                    <Button
+                                      size="sm"
                                       onClick={async () => {
                                       try {
                                         setStartingPhase(phase);
@@ -517,9 +517,9 @@ export default function ProjectRFEDetailPage() {
                                       } finally {
                                         setStartingPhase(null);
                                       }
-                                    }} disabled={startingPhase === phase || !isSeeded}>
-                                      {startingPhase === phase ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Starting…</>) : (<><Play className="mr-2 h-4 w-4" />Generate</>)}
-                                    </Button>
+                                      }} disabled={startingPhase === phase || !isSeeded}>
+                                        {startingPhase === phase ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" />Starting…</>) : (<><Play className="mr-2 h-4 w-4" />Generate</>)}
+                                      </Button>
                                 )
                             )}
                             {exists && phase !== "ideate" && (
@@ -587,6 +587,7 @@ export default function ProjectRFEDetailPage() {
                         <TableHead className="min-w-[220px]">Name</TableHead>
                         <TableHead>Stage</TableHead>
                         <TableHead>Status</TableHead>
+                        <TableHead>Changes</TableHead>
                         <TableHead className="hidden md:table-cell">Model</TableHead>
                         <TableHead className="hidden lg:table-cell">Created</TableHead>
                         <TableHead className="hidden xl:table-cell">Cost</TableHead>
@@ -620,6 +621,19 @@ export default function ProjectRFEDetailPage() {
                               </TableCell>
                               <TableCell>{WORKFLOW_PHASE_LABELS[rfePhase as WorkflowPhase] || rfePhase || '—'}</TableCell>
                               <TableCell><span className="text-sm">{s.status?.phase || 'Pending'}</span></TableCell>
+                              <TableCell>
+                                {/* Simplified: rely on repo statuses if present */}
+                                {(() => {
+                                  const repos = Array.isArray(s.spec?.repos) ? s.spec!.repos! : [] as any[]
+                                  const statuses = repos.map((r:any)=> (r?.status as string)||'')
+                                  const allPushed = statuses.length>0 && statuses.every((st:string)=> st==='pushed')
+                                  // If not all pushed, show 'diff' only when some repos are still undecided (neither pushed nor abandoned)
+                                  const anyUndecided = statuses.some((st:string)=> st !== 'pushed' && st !== 'abandoned')
+                                  if (anyUndecided) return <span className="text-xs px-2 py-0.5 rounded border">diff</span>
+                                  if (allPushed && statuses.some((st:string)=> st==='pushed')) return <span className="text-xs px-2 py-0.5 rounded border bg-green-50 text-green-700">pushed</span>
+                                  return <span className="text-xs text-muted-foreground">no changes</span>
+                                })()}
+                              </TableCell>
                               <TableCell className="hidden md:table-cell"><span className="text-sm text-gray-600 truncate max-w-[160px] block">{model || '—'}</span></TableCell>
                               <TableCell className="hidden lg:table-cell">{created || <span className="text-gray-400">—</span>}</TableCell>
                               <TableCell className="hidden xl:table-cell">{cost ? <span className="text-sm font-mono">${cost.toFixed?.(4) ?? cost}</span> : <span className="text-gray-400">—</span>}</TableCell>
@@ -639,7 +653,7 @@ export default function ProjectRFEDetailPage() {
             <RepoBrowser
               projectName={project}
               repoUrl={selectedFork?.url || upstreamRepo}
-              defaultRef={selectedFork?.default_branch || "main"}
+              defaultRef={selectedFork?.default_branch || workflow.umbrellaRepo?.branch || "main"}
             />
           </TabsContent>
         </Tabs>
