@@ -31,20 +31,32 @@ class WebSocketTransport:
         try:
             # Forward Authorization header if BOT_TOKEN (runner SA token) is present
             headers: Dict[str, str] = {}
-            token = (os.getenv("BOT_TOKEN") or os.getenv("RUNNER_TOKEN") or "").strip()
+            token = (os.getenv("BOT_TOKEN") or "").strip()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
 
             # Some websockets versions use `extra_headers`, others use `additional_headers`.
             # Pass headers as list of tuples for broad compatibility.
             header_items = [(k, v) for k, v in headers.items()]
+            # Disable client-side keepalive pings (ping_interval=None)
+            # Backend already sends pings every 30s, client pings cause timeouts during long Claude operations
             try:
-                self.websocket = await websockets.connect(self.url, extra_headers=header_items)
+                self.websocket = await websockets.connect(
+                    self.url,
+                    extra_headers=header_items,
+                    ping_interval=None  # Disable automatic keepalive, rely on backend pings
+                )
             except TypeError:
                 # Fallback for newer versions
-                self.websocket = await websockets.connect(self.url, additional_headers=header_items)
+                self.websocket = await websockets.connect(
+                    self.url,
+                    additional_headers=header_items,
+                    ping_interval=None  # Disable automatic keepalive, rely on backend pings
+                )
             self.running = True
-            logger.info(f"Connected to WebSocket: {self.url}")
+            # Redact token from URL for logging
+            safe_url = self.url.split('?token=')[0] if '?token=' in self.url else self.url
+            logger.info(f"Connected to WebSocket: {safe_url}")
 
             # Start receive loop only once
             if self._recv_task is None or self._recv_task.done():
@@ -57,7 +69,7 @@ class WebSocketTransport:
             )
             # Surface a clearer hint when auth is likely missing
             if status == 401:
-                has_token = bool((os.getenv("BOT_TOKEN") or os.getenv("RUNNER_TOKEN") or "").strip())
+                has_token = bool((os.getenv("BOT_TOKEN") or "").strip())
                 if not has_token:
                     logger.error(
                         "No BOT_TOKEN present; backend project routes require Authorization."

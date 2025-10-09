@@ -64,8 +64,22 @@ func main() {
 
 	// Project-scoped storage; no global preload required
 
-	// Setup Gin router
-	r := gin.Default()
+	// Setup Gin router with custom logger that redacts tokens
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		// Redact token from query string
+		path := param.Path
+		if strings.Contains(param.Request.URL.RawQuery, "token=") {
+			path = strings.Split(path, "?")[0] + "?token=[REDACTED]"
+		}
+		return fmt.Sprintf("[GIN] %s | %3d | %s | %s\n",
+			param.Method,
+			param.StatusCode,
+			param.ClientIP,
+			path,
+		)
+	}))
 
 	// Middleware to populate user context from forwarded headers
 	r.Use(forwardedIdentityMiddleware())
@@ -82,6 +96,10 @@ func main() {
 		r.POST("/content/write", contentWrite)
 		r.GET("/content/file", contentRead)
 		r.GET("/content/list", contentList)
+		// Git operations proxied to this sidecar (invoked by backend)
+		r.POST("/content/github/push", contentGitPush)
+		r.POST("/content/github/abandon", contentGitAbandon)
+		r.GET("/content/github/diff", contentGitDiff)
 		// Health check endpoint
 		r.GET("/health", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"status": "healthy"})
@@ -101,6 +119,8 @@ func main() {
 	// API routes (all consolidated under /api) remain available
 	api := r.Group("/api")
 	{
+		// Runner token mint endpoint (SA-authenticated via TokenReview; not gated by validateProjectContext)
+		api.POST("/projects/:projectName/agentic-sessions/:sessionName/github/token", mintSessionGitHubToken)
 		// Legacy non-project agentic session routes removed
 
 		// RFE workflows are project-scoped only (legacy non-project routes removed)
@@ -112,7 +132,10 @@ func main() {
 			projectGroup.GET("/users/forks", listUserForks)
 			projectGroup.POST("/users/forks", createUserFork)
 
-			// Repo browsing moved to global routes (non project-scoped)
+			// Repo browsing (project-scoped for GitHub credentials)
+			projectGroup.GET("/repo/tree", getRepoTree)
+			projectGroup.GET("/repo/blob", getRepoBlob)
+
 			// Agentic sessions under a project
 			projectGroup.GET("/agentic-sessions", listSessions)
 			projectGroup.POST("/agentic-sessions", createSession)
@@ -123,6 +146,16 @@ func main() {
 			projectGroup.POST("/agentic-sessions/:sessionName/start", startSession)
 			projectGroup.POST("/agentic-sessions/:sessionName/stop", stopSession)
 			projectGroup.PUT("/agentic-sessions/:sessionName/status", updateSessionStatus)
+			// Session workspace proxy to content service
+			projectGroup.GET("/agentic-sessions/:sessionName/workspace", listSessionWorkspace)
+			projectGroup.GET("/agentic-sessions/:sessionName/workspace/*path", getSessionWorkspaceFile)
+			projectGroup.PUT("/agentic-sessions/:sessionName/workspace/*path", putSessionWorkspaceFile)
+			// Git push/abandon actions for a specific repo in a session
+			projectGroup.POST("/agentic-sessions/:sessionName/github/push", pushSessionRepo)
+			projectGroup.POST("/agentic-sessions/:sessionName/github/abandon", abandonSessionRepo)
+			projectGroup.GET("/agentic-sessions/:sessionName/github/diff", diffSessionRepo)
+			// Mint short-lived GitHub token for a session runner (session-scoped)
+			// Token minting endpoint moved outside validateProjectContext to allow runner SA auth
 
 			// RFE workflow endpoints (project-scoped)
 			projectGroup.GET("/rfe-workflows", listProjectRFEWorkflows)
@@ -132,8 +165,6 @@ func main() {
 			projectGroup.DELETE("/rfe-workflows/:id", deleteProjectRFEWorkflow)
 			projectGroup.POST("/rfe-workflows/:id/seed", seedProjectRFEWorkflow)
 			projectGroup.GET("/rfe-workflows/:id/check-seeding", checkProjectRFEWorkflowSeeding)
-
-			// Removed dead endpoints: runSpecify, createRunnerSession - AgenticSession CRD flow is used instead
 
 			// Session WebSocket and messages
 			projectGroup.GET("/sessions/:sessionId/ws", handleSessionWebSocket)
@@ -173,13 +204,6 @@ func main() {
 		api.GET("/auth/github/status", getGitHubStatusGlobal)
 		api.POST("/auth/github/disconnect", disconnectGitHubGlobal)
 		api.GET("/auth/github/user/callback", handleGitHubUserOAuthCallback)
-
-		// Repo browsing via backend proxy (global)
-		api.GET("/repo/tree", getRepoTree)
-		api.GET("/repo/blob", getRepoBlob)
-
-		// Webhooks (deprecated for install flow; kept for future use)
-		// api.POST("/webhooks/github", handleGitHubWebhook)
 
 		// Project management (cluster-wide)
 		api.GET("/projects", listProjects)
@@ -285,15 +309,16 @@ type AgenticSession struct {
 }
 
 type AgenticSessionSpec struct {
-	Prompt            string             `json:"prompt" binding:"required"`
-	Interactive       bool               `json:"interactive,omitempty"`
-	DisplayName       string             `json:"displayName"`
-	LLMSettings       LLMSettings        `json:"llmSettings"`
-	Timeout           int                `json:"timeout"`
-	UserContext       *UserContext       `json:"userContext,omitempty"`
-	BotAccount        *BotAccountRef     `json:"botAccount,omitempty"`
-	ResourceOverrides *ResourceOverrides `json:"resourceOverrides,omitempty"`
-	Project           string             `json:"project,omitempty"`
+	Prompt               string             `json:"prompt" binding:"required"`
+	Interactive          bool               `json:"interactive,omitempty"`
+	DisplayName          string             `json:"displayName"`
+	LLMSettings          LLMSettings        `json:"llmSettings"`
+	Timeout              int                `json:"timeout"`
+	UserContext          *UserContext       `json:"userContext,omitempty"`
+	BotAccount           *BotAccountRef     `json:"botAccount,omitempty"`
+	ResourceOverrides    *ResourceOverrides `json:"resourceOverrides,omitempty"`
+	EnvironmentVariables map[string]string  `json:"environmentVariables,omitempty"`
+	Project              string             `json:"project,omitempty"`
 	// Multi-repo support (unified mapping)
 	Repos         []SessionRepoMapping `json:"repos,omitempty"`
 	MainRepoIndex *int                 `json:"mainRepoIndex,omitempty"`
@@ -325,6 +350,7 @@ type OutputNamedGitRepo struct {
 type SessionRepoMapping struct {
 	Input  NamedGitRepo        `json:"input"`
 	Output *OutputNamedGitRepo `json:"output,omitempty"`
+	Status *string             `json:"status,omitempty"`
 }
 
 type GitConfig struct {

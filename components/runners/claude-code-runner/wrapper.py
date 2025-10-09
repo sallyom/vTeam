@@ -42,6 +42,11 @@ class ClaudeCodeAdapter:
     async def run(self):
         """Run the Claude Code CLI session."""
         try:
+            # Wait for WebSocket connection to be established before sending messages
+            # The shell.start() call happens before this method, but the WS connection is async
+            # and may not be ready yet. Retry first message send to ensure connection is up.
+            await self._wait_for_ws_connection()
+
             # Get prompt from environment
             prompt = self.context.get_env("PROMPT", "")
             if not prompt:
@@ -59,6 +64,18 @@ class ClaudeCodeAdapter:
             except Exception as _:
                 logging.debug("CR status update (Running) skipped")
 
+
+            # Append token to websocket URL if available (to pass SA token to backend)
+            try:
+                if self.shell and getattr(self.shell, 'transport', None):
+                    ws = getattr(self.shell.transport, 'url', '') or ''
+                    bot = (os.getenv('BOT_TOKEN') or '').strip()
+                    if bot and ws and '?' not in ws:
+                        # Safe to append token as query for backend to map into Authorization
+                        setattr(self.shell.transport, 'url', ws + f"?token={bot}")
+            except Exception:
+                pass
+
             # Execute Claude Code CLI (interactive or one-shot based on env)
             result = await self._run_claude_agent_sdk(prompt)
 
@@ -66,12 +83,18 @@ class ClaudeCodeAdapter:
             await self._send_log("Claude Code session completed")
             
 
-            # Push results to output if configured
-            await self._push_results_if_any()
+            # Optional auto-push on completion (default: disabled)
+            try:
+                auto_push = str(self.context.get_env('AUTO_PUSH_ON_COMPLETE', 'false')).strip().lower() in ('1','true','yes')
+            except Exception:
+                auto_push = False
+            if auto_push:
+                await self._push_results_if_any()
 
-            # Best-effort CR completion update if succeeded
+            # CR status update based on result - MUST complete before pod exits
             try:
                 if isinstance(result, dict) and result.get("success"):
+                    logging.info(f"Updating CR status to Completed (result.success={result.get('success')})")
                     result_summary = ""
                     if isinstance(result.get("result"), dict):
                         # Prefer subtype and output if present
@@ -79,6 +102,7 @@ class ClaudeCodeAdapter:
                         if subtype:
                             result_summary = f"Completed with subtype: {subtype}"
                     stdout_text = result.get("stdout") or ""
+                    # Use BLOCKING call to ensure completion before container exits
                     await self._update_cr_status({
                         "phase": "Completed",
                         "completionTime": self._utc_iso(),
@@ -88,9 +112,22 @@ class ClaudeCodeAdapter:
                         "num_turns": getattr(self, "_turn_count", 0),
                         "session_id": self.context.session_id,
                         "result": stdout_text[:10000],
-                    })
-            except Exception:
-                logging.debug("CR status update (Completed) skipped")
+                    }, blocking=True)
+                    logging.info("CR status update to Completed completed")
+                elif isinstance(result, dict) and not result.get("success"):
+                    # Handle failure case (e.g., SDK crashed without ResultMessage)
+                    error_msg = result.get("error", "Unknown error")
+                    # Use BLOCKING call to ensure completion before container exits
+                    await self._update_cr_status({
+                        "phase": "Failed",
+                        "completionTime": self._utc_iso(),
+                        "message": error_msg,
+                        "is_error": True,
+                        "num_turns": getattr(self, "_turn_count", 0),
+                        "session_id": self.context.session_id,
+                    }, blocking=True)
+            except Exception as e:
+                logging.error(f"CR status update exception: {e}")
 
             return result
 
@@ -183,7 +220,6 @@ class ClaudeCodeAdapter:
 
             os.environ['ANTHROPIC_API_KEY'] = api_key
 
-            logs = []
             result_payload = None
             self._turn_count = 0
             # Import SDK message and content types for accurate mapping
@@ -210,13 +246,13 @@ class ClaudeCodeAdapter:
                                 text_piece = getattr(block, 'text', None)
                                 if text_piece:
                                     await self.shell._send_message(
-                                    MessageType.AGENT_MESSAGE,
-                                    {"type": "agent_message", "content": {"type": "text_block", "text": text_piece}},
-                                )
+                                        MessageType.AGENT_MESSAGE,
+                                        {"type": "agent_message", "content": {"type": "text_block", "text": text_piece}},
+                                    )
                             elif isinstance(block, ToolUseBlock):
                                 tool_name = getattr(block, 'name', '') or 'unknown'
                                 tool_input = getattr(block, 'input', {}) or {}
-                                tool_id = getattr(block, 'id', None) 
+                                tool_id = getattr(block, 'id', None)
                                 await self.shell._send_message(
                                     MessageType.AGENT_MESSAGE,
                                     {"tool": tool_name, "input": tool_input, "id": tool_id},
@@ -227,6 +263,7 @@ class ClaudeCodeAdapter:
                                 content = getattr(block, 'content', None)
                                 is_error = getattr(block, 'is_error', None)
                                 result_text = getattr(block, 'text', None)
+
                                 await self.shell._send_message(
                                     MessageType.AGENT_MESSAGE,
                                     {
@@ -264,9 +301,6 @@ class ClaudeCodeAdapter:
                                 MessageType.AGENT_MESSAGE,
                                 {"type": "result.message", "payload": result_payload},
                             )
-                    subtype = getattr(message, 'subtype', None)
-                    if subtype in ['success', 'error']:
-                        result_payload = {"subtype": subtype}
 
             async with ClaudeSDKClient(options=options) as client:
                 async def process_one_prompt(text: str):
@@ -303,13 +337,25 @@ class ClaudeCodeAdapter:
                         else:
                             await self._send_log({"level": "debug", "message": f"ignored.message: {mtype_raw}"})
 
-            stdout_text = "\n".join(logs)
-            await self._check_pr_intent(stdout_text)
+            # Note: All output is streamed via WebSocket, not collected here
+            await self._check_pr_intent("")
+
+            # Check if we received a valid result from the SDK
+            if result_payload is None:
+                # SDK exited without ResultMessage - this indicates failure
+                return {
+                    "success": False,
+                    "error": "Claude SDK exited without producing a result. Session may have crashed or hung.",
+                    "returnCode": 1,
+                    "stdout": "",
+                    "stderr": "No ResultMessage received from SDK"
+                }
+
             return {
                 "success": True,
-                "result": result_payload or {"output": stdout_text, "format": "text"},
+                "result": result_payload,
                 "returnCode": 0,
-                "stdout": stdout_text,
+                "stdout": "",
                 "stderr": ""
             }
         except Exception as e:
@@ -321,8 +367,7 @@ class ClaudeCodeAdapter:
 
     async def _prepare_workspace(self):
         """Clone input repo/branch into workspace and configure git remotes."""
-        # Prefer GIT_TOKEN (project-level secret) over GITHUB_TOKEN (app-level)
-        token = os.getenv("GIT_TOKEN") or os.getenv("GITHUB_TOKEN") or os.getenv("BOT_TOKEN") or ""
+        token = os.getenv("GITHUB_TOKEN") or await self._fetch_github_token()
         workspace = Path(self.context.workspace_path)
         workspace.mkdir(parents=True, exist_ok=True)
 
@@ -454,6 +499,7 @@ class ClaudeCodeAdapter:
 
                 break  # Only check the first matching command
 
+
     async def _push_results_if_any(self):
         """Commit and push changes to output repo/branch if configured."""
         repos_cfg = self._get_repos_config()
@@ -533,8 +579,8 @@ class ClaudeCodeAdapter:
 
         Returns the PR HTML URL on success, or None.
         """
-        # Prefer GIT_TOKEN (project-level secret) over GITHUB_TOKEN (app-level)
-        token = (os.getenv("GIT_TOKEN") or os.getenv("GITHUB_TOKEN") or os.getenv("BOT_TOKEN") or "").strip()
+
+        token = (os.getenv("GITHUB_TOKEN") or await self._fetch_github_token() or "").strip()
         if not token:
             raise RuntimeError("Missing token for PR creation")
 
@@ -660,26 +706,40 @@ class ClaudeCodeAdapter:
             return None
         return None
 
-    async def _update_cr_status(self, fields: dict):
+    async def _update_cr_status(self, fields: dict, blocking: bool = False):
+        """Update CR status. Set blocking=True for critical final updates before container exit."""
         url = self._compute_status_url()
         if not url:
             return
         data = _json.dumps(fields).encode('utf-8')
         req = _urllib_request.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='PUT')
         # Propagate runner token if present
-        token = (os.getenv('BOT_TOKEN') or os.getenv('RUNNER_TOKEN') or '').strip()
+        token = (os.getenv('BOT_TOKEN') or '').strip()
         if token:
             req.add_header('Authorization', f'Bearer {token}')
-        loop = asyncio.get_event_loop()
+
         def _do():
             try:
                 with _urllib_request.urlopen(req, timeout=10) as resp:
                     _ = resp.read()
+                logging.info(f"CR status update successful to {fields.get('phase', 'unknown')}")
+                return True
             except _urllib_error.HTTPError as he:
-                logging.debug(f"CR status HTTPError: {he.code}")
+                logging.error(f"CR status HTTPError: {he.code} - {he.read().decode('utf-8', errors='replace')}")
+                return False
             except Exception as e:
-                logging.debug(f"CR status update failed: {e}")
-        await loop.run_in_executor(None, _do)
+                logging.error(f"CR status update failed: {e}")
+                return False
+
+        if blocking:
+            # Synchronous blocking call - ensures completion before container exit
+            logging.info(f"BLOCKING CR status update to {fields.get('phase', 'unknown')}")
+            success = _do()
+            logging.info(f"BLOCKING update {'succeeded' if success else 'failed'}")
+        else:
+            # Async call for non-critical updates
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _do)
 
     async def _run_cmd(self, cmd, cwd=None, capture_stdout=False, ignore_errors=False):
         """Run a subprocess command asynchronously."""
@@ -696,6 +756,40 @@ class ClaudeCodeAdapter:
         if capture_stdout:
             return stdout_data.decode("utf-8", errors="replace")
         return ""
+
+    async def _wait_for_ws_connection(self, timeout_seconds: int = 10):
+        """Wait for WebSocket connection to be established before proceeding.
+
+        Retries sending a test message until it succeeds or timeout is reached.
+        This prevents race condition where runner sends messages before WS is connected.
+        """
+        if not self.shell:
+            logging.warning("No shell available - skipping WebSocket wait")
+            return
+
+        start_time = asyncio.get_event_loop().time()
+        attempt = 0
+
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > timeout_seconds:
+                logging.error(f"WebSocket connection not established after {timeout_seconds}s - proceeding anyway")
+                return
+
+            try:
+                # Try to send a test message
+                await self.shell._send_message(
+                    MessageType.SYSTEM_MESSAGE,
+                    "WebSocket connection test",
+                )
+                logging.info(f"WebSocket connection established (attempt {attempt + 1})")
+                return  # Success!
+            except Exception as e:
+                attempt += 1
+                if attempt == 1:
+                    logging.warning(f"WebSocket not ready yet, retrying... ({e})")
+                # Wait 200ms before retry
+                await asyncio.sleep(0.2)
 
     async def _send_log(self, payload):
         """Send a system-level message. Accepts either a string or a dict payload."""
@@ -726,6 +820,48 @@ class ClaudeCodeAdapter:
             return urlunparse((parsed.scheme, new_netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
         except Exception:
             return url
+
+    async def _fetch_github_token(self) -> str:
+        # Try cached value from env first
+        cached = os.getenv("GITHUB_TOKEN", "").strip()
+        if cached:
+            return cached
+        # Build mint URL from status URL if available
+        status_url = self._compute_status_url()
+        if not status_url:
+            return ""
+        try:
+            from urllib.parse import urlparse as _up, urlunparse as _uu
+            p = _up(status_url)
+            new_path = p.path.rstrip("/")
+            if new_path.endswith("/status"):
+                new_path = new_path[:-7] + "/github/token"
+            else:
+                new_path = new_path + "/github/token"
+            url = _uu((p.scheme, p.netloc, new_path, '', '', ''))
+        except Exception:
+            return ""
+        req = _urllib_request.Request(url, data=b"{}", headers={'Content-Type': 'application/json'}, method='POST')
+        bot = (os.getenv('BOT_TOKEN') or '').strip()
+        if bot:
+            req.add_header('Authorization', f'Bearer {bot}')
+        loop = asyncio.get_event_loop()
+        def _do_req():
+            try:
+                with _urllib_request.urlopen(req, timeout=10) as resp:
+                    return resp.read().decode('utf-8', errors='replace')
+            except Exception as e:
+                logging.debug(f"mint token failed: {e}")
+                return ''
+        resp_text = await loop.run_in_executor(None, _do_req)
+        if not resp_text:
+            return ""
+        try:
+            data = _json.loads(resp_text)
+            token = str(data.get('token') or '')
+            return token
+        except Exception:
+            return ""
 
     async def _send_partial_output(self, output_chunk: str, *, stream_id: str, index: int):
         """Send partial assistant output using MESSAGE_PARTIAL with PartialInfo."""
