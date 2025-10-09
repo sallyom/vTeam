@@ -689,3 +689,31 @@ func gitDiffRepo(ctx context.Context, repoDir string) (*GitDiffSummary, error) {
 		summary.TotalAdded, summary.TotalRemoved)
 	return summary, nil
 }
+
+// readGitHubFile reads the content of a file from a GitHub repository
+func readGitHubFile(ctx context.Context, owner, repo, branch, path, token string) ([]byte, error) {
+	// Use GitHub Contents API with raw accept header
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s",
+		owner, repo, path, branch)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/vnd.github.v3.raw") // Get raw content directly
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API error: %s (body: %s)", resp.Status, string(body))
+	}
+
+	return io.ReadAll(resp.Body)
+}

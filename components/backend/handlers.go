@@ -2976,6 +2976,11 @@ func rfeFromUnstructured(item *unstructured.Unstructured) *RFEWorkflow {
 		}
 	}
 
+	// Parse parentOutcome
+	if po, ok := spec["parentOutcome"].(string); ok && strings.TrimSpace(po) != "" {
+		wf.ParentOutcome = stringPtr(strings.TrimSpace(po))
+	}
+
 	return wf
 }
 
@@ -3232,6 +3237,9 @@ func getProjectRFEWorkflow(c *gin.Context) {
 		"createdAt":     wf.CreatedAt,
 		"updatedAt":     wf.UpdatedAt,
 	}
+	if wf.ParentOutcome != nil {
+		resp["parentOutcome"] = *wf.ParentOutcome
+	}
 	if len(wf.JiraLinks) > 0 {
 		links := make([]map[string]interface{}, 0, len(wf.JiraLinks))
 		for _, l := range wf.JiraLinks {
@@ -3408,80 +3416,7 @@ func extractTitleFromContent(content string) string {
 	return ""
 }
 
-// POST /api/projects/:projectName/rfe-workflows/:id/jira { path }
-// Creates a Jira issue from a workspace file and updates the RFEWorkflow CR with the linkage
-func publishWorkflowFileToJira(c *gin.Context) {
-	project := c.Param("projectName")
-	id := c.Param("id")
-
-	var req struct {
-		Path string `json:"path" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Path) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "path is required"})
-		return
-	}
-
-	// Load runner secrets for Jira config
-	// Reuse listRunnerSecrets helpers indirectly by reading the Secret directly
-	_, reqDyn := getK8sClientsForRequest(c)
-	reqK8s, _ := getK8sClientsForRequest(c)
-	if reqK8s == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid user token"})
-		return
-	}
-
-	// Determine configured secret name
-	secretName := ""
-	if reqDyn != nil {
-		gvr := getProjectSettingsResource()
-		if obj, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), "projectsettings", v1.GetOptions{}); err == nil {
-			if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
-				if v, ok := spec["runnerSecretsName"].(string); ok {
-					secretName = strings.TrimSpace(v)
-				}
-			}
-		}
-	}
-	if secretName == "" {
-		secretName = "ambient-runner-secrets"
-	}
-
-	sec, err := reqK8s.CoreV1().Secrets(project).Get(c.Request.Context(), secretName, v1.GetOptions{})
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read runner secret", "details": err.Error()})
-		return
-	}
-	get := func(k string) string {
-		if b, ok := sec.Data[k]; ok {
-			return string(b)
-		}
-		return ""
-	}
-	jiraURL := strings.TrimSpace(get("JIRA_URL"))
-	jiraProject := strings.TrimSpace(get("JIRA_PROJECT"))
-	jiraToken := strings.TrimSpace(get("JIRA_API_TOKEN"))
-	if jiraURL == "" || jiraProject == "" || jiraToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing Jira configuration in runner secret (JIRA_URL, JIRA_PROJECT, JIRA_API_TOKEN required)"})
-		return
-	}
-
-	// Load workflow for title
-	gvrWf := getRFEWorkflowResource()
-	if reqDyn == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid user token"})
-		return
-	}
-	item, err := reqDyn.Resource(gvrWf).Namespace(project).Get(c.Request.Context(), id, v1.GetOptions{})
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
-		return
-	}
-	_ = rfeFromUnstructured(item)
-
-	// Workspace content service removed; reject
-	c.JSON(http.StatusGone, gin.H{"error": "workspace API removed"})
-}
+// publishWorkflowFileToJira is now in jira.go
 
 // List sessions linked to a project-scoped RFE workflow by label selector
 func listProjectRFEWorkflowSessions(c *gin.Context) {

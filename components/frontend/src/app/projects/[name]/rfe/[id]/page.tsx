@@ -239,20 +239,25 @@ export default function ProjectRFEDetailPage() {
           </CardHeader>
           <CardContent>
             <div className="text-sm text-muted-foreground">Workspace: {workflowWorkspace}</div>
+            {workflow.parentOutcome && (
+              <div className="mt-2 text-sm">
+                <span className="font-medium">Parent Outcome:</span> <Badge variant="outline">{workflow.parentOutcome}</Badge>
+              </div>
+            )}
             {(workflow.umbrellaRepo || (workflow.supportingRepos || []).length > 0) && (
               <div className="mt-2 space-y-1">
                 {workflow.umbrellaRepo && (
                   <div className="text-sm">
                     <span className="font-medium">Umbrella:</span> {workflow.umbrellaRepo.url}
                     {workflow.umbrellaRepo.branch && <span className="text-muted-foreground"> @ {workflow.umbrellaRepo.branch}</span>}
-                    
+
                   </div>
                 )}
                 {(workflow.supportingRepos || []).map((r: { url: string; branch?: string; clonePath?: string }, i: number) => (
                   <div key={i} className="text-sm">
                     <span className="font-medium">Supporting:</span> {r.url}
                     {r.branch && <span className="text-muted-foreground"> @ {r.branch}</span>}
-                    
+
                   </div>
                 ))}
               </div>
