@@ -124,6 +124,12 @@ func main() {
 			projectGroup.POST("/agentic-sessions/:sessionName/stop", stopSession)
 			projectGroup.PUT("/agentic-sessions/:sessionName/status", updateSessionStatus)
 
+			// Session-Jira integration endpoints
+			projectGroup.GET("/sessions/:sessionName/artifacts", listSessionArtifacts)
+			projectGroup.POST("/sessions/:sessionName/jira/validate", validateSessionJiraIssue)
+			projectGroup.POST("/sessions/:sessionName/jira", pushSessionToJira)
+			projectGroup.GET("/sessions/:sessionName/jira", getSessionJiraLinks)
+
 			// RFE workflow endpoints (project-scoped)
 			projectGroup.GET("/rfe-workflows", listProjectRFEWorkflows)
 			projectGroup.POST("/rfe-workflows", createProjectRFEWorkflow)
