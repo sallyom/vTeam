@@ -8,6 +8,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -16,6 +17,15 @@ const (
 	jiraLinksAnnotation     = "vteam.ambient-code/jiraLinks"
 	lastJiraPushAnnotation  = "vteam.ambient-code/lastJiraPush"
 )
+
+// agenticSessionGVR returns the GroupVersionResource for AgenticSession
+func agenticSessionGVR() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    "vteam.ambient-code",
+		Version:  "v1alpha1",
+		Resource: "agenticsessions",
+	}
+}
 
 // getJiraLinks parses the jiraLinks annotation from an AgenticSession CR
 func getJiraLinks(cr *unstructured.Unstructured) ([]JiraLink, error) {
