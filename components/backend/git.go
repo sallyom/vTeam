@@ -123,7 +123,7 @@ func getSecretKeys(data map[string][]byte) []string {
 	return keys
 }
 
-// checkRepoSeeding checks if a repo has been seeded by verifying .claude/ and .specify/ exist
+// checkRepoSeeding checks if a repo has been seeded by verifying .claude/commands/ and .specify/ exist
 func checkRepoSeeding(ctx context.Context, repoURL string, branch *string, githubToken string) (bool, map[string]interface{}, error) {
 	// Parse repo URL to get owner/repo
 	owner, repo, err := parseGitHubURL(repoURL)
@@ -142,6 +142,18 @@ func checkRepoSeeding(ctx context.Context, repoURL string, branch *string, githu
 		return false, nil, fmt.Errorf("failed to check .claude: %w", err)
 	}
 
+	// Check for .claude/commands directory (spec-kit slash commands)
+	claudeCommandsExists, err := checkGitHubPathExists(ctx, owner, repo, branchName, ".claude/commands", githubToken)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to check .claude/commands: %w", err)
+	}
+
+	// Check for .claude/agents directory
+	claudeAgentsExists, err := checkGitHubPathExists(ctx, owner, repo, branchName, ".claude/agents", githubToken)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to check .claude/agents: %w", err)
+	}
+
 	// Check for .specify directory (from spec-kit)
 	specifyExists, err := checkGitHubPathExists(ctx, owner, repo, branchName, ".specify", githubToken)
 	if err != nil {
@@ -149,11 +161,14 @@ func checkRepoSeeding(ctx context.Context, repoURL string, branch *string, githu
 	}
 
 	details := map[string]interface{}{
-		"claudeExists":  claudeExists,
-		"specifyExists": specifyExists,
+		"claudeExists":         claudeExists,
+		"claudeCommandsExists": claudeCommandsExists,
+		"claudeAgentsExists":   claudeAgentsExists,
+		"specifyExists":        specifyExists,
 	}
 
-	isSeeded := claudeExists && specifyExists
+	// Repo is properly seeded if all critical components exist
+	isSeeded := claudeCommandsExists && claudeAgentsExists && specifyExists
 	return isSeeded, details, nil
 }
 
@@ -333,11 +348,12 @@ func performRepoSeeding(ctx context.Context, wf *RFEWorkflow, githubToken, agent
 		return fmt.Errorf("failed to clone agent source: %w (output: %s)", err, string(out))
 	}
 
-	// 4. Copy agent markdown files to .claude/
+	// 4. Copy agent markdown files to .claude/agents/
 	agentSourcePath := filepath.Join(agentSrcDir, agentPath)
 	claudeDir := filepath.Join(umbrellaDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
-		return fmt.Errorf("failed to create .claude directory: %w", err)
+	claudeAgentsDir := filepath.Join(claudeDir, "agents")
+	if err := os.MkdirAll(claudeAgentsDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .claude/agents directory: %w", err)
 	}
 
 	agentsCopied := 0
@@ -355,7 +371,7 @@ func performRepoSeeding(ctx context.Context, wf *RFEWorkflow, githubToken, agent
 			return nil
 		}
 
-		targetPath := filepath.Join(claudeDir, d.Name())
+		targetPath := filepath.Join(claudeAgentsDir, d.Name())
 		if err := os.WriteFile(targetPath, content, 0644); err != nil {
 			log.Printf("Failed to write agent file %s: %v", targetPath, err)
 			return nil
@@ -614,16 +630,13 @@ func gitAbandonRepo(ctx context.Context, repoDir string) error {
 	return nil
 }
 
-// GitDiffSummary holds summary counts from git status --porcelain
+// GitDiffSummary holds summary counts from git diff --numstat
 type GitDiffSummary struct {
-	Added      int `json:"added"`
-	Modified   int `json:"modified"`
-	Deleted    int `json:"deleted"`
-	Renamed    int `json:"renamed"`
-	Untracked  int `json:"untracked"`
+	TotalAdded   int `json:"total_added"`
+	TotalRemoved int `json:"total_removed"`
 }
 
-// gitDiffRepo returns porcelain-status summary counts for a repository directory
+// gitDiffRepo returns diff statistics comparing working directory to HEAD
 func gitDiffRepo(ctx context.Context, repoDir string) (*GitDiffSummary, error) {
 	// Validate repoDir exists
 	if fi, err := os.Stat(repoDir); err != nil || !fi.IsDir() {
@@ -642,35 +655,37 @@ func gitDiffRepo(ctx context.Context, repoDir string) (*GitDiffSummary, error) {
 		return stdout.String(), nil
 	}
 
-	out, err := run("git", "status", "--porcelain")
-	if err != nil {
-		return &GitDiffSummary{}, nil
-	}
-
-	lines := strings.Split(strings.TrimSpace(out), "\n")
 	summary := &GitDiffSummary{}
 
-	for _, ln := range lines {
-		if len(ln) < 2 {
-			continue
-		}
-		x, y := ln[0], ln[1]
-		code := string([]byte{x, y})
-		switch {
-		case strings.Contains(code, "A"):
-			summary.Added++
-		case strings.Contains(code, "M"):
-			summary.Modified++
-		case strings.Contains(code, "D"):
-			summary.Deleted++
-		case strings.Contains(strings.ToUpper(code), "R"):
-			summary.Renamed++
-		case code == "??":
-			summary.Untracked++
+	// Get numstat for modified files (working tree vs HEAD)
+	numstatOut, err := run("git", "diff", "--numstat", "HEAD")
+	if err == nil && strings.TrimSpace(numstatOut) != "" {
+		lines := strings.Split(strings.TrimSpace(numstatOut), "\n")
+		for _, ln := range lines {
+			if ln == "" {
+				continue
+			}
+			parts := strings.Fields(ln)
+			if len(parts) < 3 {
+				continue
+			}
+			added, removed := parts[0], parts[1]
+			// Parse additions
+			if added != "-" {
+				var n int
+				fmt.Sscanf(added, "%d", &n)
+				summary.TotalAdded += n
+			}
+			// Parse deletions
+			if removed != "-" {
+				var n int
+				fmt.Sscanf(removed, "%d", &n)
+				summary.TotalRemoved += n
+			}
 		}
 	}
 
-	log.Printf("gitDiffRepo: summary added=%d modified=%d deleted=%d renamed=%d untracked=%d",
-		summary.Added, summary.Modified, summary.Deleted, summary.Renamed, summary.Untracked)
+	log.Printf("gitDiffRepo: total_added=%d total_removed=%d",
+		summary.TotalAdded, summary.TotalRemoved)
 	return summary, nil
 }
