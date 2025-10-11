@@ -3,6 +3,7 @@
 ## Current State Analysis
 
 ### Strengths
+
 - **Excellent README.md**: Comprehensive overview with clear getting started instructions
 - **Detailed ARCHITECTURE.md**: Production-ready LlamaDeploy architecture documentation  
 - **Comprehensive Agent Framework**: Complete agent personas in `rhoai-ux-agents-vTeam.md`
@@ -11,6 +12,7 @@
 - **Component Documentation**: Detailed setup guides for ambient-runner platform
 
 ### Gaps Identified
+
 - No structured documentation hierarchy for different audiences
 - Scattered user guides across multiple files
 - Missing hands-on lab exercises for learning
@@ -174,6 +176,7 @@ markdown_extensions:
 ## Content Migration Strategy
 
 ### Phase 1: Foundation (Week 1)
+
 1. **Setup MkDocs infrastructure**
    - Install MkDocs with Material theme
    - Configure `mkdocs.yml` with navigation structure
@@ -185,6 +188,7 @@ markdown_extensions:
    - Create section index pages with clear navigation
 
 ### Phase 2: User Documentation (Week 2)
+
 1. **Getting Started Guide**
    - 5-minute quick start (streamlined from README)
    - Prerequisites and installation
@@ -196,6 +200,7 @@ markdown_extensions:
    - Configuration and customization options
 
 ### Phase 3: Developer Documentation (Week 3)
+
 1. **Development Setup**
    - Environment setup and dependencies
    - Development workflow and standards
@@ -207,6 +212,7 @@ markdown_extensions:
    - API reference documentation
 
 ### Phase 4: Lab Exercises (Week 4)
+
 1. **Basic Labs**
    - Lab 1: Create your first RFE using the chat interface
    - Lab 2: Understand agent interactions and workflows
@@ -225,6 +231,7 @@ markdown_extensions:
 ## Lab Exercise Design Principles
 
 ### Structure
+
 - **Objective**: Clear learning goals
 - **Prerequisites**: Required knowledge and setup
 - **Step-by-Step Instructions**: Detailed procedures
@@ -233,6 +240,7 @@ markdown_extensions:
 - **Further Reading**: Links to relevant documentation
 
 ### Example Lab Template
+
 ```markdown
 # Lab 1: Create Your First RFE
 
@@ -258,8 +266,8 @@ Learn to create a Request for Enhancement (RFE) using the conversational AI inte
 - Agent workflow initiated
 
 ## Troubleshooting
-- If API key errors occur, check `.streamlit/secrets.toml`
-- For agent timeout issues, verify network connectivity
+- If API key errors occur, check ProjectSettings CR in your namespace
+- For agent timeout issues, verify network connectivity and check operator logs
 
 ## Further Reading
 - [Agent Framework Guide](../user-guide/agent-framework.md)
@@ -269,18 +277,21 @@ Learn to create a Request for Enhancement (RFE) using the conversational AI inte
 ## Integration with Existing Tools
 
 ### GitHub Integration
+
 - **Source**: Documentation lives in `/docs` directory
 - **Editing**: Direct GitHub editing links in MkDocs
 - **Issues**: Link to GitHub issues for documentation bugs
 - **Contributions**: Pull request workflow for doc updates
 
 ### CI/CD Pipeline
+
 - **Build**: Automated MkDocs builds on push to main
 - **Deploy**: GitHub Pages or internal hosting
 - **Validation**: Link checking and markdown linting
 - **Preview**: PR preview deployments
 
 ### Search and Discovery
+
 - **Full-text search** via MkDocs search plugin
 - **Cross-references** between sections
 - **Glossary** for technical terms
@@ -289,18 +300,21 @@ Learn to create a Request for Enhancement (RFE) using the conversational AI inte
 ## Success Metrics
 
 ### User Adoption
+
 - **Time to first RFE**: Measure setup to first successful RFE creation
 - **Documentation page views**: Track most accessed content
 - **Lab completion rates**: Monitor learning engagement
 - **Support ticket reduction**: Measure documentation effectiveness
 
 ### Developer Experience
+
 - **Contribution velocity**: Track PR frequency and merge time
 - **Setup time**: Measure development environment setup duration  
 - **API usage**: Monitor developer API adoption
 - **Community engagement**: Track discussions and questions
 
 ### Content Quality
+
 - **Accuracy**: Regular technical review cycles
 - **Freshness**: Automated checks for outdated content
 - **Completeness**: Coverage analysis of features vs documentation
@@ -309,12 +323,14 @@ Learn to create a Request for Enhancement (RFE) using the conversational AI inte
 ## Maintenance Strategy
 
 ### Regular Updates
+
 - **Monthly reviews** of user feedback and analytics
 - **Quarterly content audits** for accuracy and relevance
 - **Version alignment** with software releases
 - **Link validation** and broken reference cleanup
 
 ### Community Contributions
+
 - **Clear contribution guidelines** for documentation PRs
 - **Template system** for consistent formatting
 - **Review process** with subject matter experts

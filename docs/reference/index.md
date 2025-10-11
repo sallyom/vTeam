@@ -5,15 +5,19 @@ This section provides comprehensive reference material for the vTeam system, inc
 ## Quick Reference
 
 ### **[Agent Personas](agent-personas.md)** 🤖
+
 Complete specifications for all 7 AI agents, including their roles, expertise areas, analysis frameworks, and interaction patterns.
 
 ### **[API Endpoints](api-endpoints.md)** 🌐
+
 REST API documentation with request/response examples, authentication requirements, and error handling.
 
 ### **[Configuration Schema](configuration-schema.md)** ⚙️
+
 Detailed configuration file formats, validation rules, and customization options for agents, workflows, and integrations.
 
 ### **[Glossary](glossary.md)** 📖
+
 Definitions of terms, concepts, and acronyms used throughout the vTeam system and documentation.
 
 ## Agent System Reference
@@ -51,10 +55,12 @@ stateDiagram-v2
 ## API Reference Summary
 
 ### Base URLs
+
 - **Development**: `http://localhost:8000`
 - **Production**: `https://vteam.example.com/api`
 
 ### Authentication
+
 ```http
 Authorization: Bearer your-api-key-here
 Content-Type: application/json
@@ -102,21 +108,7 @@ outputSchema:
 
 ### System Configuration
 
-```toml
-# .streamlit/secrets.toml
-[anthropic]
-api_key = "sk-ant-api03-..."
-model = "claude-3-5-sonnet-20241022"
-
-[system]
-max_concurrent_agents = 7
-response_timeout_seconds = 120
-enable_caching = true
-
-[integrations]
-jira_enabled = true
-github_enabled = false
-```
+Configuration is managed via Kubernetes Custom Resources (ProjectSettings) and environment variables in deployment manifests.
 
 ## Data Models
 
@@ -162,6 +154,7 @@ class AgentAnalysis(BaseModel):
 ### Common Issues
 
 #### Agent Timeout
+
 ```json
 {
   "error": "AGENT_TIMEOUT",
@@ -172,6 +165,7 @@ class AgentAnalysis(BaseModel):
 ```
 
 #### Invalid Configuration
+
 ```json
 {
   "error": "CONFIG_VALIDATION_ERROR",
@@ -206,12 +200,14 @@ class AgentAnalysis(BaseModel):
 ### Current Version: v2.0.0
 
 **Major Changes:**
+
 - LlamaDeploy workflow orchestration
 - TypeScript frontend with @llamaindex/server
 - Enhanced agent persona system
 - Production-ready deployment architecture
 
 **Breaking Changes:**
+
 - API endpoints moved from `/api/v1/` to `/deployments/rhoai/`
 - Agent configuration schema updated
 - Authentication now requires Bearer tokens
@@ -236,12 +232,12 @@ To help with support requests, gather this information:
 # Version info
 git describe --tags
 
-# System details  
-python --version
-streamlit --version
+# Kubernetes cluster info
+kubectl version
+kubectl get pods -n ambient-code
 
-# Environment check
-pip list | grep -E "(anthropic|streamlit|llamaindex)"
+# Component versions
+kubectl get pods -n ambient-code -o jsonpath='{.items[*].spec.containers[*].image}'
 ```
 
 ---
