@@ -7,31 +7,37 @@ Welcome to the vTeam Developer Guide! This section provides comprehensive inform
 This guide covers technical implementation details and development workflows:
 
 ### 🔧 [Setup](setup.md)
+
 - Development environment configuration
 - Dependencies and tooling
 - Local development workflow
 
 ### 🏗️ [Architecture](architecture.md)
+
 - System design and component overview
 - LlamaDeploy workflow orchestration
 - Multi-agent coordination patterns
 
 ### 🔌 [Plugin Development](plugin-development.md)
+
 - Creating custom agent personas
 - Extending workflow capabilities
 - Integration patterns and APIs
 
 ### 📚 [API Reference](api-reference.md)
+
 - REST endpoint documentation
 - Python API usage examples
 - Response schemas and error codes
 
 ### 🤝 [Contributing](contributing.md)
+
 - Code standards and review process
 - Testing requirements and strategies
 - Documentation guidelines
 
 ### 🧪 [Testing](testing.md)
+
 - Unit testing strategies
 - Integration testing with AI services
 - Performance testing and benchmarks
@@ -41,18 +47,23 @@ This guide covers technical implementation details and development workflows:
 This guide serves different development roles:
 
 ### **Backend Engineers**
+
 Focus on LlamaDeploy workflows, agent orchestration, and API development.
 
 ### **Frontend Engineers**
+
 Learn about the TypeScript chat interface and @llamaindex/server integration.
 
 ### **DevOps Engineers**
+
 Understand deployment architecture, monitoring, and scalability considerations.
 
 ### **AI/ML Engineers**
+
 Explore agent behavior customization, prompt engineering, and model integration.
 
 ### **QA Engineers**
+
 Discover testing strategies for AI-powered workflows and integration patterns.
 
 ## Technology Stack
@@ -60,52 +71,53 @@ Discover testing strategies for AI-powered workflows and integration patterns.
 Understanding our core technologies:
 
 ### **Backend (Go)**
+
 - **Gin**: HTTP server and routing
 - **Kubernetes Client**: Interacts with CRDs and cluster APIs
 - **GitHub App Integration**: Installation tokens, repo proxying
 
 ### **Operator (Go)**
+
 - **Controller Runtime**: Watches CRDs and manages Jobs
 - **Runner Orchestration**: Creates per-session runner pods with PVC
 
 ### **Frontend (TypeScript/Next.js)**
+
 - **Next.js + React**: UI and routing
 - **Shadcn UI**: Component library
 - **WebSocket**: Real-time session updates
 
 ### **Runner (Python)**
-- **Claude Agent SDK**: Executes tasks with allowed tools
-- **runner-shell**: Standardized adapter protocol
+
+- **Claude Code SDK**: Executes agentic sessions
+- **Multi-agent collaboration**: Supports complex workflows
 
 ### **AI Integration**
-- **Anthropic Claude**: Primary model via Claude Agent SDK
+
+- **Anthropic Claude**: Primary model via Claude Code SDK
 
 ### **Development Tools**
+
 - **docker/podman**: Container builds
 - **make**: Build and deploy automation
+- **Kubernetes/OpenShift**: Runtime platform
 
 ## Architecture Overview
 
 ```mermaid
 graph TD
-    A[Frontend: @llamaindex/server] --> B[LlamaDeploy API Server]
-    B --> C[RFE Builder Workflow]
-    C --> D[Multi-Agent Manager]
-    D --> E[UX Designer Agent]
-    D --> F[Product Manager Agent]
-    D --> G[Backend Engineer Agent]
-    D --> H[Frontend Engineer Agent]
-    D --> I[Architect Agent]
-    D --> J[Product Owner Agent]
-    D --> K[SME/Researcher Agent]
-    
-    L[Vector Index Generation] --> M[FAISS Vector Stores]
-    M --> D
-    
-    N[External APIs] --> O[Anthropic Claude]
-    N --> P[OpenAI Embeddings]
-    
-    B --> N
+    A[Frontend NextJS] --> B[Backend API]
+    B --> C[Kubernetes CRDs]
+    C --> D[Operator]
+    D --> E[Job Pods]
+    E --> F[Claude Code Runner]
+    F --> G[GitHub Repos]
+
+    H[ProjectSettings CR] --> D
+    I[AgenticSession CR] --> D
+    J[RFEWorkflow CR] --> D
+
+    K[Anthropic Claude API] --> F
 ```
 
 ## Development Workflow
@@ -122,35 +134,44 @@ graph TD
 
 ```
 vTeam/
-├── demos/rfe-builder/          # Main application
-│   ├── src/                    # Core Python backend
-│   │   ├── agents/             # Agent YAML configurations
-│   │   ├── rfe_builder_workflow.py # Main LlamaDeploy workflow
-│   │   ├── artifact_editor_workflow.py # Artifact editing workflow
-│   │   └── settings.py         # System configuration
-│   ├── ui/                     # TypeScript frontend (@llamaindex/server)
-│   ├── deployment.yml          # LlamaDeploy deployment configuration
-│   ├── pyproject.toml          # Python dependencies and build config
-│   └── data/                   # Document sources for RAG
-├── src/vteam_shared_configs/   # Shared configuration package  
+├── components/
+│   ├── backend/                # Go REST API
+│   │   ├── handlers.go         # HTTP handlers
+│   │   ├── git.go              # GitHub integration
+│   │   └── websocket_messaging.go # Real-time updates
+│   ├── frontend/               # Next.js web UI
+│   │   ├── app/                # Next.js app router
+│   │   └── components/         # React components
+│   ├── operator/               # Kubernetes operator (Go)
+│   │   └── controllers/        # CR reconciliation logic
+│   ├── runners/
+│   │   └── claude-code-runner/ # Python Claude Code SDK wrapper
+│   └── manifests/              # Kubernetes deployment YAMLs
+│       ├── crds/               # Custom Resource Definitions
+│       └── deployment/         # Deployment manifests
 └── docs/                       # Documentation (you are here!)
 ```
 
 ## Key Development Areas
 
-### **Agent System Development**
-Extend the multi-agent framework with new personas, specialized knowledge, and interaction patterns.
+### **Custom Resource Development**
 
-### **Workflow Engine Enhancement**  
-Improve LlamaDeploy orchestration, add new workflow steps, and optimize performance.
+Extend the Kubernetes CRD system with new workflow types and orchestration patterns.
 
-### **RAG System Optimization**
-Enhance document ingestion, vector search accuracy, and context relevance.
+### **Operator Enhancement**
+
+Improve reconciliation loops, job management, and error handling in the operator.
+
+### **Runner Capabilities**
+
+Enhance the Claude Code runner with new tools and integration patterns.
 
 ### **API & Integration Development**
+
 Build new integrations, improve existing APIs, and enhance external service connections.
 
 ### **Frontend Experience**
+
 Improve the chat interface, add visualization features, and enhance user experience.
 
 ## Getting Started

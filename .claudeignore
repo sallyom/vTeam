@@ -1,9 +1,6 @@
 # Claude Code ignore file
 # Directories and files that Claude Code should not analyze
 
-# Archived demos - outdated system, should not be used for documentation
-demos/rfe-builder-archived/
-
 # Git internal files
 .git/
 

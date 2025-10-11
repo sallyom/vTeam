@@ -5,6 +5,7 @@
 Learn to create a Request for Enhancement (RFE) using vTeam's conversational AI interface and understand how the 7-agent council processes your requirements.
 
 **By the end of this lab, you will:**
+
 - Successfully create an RFE using natural language
 - Understand the agent workflow stages  
 - Interpret agent analysis and recommendations
@@ -12,10 +13,10 @@ Learn to create a Request for Enhancement (RFE) using vTeam's conversational AI 
 
 ## Prerequisites 📋
 
-- [ ] vTeam installed and running locally ([Getting Started Guide](../../user-guide/getting-started.md))
-- [ ] OpenAI and Anthropic API keys configured in `src/.env`
+- [ ] vTeam installed and running ([Getting Started Guide](../../user-guide/getting-started.md))
+- [ ] Anthropic API key configured in your project settings
 - [ ] Basic understanding of software requirements
-- [ ] Web browser for accessing the LlamaIndex chat interface
+- [ ] Web browser for accessing the vTeam interface
 
 ## Estimated Time ⏱️
 
@@ -25,33 +26,30 @@ Learn to create a Request for Enhancement (RFE) using vTeam's conversational AI 
 
 You're a Product Manager at a software company. Your development team has been asking for a **dark mode feature** to improve user experience and reduce eye strain during late-night coding sessions. You need to create a comprehensive RFE that the engineering team can implement immediately.
 
-## Step 1: Access the Chat Interface
+## Step 1: Access the vTeam Interface
 
-1. **Ensure vTeam is running**. If not, start it:
+1. **Ensure vTeam is running**. For local development with OpenShift Local (CRC):
+
    ```bash
-   cd demos/rfe-builder
-   
-   # Terminal 1: Start API server
-   uv run -m llama_deploy.apiserver
-   
-   # Terminal 2: Deploy workflow
-   uv run llamactl deploy deployment.yml
+   cd vTeam
+   make dev-start
    ```
 
-2. **Open your browser** to `http://localhost:4501/deployments/rhoai-ai-feature-sizing/ui`
+2. **Open your browser** to the vTeam frontend URL (displayed after deployment)
 
-3. **Verify the chat interface**:
-   - You should see a modern LlamaIndex chat interface
-   - Look for starter questions or prompts
+3. **Verify the interface**:
+   - You should see the vTeam web interface
+   - Look for project creation or session options
    - The interface should be ready to accept your input
 
-**✅ Checkpoint**: Confirm you can see the chat interface and it's responsive to input.
+**✅ Checkpoint**: Confirm you can access the vTeam interface and navigate the UI.
 
 ## Step 2: Initiate RFE Creation
 
 Now let's create your first RFE using natural language.
 
 1. **Start with a basic description** in the chat:
+
    ```
    I want to add a dark mode toggle to our application. Users should be able to switch between light and dark themes, and their preference should be saved.
    ```
@@ -63,23 +61,26 @@ Now let's create your first RFE using natural language.
    - Where should the toggle be located?
    - Are there any specific design requirements?
 
-**✅ Checkpoint**: The LlamaDeploy workflow should begin processing and respond within 10-15 seconds.
+**✅ Checkpoint**: The vTeam workflow should begin processing and respond within 10-15 seconds.
 
 ## Step 3: Provide Additional Context
 
 The AI will guide you through refining your requirements. Respond to its questions with details like:
 
 **When asked about application type:**
+
 ```
 This is a web-based project management application built with React. We have about 5,000 active users who work in different time zones.
 ```
 
 **When asked about toggle placement:**
+
 ```
 The toggle should be in the user settings page, but also accessible from the main navigation bar for quick switching.
 ```
 
 **When asked about design requirements:**
+
 ```
 We want to follow our existing design system. Dark mode should use our brand colors - dark gray (#2D3748) backgrounds with white text, and our signature blue (#3182CE) for accents.
 ```
@@ -97,6 +98,7 @@ The AI will present a structured RFE with sections like:
 - **Technical Considerations**: Implementation notes
 
 **Review the generated content and verify:**
+
 - [ ] Title accurately reflects your request
 - [ ] Description captures all discussed details
 - [ ] Business justification makes sense for your user base
@@ -106,16 +108,17 @@ The AI will present a structured RFE with sections like:
 
 ## Step 5: Watch Multi-Agent Analysis
 
-The LlamaDeploy workflow automatically orchestrates all 7 agents:
+The vTeam workflow automatically orchestrates all 7 agents:
 
 1. **Monitor the progress** in real-time
 2. **Observe agent coordination**:
    - All 7 agents analyze your RFE simultaneously
-   - LlamaDeploy orchestrates the workflow execution
-   - Real-time streaming shows agent progress
+   - vTeam orchestrates the workflow execution via Kubernetes
+   - Real-time updates show agent progress
 3. **Watch for specialized analysis** from each agent perspective
 
 **The 7-agent process:**
+
 1. **Parker (PM)**: Prioritizes business value and stakeholder impact
 2. **Archie (Architect)**: Evaluates technical feasibility and design approach
 3. **Stella (Staff Engineer)**: Reviews implementation complexity and completeness  
@@ -131,18 +134,21 @@ The LlamaDeploy workflow automatically orchestrates all 7 agents:
 Each agent provides specialized analysis. Review their outputs:
 
 ### **Parker (PM) Analysis**
+
 - Business value assessment (1-10 scale)
 - User impact evaluation  
 - Resource requirement estimates
 - Stakeholder communication recommendations
 
 ### **Archie (Architect) Analysis**  
+
 - Technical feasibility score
 - Architecture impact assessment
 - Integration points identified
 - Risk factors and mitigation strategies
 
 ### **Stella (Staff Engineer) Analysis**
+
 - Implementation complexity rating
 - Development time estimates
 - Required skills and resources
@@ -155,12 +161,14 @@ Each agent provides specialized analysis. Review their outputs:
 Based on the agent analysis, you should see:
 
 **Positive Indicators:**
+
 - High business value score (7-9/10)
 - Low-to-medium technical complexity
 - Clear implementation path
 - Strong user benefit justification
 
 **Potential Concerns:**
+
 - Design system impact
 - Testing requirements for multiple themes
 - Browser compatibility considerations
@@ -178,6 +186,7 @@ If the RFE is accepted, Derek (Delivery Owner) will create:
 - **Implementation Timeline**: Development phases and milestones
 
 **Review these artifacts for:**
+
 - [ ] Clear, actionable user stories
 - [ ] Testable acceptance criteria
 - [ ] Realistic timeline estimates
@@ -198,6 +207,7 @@ If the RFE is accepted, Derek (Delivery Owner) will create:
 ### Verify the RFE Quality
 
 A well-refined RFE should have:
+
 - [ ] **Specific title** that clearly communicates the feature
 - [ ] **Detailed description** with user context and motivation
 - [ ] **Quantified business justification** with user impact metrics
@@ -208,16 +218,19 @@ A well-refined RFE should have:
 ## Troubleshooting 🛠️
 
 ### Agent Analysis Takes Too Long
+
 - **Cause**: High API usage or network issues
 - **Solution**: Check your internet connection and Anthropic API status
 - **Workaround**: Try during off-peak hours
 
 ### Unclear Agent Recommendations  
+
 - **Cause**: Insufficient initial requirements
 - **Solution**: Provide more context about your application, users, and constraints
 - **Tip**: Include technical stack, user base size, and business priorities
 
 ### RFE Rejected by Agents
+
 - **Cause**: Low business value, high complexity, or unclear requirements
 - **Solution**: Refine your requirements based on agent feedback
 - **Next Step**: Address specific concerns and resubmit

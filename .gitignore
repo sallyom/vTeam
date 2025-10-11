@@ -102,8 +102,6 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-demos/rfe-builder/.streamlit/secrets.toml
-
 .claude/settings.local.json
 
 # macOS system files

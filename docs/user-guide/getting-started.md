@@ -1,208 +1,184 @@
 # Getting Started
 
-Get vTeam up and running in just 5 minutes! This guide walks you through everything needed to create your first AI-refined RFE.
+Get vTeam up and running quickly! This guide walks you through everything needed to create your first AI-powered agentic session.
 
 ## Prerequisites
 
 Before starting, ensure you have:
 
-- **Python 3.12+** (or Python 3.11+)
+- **Kubernetes or OpenShift cluster** (or OpenShift Local for development)
 - **Git** for cloning the repository
-- **uv** package manager ([Installation guide](https://docs.astral.sh/uv/getting-started/installation/))
-- **pnpm** for TypeScript frontend (`npm i -g pnpm`)
-- **OpenAI API key** for embeddings and AI features
-- **Anthropic Claude API key** for conversational AI ([Get one here](https://console.anthropic.com/))
-- **Internet connection** for API calls and package downloads
+- **kubectl** or **oc** CLI tools
+- **Anthropic Claude API key** ([Get one here](https://console.anthropic.com/))
+- **Internet connection** for container image pulls and API calls
 
-## Installation
+For local development:
 
-### Step 1: Clone the Repository
+- **OpenShift Local (CRC)** - [Installation guide](https://developers.redhat.com/products/openshift-local/overview)
+- **Make** for running build commands
+- **Docker or Podman** (optional, for building custom images)
+
+## Quick Start - Local Development
+
+The fastest way to get started is using OpenShift Local (CRC):
+
+### Step 1: Install OpenShift Local
 
 ```bash
+# Install CRC (one-time setup)
+brew install crc
+
+# Get your free Red Hat pull secret from:
+# https://console.redhat.com/openshift/create/local
+
+# Setup CRC (follow prompts to add pull secret)
+crc setup
+```
+
+### Step 2: Clone and Deploy
+
+```bash
+# Clone the repository
 git clone https://github.com/red-hat-data-services/vTeam.git
 cd vTeam
+
+# Single command to start everything
+make dev-start
 ```
 
-### Step 2: Set Up Environment
+This command will:
 
-Navigate to the RFE builder and install dependencies:
+- Start OpenShift Local if not running
+- Create the vteam-dev project/namespace
+- Deploy all components (frontend, backend, operator, runner)
+- Configure routes and services
+- Display the frontend URL when ready
+
+### Step 3: Configure API Key
+
+After deployment, you need to configure your Anthropic API key:
 
 ```bash
-# Navigate to the RFE builder demo
-cd demos/rfe-builder
-
-# Install all dependencies (Python backend + TypeScript frontend)
-uv sync
+# Create a project settings with your API key
+# Access the vTeam UI (URL shown after dev-start)
+# Navigate to Project Settings
+# Add your ANTHROPIC_API_KEY
 ```
 
-This will automatically:
-- Create a virtual environment
-- Install Python dependencies from `pyproject.toml`
-- Set up the LlamaDeploy workflow system
-
-### Step 3: Configure API Access
-
-Set up your API keys in the environment file:
+Alternatively, create it via CLI:
 
 ```bash
-# Create environment file
-cp src/.env.example src/.env  # If example exists
-# OR create new file:
-touch src/.env
+oc apply -f - <<EOF
+apiVersion: vteam.ambient-code/v1alpha1
+kind: ProjectSettings
+metadata:
+  name: default-settings
+  namespace: vteam-dev
+spec:
+  apiKeys:
+    anthropic: "sk-ant-api03-your-key-here"
+  defaultModel: "claude-3-5-sonnet-20241022"
+  timeout: 300
+EOF
 ```
 
-Add your API credentials to `src/.env`:
+### Step 4: Access the UI
 
 ```bash
-# Required: OpenAI for embeddings
-OPENAI_API_KEY=your-openai-api-key-here
+# Get the frontend URL
+echo "https://$(oc get route vteam-frontend -n vteam-dev -o jsonpath='{.spec.host}')"
 
-# Required: Anthropic for conversational AI
-ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
-
-# Optional: Vertex AI support
-VERTEX_PROJECT_ID=your-gcp-project-id
-VERTEX_LOCATION=us-central1
-
-# Optional: Jira integration
-JIRA_BASE_URL=https://your-domain.atlassian.net
-JIRA_USERNAME=your-email@company.com
-JIRA_API_TOKEN=your-jira-api-token
+# Open in browser and start creating agentic sessions!
 ```
 
-!!! warning "Keep Your Keys Secret"
-    Never commit `src/.env` to version control. It's already in `.gitignore`.
+## First Agentic Session
 
-### Step 4: Generate Knowledge Base
+Now let's create your first agentic session to verify everything works:
 
-First, generate the document embeddings for the RAG system:
+### Using the Web Interface
 
-```bash
-uv run generate
-```
-
-This creates vector embeddings from documents in the `./data` directory.
-
-### Step 5: Launch the Application
-
-Start the LlamaDeploy system in two steps:
-
-```bash
-# Terminal 1: Start the API server
-uv run -m llama_deploy.apiserver
-
-# Terminal 2: Deploy the workflow (wait for server to start)
-uv run llamactl deploy deployment.yml
-```
-
-You should see output like:
-
-```
-# From Terminal 1:
-INFO:     Uvicorn running on http://0.0.0.0:4501 (Press CTRL+C to quit)
-
-# From Terminal 2:  
-Deployment successful: rhoai-ai-feature-sizing
-```
-
-### Step 6: Verify Installation
-
-1. **Open your browser** to `http://localhost:4501/deployments/rhoai-ai-feature-sizing/ui`
-2. **Check the interface** - you should see the LlamaIndex chat interface
-3. **Test API connection** - try sending a message like "Help me create an RFE"
-4. **Verify agent loading** - check that the workflow responds with agent analysis
-
-## First RFE Creation
-
-Now let's create your first RFE to verify everything works:
-
-### Using the Chat Interface
-
-1. **In the chat interface**, describe your feature idea:
-   ```
-   I want to add a dark mode toggle to our application settings page
-   ```
-2. **The multi-agent system** will automatically:
-   - Analyze your request from 7 different perspectives
-   - Generate comprehensive requirements
-   - Provide implementation guidance
-   - Create actionable deliverables
-3. **Review the results** as each agent provides their specialized analysis
+1. **Access the vTeam UI** in your browser
+2. **Create a new project** (if not already created)
+3. **Start a new AgenticSession**:
+   - Provide a prompt describing your task
+   - Optionally specify GitHub repositories to work with
+   - Click "Create Session"
+4. **Monitor progress** in real-time as the Claude Code agent executes your task
+5. **Review results** when the session completes
 
 ## Verification Checklist
 
 Ensure your installation is working correctly:
 
-- [ ] LlamaDeploy API server starts without errors (port 4501)
-- [ ] Workflow deploys successfully with `llamactl`
-- [ ] Chat interface loads and responds to messages  
-- [ ] Multi-agent analysis completes within 2-3 minutes
-- [ ] No API authentication errors in logs
-- [ ] Agent responses show specialized perspectives
+- [ ] All pods are running: `oc get pods -n vteam-dev`
+- [ ] Frontend is accessible via browser
+- [ ] Backend API health check passes: `/health` endpoint
+- [ ] AgenticSession CR can be created
+- [ ] Operator spawns Job pods for sessions
+- [ ] No API authentication errors in operator logs
 
 ## Common Issues
 
 ### API Key Errors
 
-**Symptom**: "Authentication failed" or similar errors
-**Solution**: 
-1. Verify your API keys are correct in `src/.env`
-2. Check you have available credits in both OpenAI and Anthropic accounts
-3. Ensure both `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are set
-
-### Dependency Errors
-
-**Symptom**: `ModuleNotFoundError` or import errors
+**Symptom**: Agentic sessions fail with authentication errors
 **Solution**:
-1. Ensure you ran `uv sync` in the `demos/rfe-builder` directory
-2. Check that `uv` is installed: `uv --version`
-3. Try cleaning and reinstalling: `rm -rf .venv && uv sync`
 
-### Port Already in Use
+1. Verify your Anthropic API key is correct in ProjectSettings
+2. Check you have available credits in your Anthropic account
+3. Ensure the API key is properly formatted: `sk-ant-api03-...`
 
-**Symptom**: "Port 4501 is already in use"  
+### Pod Not Starting
+
+**Symptom**: Pods stuck in `ImagePullBackOff` or `CrashLoopBackOff`
 **Solution**:
+
 ```bash
-# Kill existing LlamaDeploy processes
-pkill -f llama_deploy
+# Check pod status and events
+oc describe pod <pod-name> -n vteam-dev
 
-# Or use a different port in deployment.yml
-# Modify the apiServer.port setting
+# Check pod logs
+oc logs <pod-name> -n vteam-dev
+
+# Verify images are accessible
+oc get pods -n vteam-dev -o jsonpath='{.items[*].spec.containers[*].image}'
 ```
 
 ### Deployment Failures
 
-**Symptom**: `llamactl deploy` fails or times out
+**Symptom**: `make dev-start` fails or times out
 **Solution**:
-1. Ensure the API server is running first (`uv run -m llama_deploy.apiserver`)
-2. Wait a few seconds between starting the server and deploying
-3. Check logs for specific error messages
-4. Verify all agents have valid configurations in `src/agents/`
 
-### Slow Agent Responses
+1. Check CRC status: `crc status`
+2. Ensure CRC has enough resources (recommend 8GB RAM minimum)
+3. Check deployment logs: `make dev-logs`
+4. Verify all CRDs are installed: `oc get crd | grep vteam`
 
-**Symptom**: Long wait times for multi-agent analysis
+### Session Job Failures
+
+**Symptom**: AgenticSession jobs fail or timeout
 **Solution**:
-1. Check your internet connection
-2. Verify API service status at [Anthropic Status](https://status.anthropic.com/) and [OpenAI Status](https://status.openai.com/)
-3. Monitor the LlamaDeploy logs for bottlenecks
-4. Consider using smaller document sets during development
+
+1. Check job logs: `oc logs job/<session-name> -n vteam-dev`
+2. Verify workspace PVC is accessible
+3. Check operator logs for errors: `make dev-logs-operator`
+4. Ensure sufficient cluster resources for job pods
 
 ## What's Next?
 
 Now that vTeam is running, you're ready to:
 
-1. **Learn RFE best practices** → [Creating RFEs Guide](creating-rfes.md)
-2. **Understand the AI agents** → [Agent Framework](agent-framework.md)  
-3. **Try hands-on exercises** → [Lab 1: First RFE](../labs/basic/lab-1-first-rfe.md)
-4. **Customize your setup** → [Configuration Guide](configuration.md)
+1. **Explore the architecture** → [Developer Guide](../developer-guide/index.md)
+2. **Try RFE workflows** → [RFE Workflow Guide](rfe-workflow.md)
+3. **Try hands-on exercises** → [Labs](../labs/index.md)
+4. **Customize your deployment** → [Configuration Guide](configuration.md)
 
 ## Getting Help
 
 If you encounter issues not covered here:
 
-- **Check the troubleshooting guide** → [Troubleshooting](troubleshooting.md)
-- **Search existing issues** → [GitHub Issues](https://github.com/red-hat-data-services/vTeam/issues)  
+- **Check the CLAUDE.md** → [Project Documentation](../../CLAUDE.md)
+- **Search existing issues** → [GitHub Issues](https://github.com/red-hat-data-services/vTeam/issues)
 - **Create a new issue** with your error details and environment info
 
-Welcome to AI-assisted refinement! 🚀
+Welcome to Kubernetes-native AI automation! 🚀

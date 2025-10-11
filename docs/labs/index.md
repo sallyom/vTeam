@@ -7,6 +7,7 @@ Welcome to the vTeam hands-on learning labs! These practical exercises will guid
 Our lab curriculum is designed for progressive skill building:
 
 ### 🎯 Basic Labs (30-45 minutes each)
+
 Perfect for getting started with vTeam fundamentals.
 
 - **[Lab 1: Create Your First RFE](basic/lab-1-first-rfe.md)**  
@@ -19,6 +20,7 @@ Perfect for getting started with vTeam fundamentals.
   Master workflow states, progress tracking, and result interpretation
 
 ### 🔧 Advanced Labs (60-90 minutes each)  
+
 For users ready to customize and extend vTeam capabilities.
 
 - **[Lab 4: Custom Agent Creation](advanced/lab-4-custom-agents.md)**  
@@ -31,6 +33,7 @@ For users ready to customize and extend vTeam capabilities.
   Validate custom configurations and ensure system reliability
 
 ### 🚀 Production Labs (90-120 minutes each)
+
 Enterprise deployment and scaling considerations.
 
 - **[Lab 7: Jira Integration Setup](production/lab-7-jira-integration.md)**  
@@ -47,24 +50,31 @@ Enterprise deployment and scaling considerations.
 Each lab follows a consistent structure for optimal learning:
 
 ### **Objective** 🎯
+
 Clear learning goals and expected outcomes
 
 ### **Prerequisites** 📋
+
 Required knowledge, tools, and setup before starting
 
 ### **Estimated Time** ⏱️
+
 Realistic time commitment for completion
 
 ### **Step-by-Step Instructions** 📝
+
 Detailed procedures with code examples and screenshots
 
 ### **Validation Checkpoints** ✅
+
 Verify your progress at key milestones
 
 ### **Troubleshooting** 🛠️
+
 Common issues and solutions
 
 ### **Further Exploration** 🔍
+
 Additional resources and next steps
 
 ## Prerequisites
@@ -82,18 +92,12 @@ Before starting the labs, ensure you have:
 ### Recommended Setup
 
 ```bash
-# Clone and set up vTeam
+# Clone vTeam repository
 git clone https://github.com/red-hat-data-services/vTeam.git
-cd vTeam/demos/rfe-builder
+cd vTeam
 
-# Create dedicated lab environment
-python -m venv venv-labs
-source venv-labs/bin/activate
-uv pip install -r requirements.txt
-
-# Copy and configure secrets
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-# Edit with your API keys
+# Follow the deployment guide for your environment
+# See: docs/user-guide/getting-started.md for detailed instructions
 ```
 
 ### Lab-Specific Data
@@ -113,17 +117,20 @@ labs/
 ## Skills You'll Develop
 
 ### **Product Management Skills**
+
 - Writing clear, actionable requirements
 - Collaborating with AI agents for requirement refinement
 - Stakeholder communication through agent interactions
 
 ### **Technical Skills**
+
 - Python development for agent customization
 - YAML configuration for agent personas
 - REST API integration and testing
 - Docker and Kubernetes deployment
 
 ### **Process Skills**
+
 - Agile refinement best practices
 - Workflow optimization and measurement
 - Quality assurance for AI-generated content
