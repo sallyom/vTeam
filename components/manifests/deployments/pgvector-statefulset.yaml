@@ -1,0 +1,177 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${RAG_DATABASE_NAME}-svc
+  namespace: ${NAMESPACE}
+  labels:
+    app: rag-database
+    ragdatabase: ${RAG_DATABASE_NAME}
+spec:
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres
+  clusterIP: None
+  selector:
+    app: rag-database
+    ragdatabase: ${RAG_DATABASE_NAME}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ${RAG_DATABASE_NAME}
+  namespace: ${NAMESPACE}
+  labels:
+    app: rag-database
+    ragdatabase: ${RAG_DATABASE_NAME}
+spec:
+  serviceName: ${RAG_DATABASE_NAME}-svc
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rag-database
+      ragdatabase: ${RAG_DATABASE_NAME}
+  template:
+    metadata:
+      labels:
+        app: rag-database
+        ragdatabase: ${RAG_DATABASE_NAME}
+    spec:
+      initContainers:
+        - name: init-schema
+          image: pgvector/pgvector:pg16
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Waiting for PostgreSQL to be ready..."
+              until pg_isready -h localhost -U postgres; do
+                sleep 2
+              done
+              echo "PostgreSQL is ready. Loading schema..."
+              psql -U postgres -d ragdb -f /schema/pgvector-schema.sql
+              echo "Schema loaded successfully."
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${RAG_DATABASE_NAME}-secret
+                  key: password
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: "ragdb"
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${RAG_DATABASE_NAME}-secret
+                  key: password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "4Gi"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U postgres
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U postgres
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+      volumes:
+        - name: schema
+          configMap:
+            name: pgvector-schema
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: ${STORAGE_CLASS}
+        resources:
+          requests:
+            storage: ${STORAGE_SIZE}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pgvector-schema
+  namespace: ${NAMESPACE}
+data:
+  pgvector-schema.sql: |
+    -- This will be populated from the schema file
+    CREATE EXTENSION IF NOT EXISTS pgvector;
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+    CREATE TABLE IF NOT EXISTS documents (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        rag_database_name VARCHAR(253) NOT NULL,
+        document_cr_name VARCHAR(253) NOT NULL,
+        file_path TEXT NOT NULL,
+        file_name VARCHAR(255) NOT NULL,
+        file_format VARCHAR(10) NOT NULL CHECK (file_format IN ('pdf', 'docx', 'pptx', 'xlsx', 'md', 'csv', 'txt', 'html')),
+        uploaded_by VARCHAR(255) NOT NULL,
+        upload_timestamp TIMESTAMPTZ NOT NULL,
+        chunk_count INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(rag_database_name, document_cr_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS chunks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+        chunk_index INTEGER NOT NULL,
+        text TEXT NOT NULL CHECK (length(text) >= 10 AND length(text) <= 1000),
+        embedding VECTOR(384) NOT NULL,
+        page_number INTEGER CHECK (page_number >= 1),
+        section_reference TEXT,
+        metadata JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(document_id, chunk_index)
+    );
+
+    CREATE INDEX IF NOT EXISTS chunks_embedding_idx
+        ON chunks
+        USING hnsw (embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64);
+
+    CREATE INDEX IF NOT EXISTS chunks_text_idx
+        ON chunks
+        USING GIN (to_tsvector('english', text));
+
+    CREATE INDEX IF NOT EXISTS chunks_document_id_idx
+        ON chunks(document_id);
+
+    CREATE INDEX IF NOT EXISTS documents_rag_database_idx
+        ON documents(rag_database_name);

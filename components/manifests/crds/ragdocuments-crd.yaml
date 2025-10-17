@@ -1,0 +1,137 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ragdocuments.vteam.ambient-code
+spec:
+  group: vteam.ambient-code
+  names:
+    kind: RAGDocument
+    listKind: RAGDocumentList
+    plural: ragdocuments
+    singular: ragdocument
+    shortNames:
+      - ragdoc
+      - ragdocs
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - databaseRef
+                - fileName
+                - fileFormat
+                - fileSize
+                - uploadedBy
+                - uploadTimestamp
+                - storagePath
+                - checksum
+              properties:
+                databaseRef:
+                  type: string
+                  description: "Reference to RAGDatabase name"
+                fileName:
+                  type: string
+                  maxLength: 255
+                  description: "Original file name"
+                fileFormat:
+                  type: string
+                  enum: ["pdf", "docx", "pptx", "xlsx", "md", "csv", "txt", "html"]
+                  description: "File format/type"
+                fileSize:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  maximum: 104857600
+                  description: "File size in bytes (max 100MB)"
+                uploadedBy:
+                  type: string
+                  maxLength: 255
+                  description: "User who uploaded the file"
+                uploadTimestamp:
+                  type: string
+                  format: date-time
+                  description: "Upload timestamp"
+                storagePath:
+                  type: string
+                  description: "Path to file in PVC"
+                checksum:
+                  type: string
+                  pattern: '^sha256:[a-f0-9]{64}$'
+                  description: "SHA-256 checksum of the file"
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: ["Uploaded", "Processing", "Completed", "Failed"]
+                  description: "Processing status"
+                chunkCount:
+                  type: integer
+                  minimum: 0
+                  description: "Number of chunks created"
+                processingTime:
+                  type: string
+                  description: "Duration of processing (e.g., '45s', '2m30s')"
+                errorMessage:
+                  type: string
+                  maxLength: 1000
+                  description: "Error details if processing failed"
+                processingStartTime:
+                  type: string
+                  format: date-time
+                  description: "When processing started"
+                processingEndTime:
+                  type: string
+                  format: date-time
+                  description: "When processing completed"
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Database
+          type: string
+          jsonPath: .spec.databaseRef
+        - name: File Name
+          type: string
+          jsonPath: .spec.fileName
+        - name: Format
+          type: string
+          jsonPath: .spec.fileFormat
+        - name: Size
+          type: integer
+          jsonPath: .spec.fileSize
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Chunks
+          type: integer
+          jsonPath: .status.chunkCount
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

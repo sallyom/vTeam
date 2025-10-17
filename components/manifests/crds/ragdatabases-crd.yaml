@@ -1,0 +1,178 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ragdatabases.vteam.ambient-code
+spec:
+  group: vteam.ambient-code
+  names:
+    kind: RAGDatabase
+    listKind: RAGDatabaseList
+    plural: ragdatabases
+    singular: ragdatabase
+    shortNames:
+      - ragdb
+      - ragdbs
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - projectName
+                - storage
+              properties:
+                displayName:
+                  type: string
+                  maxLength: 100
+                  description: "Human-readable name for the RAG database"
+                description:
+                  type: string
+                  maxLength: 500
+                  description: "Description of the database purpose"
+                projectName:
+                  type: string
+                  pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                  description: "Owning project name (must match namespace suffix)"
+                storage:
+                  type: object
+                  required:
+                    - size
+                  properties:
+                    size:
+                      type: string
+                      pattern: '^([0-9]+)(Gi|Mi)$'
+                      description: "Storage allocation (e.g., '5Gi')"
+                    storageClass:
+                      type: string
+                      description: "Storage class name"
+                pgvectorConfig:
+                  type: object
+                  properties:
+                    version:
+                      type: string
+                      default: "16"
+                      enum: ["15", "16"]
+                      description: "PostgreSQL version"
+                    extensions:
+                      type: array
+                      items:
+                        type: string
+                      default: ["pgvector", "pg_trgm"]
+                      description: "PostgreSQL extensions to enable"
+                backupSchedule:
+                  type: string
+                  default: "0 2 * * *"
+                  description: "Cron schedule for backups (default: daily at 2 AM)"
+                importFrom:
+                  type: object
+                  properties:
+                    dumpFileUrl:
+                      type: string
+                      description: "URL or path to import SQL dump from"
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: ["Creating", "Processing", "Ready", "Failed", "Degraded"]
+                  description: "Current lifecycle phase"
+                message:
+                  type: string
+                  description: "Human-readable status message"
+                endpoint:
+                  type: string
+                  description: "Database connection endpoint"
+                databaseName:
+                  type: string
+                  description: "PostgreSQL database name"
+                documentCount:
+                  type: integer
+                  minimum: 0
+                  description: "Number of documents in the database"
+                chunkCount:
+                  type: integer
+                  minimum: 0
+                  description: "Number of document chunks"
+                storageUsed:
+                  type: string
+                  description: "Current storage usage"
+                processingProgress:
+                  type: object
+                  properties:
+                    totalFiles:
+                      type: integer
+                      minimum: 0
+                    processedFiles:
+                      type: integer
+                      minimum: 0
+                    failedFiles:
+                      type: integer
+                      minimum: 0
+                    currentPhase:
+                      type: string
+                      enum: ["ingestion", "extraction", "embedding", "loading", "completed"]
+                    estimatedTimeRemainingMs:
+                      type: integer
+                      minimum: 0
+                health:
+                  type: string
+                  enum: ["Healthy", "Degraded", "Unavailable"]
+                  description: "Database health status"
+                lastBackupTime:
+                  type: string
+                  format: date-time
+                  description: "Timestamp of last successful backup"
+                lastAccessedTime:
+                  type: string
+                  format: date-time
+                  description: "Timestamp of last query"
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      reason:
+                        type: string
+                      message:
+                        type: string
+          x-kubernetes-validations:
+            - rule: "self.spec.storage.size.matches('^([1-5])(Gi)$')"
+              message: "Storage size must be between 1Gi and 5Gi"
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Display Name
+          type: string
+          jsonPath: .spec.displayName
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Health
+          type: string
+          jsonPath: .status.health
+        - name: Documents
+          type: integer
+          jsonPath: .status.documentCount
+        - name: Chunks
+          type: integer
+          jsonPath: .status.chunkCount
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

@@ -1,0 +1,94 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${DOCUMENT_NAME}-processing
+  namespace: ${NAMESPACE}
+  labels:
+    app: docs2db
+    ragdatabase: ${RAG_DATABASE_NAME}
+    ragdocument: ${DOCUMENT_NAME}
+spec:
+  ttlSecondsAfterFinished: 3600  # Clean up job 1 hour after completion
+  backoffLimit: 3  # Retry up to 3 times on failure
+  template:
+    metadata:
+      labels:
+        app: docs2db
+        ragdatabase: ${RAG_DATABASE_NAME}
+        ragdocument: ${DOCUMENT_NAME}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: docs2db
+          image: quay.io/ambient_code/docs2db:latest
+          imagePullPolicy: Always
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Starting document processing for ${DOCUMENT_NAME}"
+              echo "Document path: ${DOCUMENT_PATH}"
+              echo "Database: ${PGHOST}:${PGPORT}/${PGDATABASE}"
+
+              # Run docs2db processing
+              # The docs2db tool will:
+              # 1. Ingest the document from DOCUMENT_PATH
+              # 2. Extract text and chunk it
+              # 3. Generate embeddings using Granite model
+              # 4. Load chunks into pgvector database
+              docs2db process \
+                --input "${DOCUMENT_PATH}" \
+                --db-host "${PGHOST}" \
+                --db-port "${PGPORT}" \
+                --db-name "${PGDATABASE}" \
+                --db-user "${PGUSER}" \
+                --db-password "${PGPASSWORD}" \
+                --rag-database-name "${RAG_DATABASE_NAME}" \
+                --document-cr-name "${DOCUMENT_NAME}" \
+                --embedding-model "granite-30m-english" \
+                --chunk-size 500 \
+                --chunk-overlap 50 \
+                --verbose
+
+              echo "Document processing completed successfully"
+          env:
+            # PostgreSQL connection settings
+            - name: PGHOST
+              value: "${DATABASE_ENDPOINT}"
+            - name: PGPORT
+              value: "5432"
+            - name: PGDATABASE
+              value: "ragdb"
+            - name: PGUSER
+              value: "postgres"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ${RAG_DATABASE_NAME}-secret
+                  key: password
+            # Document processing settings
+            - name: DOCUMENT_PATH
+              value: "${DOCUMENT_STORAGE_PATH}"
+            - name: RAG_DATABASE_NAME
+              value: "${RAG_DATABASE_NAME}"
+            - name: DOCUMENT_NAME
+              value: "${DOCUMENT_NAME}"
+            # Embedding service settings (if using separate service)
+            - name: EMBEDDING_SERVICE_URL
+              value: "http://embedding-service.vteam-system.svc:8080"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2"
+              memory: "2Gi"
+          volumeMounts:
+            - name: documents
+              mountPath: /workspace/ragdbs
+              readOnly: true
+      volumes:
+        - name: documents
+          persistentVolumeClaim:
+            claimName: rag-documents-pvc
