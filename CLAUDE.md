@@ -1,6 +1,6 @@
 # vteam-rfes Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2025-10-19
+Auto-generated from all feature plans. Last updated: 2025-10-20
 
 ## Active Technologies
 - RAG Component Integration (001-add-a-rag) - IN PROGRESS
@@ -18,27 +18,32 @@ The RAG implementation is being developed in the main vTeam repository:
 
 ## RAG Implementation Status
 
-### Completed Tasks (Phase 3.1: Setup & Infrastructure)
-- ✅ T001: RAGDatabase CRD created (`manifests/crds/ragdatabases-crd.yaml`)
-- ✅ T002: RAGDocument CRD created (`manifests/crds/ragdocuments-crd.yaml`)
-- ✅ T003: pgvector schema created (`manifests/schemas/pgvector-schema.sql`)
-- ✅ T004: pgvector StatefulSet template (`manifests/deployments/pgvector-statefulset.yaml`)
-- ✅ T005: docs2db Job template (`manifests/deployments/docs2db-job-template.yaml`)
-- ✅ T006-T008: Backend/Operator/Frontend stub files created
-- ✅ T027: Backend RAG types defined (`backend/types/rag.go`)
-- ✅ T028: K8s client wrappers stubbed (`backend/k8s/rag_client.go`)
-- ✅ T049: Frontend TypeScript types (`frontend/src/types/rag.ts`)
+### Completed Tasks
+#### Phase 3.1: Setup & Infrastructure ✅
+- T001-T008: All CRDs, schemas, templates, and stub files created
+- T027: Backend RAG types defined
+- T028: K8s client wrappers (partial)
+- T049: Frontend TypeScript types
 
-### Current Phase: 3.2 Contract Tests (TDD)
-Next tasks involve writing failing contract tests before implementation:
-- T011-T022: Backend API contract tests
-- T023-T024: Operator reconciler integration tests
-- T025-T026: Frontend component tests
+#### Phase 3.2: Contract Tests (TDD) ✅
+- T011-T022: All contract tests written for RAG APIs
+- Tests verify failing state before implementation
+
+#### Phase 3.3: Core Implementation ✅
+- T029-T034: RAG Database handlers (Create, List, Get, Delete, Status, Import)
+- T035-T038: RAG Document handlers (Upload, List, Get, Delete)
+- T039-T042: RAG Query handlers with vector search and SSE streaming
+- Embedding service client implemented
+- pgvector integration with pgx driver
+
+### Current Phase: 3.4 Operator Implementation
+Next tasks involve implementing Kubernetes operators:
+- T043-T045: RAGDatabase reconciler (provision pgvector, health checks, metrics)
+- T046-T048: RAGDocument reconciler (trigger docs2db jobs, track processing)
 
 ### Pending Implementation
-- Backend handlers (T029-T042) - Stub functions exist, need implementation
-- Operator reconcilers (T043-T048) - Stub files exist
-- Frontend hooks and pages (T050-T060) - Types defined, components pending
+- Operator reconcilers (T043-T048)
+- Frontend hooks and pages (T050-T060)
 - Runner integration (T061-T062)
 - Integration testing (T063-T069)
 
@@ -69,6 +74,27 @@ The RAG (Retrieval-Augmented Generation) feature enables vTeam agentic sessions 
 - **pgvector**: PostgreSQL with vector extensions for semantic search
 - **docs2db**: Document processing pipeline (ingestion → chunking → embedding)
 - **Query API**: Semantic search with source attribution
+
+## RAG API Endpoints
+```
+# Database Management
+POST   /api/projects/:projectName/rag-databases
+GET    /api/projects/:projectName/rag-databases
+GET    /api/projects/:projectName/rag-databases/:dbName
+DELETE /api/projects/:projectName/rag-databases/:dbName
+GET    /api/projects/:projectName/rag-databases/:dbName/status
+POST   /api/projects/:projectName/rag-databases/import-dump
+
+# Document Management
+POST   /api/projects/:projectName/rag-databases/:dbName/documents
+GET    /api/projects/:projectName/rag-databases/:dbName/documents
+GET    /api/projects/:projectName/rag-databases/:dbName/documents/:docName
+DELETE /api/projects/:projectName/rag-databases/:dbName/documents/:docName
+
+# Query Endpoints
+POST   /api/projects/:projectName/rag-databases/:dbName/query
+POST   /api/projects/:projectName/rag-databases/:dbName/query-stream
+```
 
 See `specs/001-add-a-rag/` for detailed specifications and `tasks.md` for implementation plan.
 <!-- MANUAL ADDITIONS END -->
