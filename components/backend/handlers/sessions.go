@@ -405,6 +405,54 @@ func CreateSession(c *gin.Context) {
 		}
 	}
 
+	// Handle RFE workflow branch management
+	{
+		rfeWorkflowID := ""
+		// Check if RFE workflow ID is in labels
+		if len(req.Labels) > 0 {
+			if id, ok := req.Labels["rfe-workflow"]; ok {
+				rfeWorkflowID = id
+			}
+		}
+
+		// If linked to an RFE workflow, fetch it and set the branch
+		if rfeWorkflowID != "" {
+			// Get request-scoped dynamic client for fetching RFE workflow
+			_, reqDyn := GetK8sClientsForRequest(c)
+			if reqDyn != nil {
+				rfeGvr := GetRFEWorkflowResource()
+				if rfeGvr != (schema.GroupVersionResource{}) {
+					rfeObj, err := reqDyn.Resource(rfeGvr).Namespace(project).Get(c.Request.Context(), rfeWorkflowID, v1.GetOptions{})
+					if err == nil {
+						rfeWf := RfeFromUnstructured(rfeObj)
+						if rfeWf != nil && rfeWf.BranchName != "" {
+							// Access spec from session object
+							spec := session["spec"].(map[string]interface{})
+
+							// Override branch for all repos to use feature branch
+							if repos, ok := spec["repos"].([]map[string]interface{}); ok {
+								for i := range repos {
+									// Always override input branch with feature branch
+									if input, ok := repos[i]["input"].(map[string]interface{}); ok {
+										input["branch"] = rfeWf.BranchName
+									}
+									// Always override output branch with feature branch
+									if output, ok := repos[i]["output"].(map[string]interface{}); ok {
+										output["branch"] = rfeWf.BranchName
+									}
+								}
+							}
+
+							log.Printf("Set RFE branch %s for session %s", rfeWf.BranchName, name)
+						}
+					} else {
+						log.Printf("Warning: Failed to fetch RFE workflow %s: %v", rfeWorkflowID, err)
+					}
+				}
+			}
+		}
+	}
+
 	// Add userContext derived from authenticated caller; ignore client-supplied userId
 	{
 		uidVal, _ := c.Get("userID")
