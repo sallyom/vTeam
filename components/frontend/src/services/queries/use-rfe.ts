@@ -238,6 +238,9 @@ export function useRfeWorkflowSeeding(projectName: string, workflowId: string) {
     queryKey: rfeKeys.seeding(projectName, workflowId),
     queryFn: () => rfeApi.checkRfeWorkflowSeeding(projectName, workflowId),
     enabled: !!projectName && !!workflowId,
+    // Retry with exponential backoff to handle GitHub API eventual consistency
+    retry: 3,
+    retryDelay: attemptIndex => Math.min(1000 * 2 ** attemptIndex, 10000),
   });
 }
 
@@ -255,9 +258,18 @@ export function useSeedRfeWorkflow() {
       projectName: string;
       workflowId: string;
     }) => rfeApi.seedRfeWorkflow(projectName, workflowId),
-    onSuccess: (_data, { projectName, workflowId }) => {
-      // Invalidate seeding status to refetch
-      queryClient.invalidateQueries({
+    onSuccess: async (_data, { projectName, workflowId }) => {
+      // Wait a bit for GitHub API eventual consistency before checking status
+      // GitHub needs time to index the newly pushed content
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Invalidate and refetch seeding status
+      await queryClient.invalidateQueries({
+        queryKey: rfeKeys.seeding(projectName, workflowId),
+      });
+
+      // Force an immediate refetch to get the updated status
+      await queryClient.refetchQueries({
         queryKey: rfeKeys.seeding(projectName, workflowId),
       });
     },
