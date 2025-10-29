@@ -20,10 +20,6 @@ rules:
 - apiGroups: [""]
   resources: ["serviceaccounts/token"]
   verbs: ["create"]
-# ConfigMaps for GitHub installation mapping
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "create", "update", "patch"]
 
 # TokenReviews for runner SA validation
 - apiGroups: ["authentication.k8s.io"]
@@ -35,11 +31,19 @@ rules:
   resources: ["roles", "rolebindings"]
   verbs: ["get", "list", "create", "update", "patch", "delete"]
 
+# ClusterRole binding permission - allows backend to grant ambient-project-admin to users
+# This is required to create RoleBindings that reference ClusterRoles
+- apiGroups: ["rbac.authorization.k8s.io"]
+  resources: ["clusterroles"]
+  resourceNames: ["ambient-project-admin", "ambient-project-edit", "ambient-project-view"]
+  verbs: ["bind"]
+
 # Secrets to store per-session BOT_TOKEN
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "list", "create", "update", "patch", "delete"]
-# ConfigMaps for GitHub installation mapping
+
+# ConfigMaps for GitHub installation mapping and project configuration
 - apiGroups: [""]
   resources: ["configmaps"]
   verbs: ["get", "create", "update", "patch"]
@@ -51,5 +55,16 @@ rules:
 - apiGroups: ["vteam.ambient-code"]
   resources: ["rfeworkflows/status"]
   verbs: ["get", "update", "patch"]
+
+# Namespaces - backend creates namespaces and manages labels for Ambient projects
+# Also handles deletion on vanilla Kubernetes after permission verification
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+
+# OpenShift Projects - backend needs to update Project resources with display metadata
+- apiGroups: ["project.openshift.io"]
+  resources: ["projects"]
+  verbs: ["get", "list", "watch", "update", "patch"]
 
 
