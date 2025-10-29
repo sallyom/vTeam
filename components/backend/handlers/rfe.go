@@ -89,7 +89,7 @@ func ListProjectRFEWorkflows(c *gin.Context) {
 	gvr := GetRFEWorkflowResource()
 	_, reqDyn := GetK8sClientsForRequest(c)
 	if reqDyn != nil {
-		if list, err := reqDyn.Resource(gvr).Namespace(project).List(context.TODO(), v1.ListOptions{LabelSelector: fmt.Sprintf("project=%s", project)}); err == nil {
+		if list, err := reqDyn.Resource(gvr).Namespace(project).List(c.Request.Context(), v1.ListOptions{LabelSelector: fmt.Sprintf("project=%s", project)}); err == nil {
 			for _, item := range list.Items {
 				wf := RfeFromUnstructured(&item)
 				if wf == nil {
@@ -188,6 +188,114 @@ func CreateProjectRFEWorkflow(c *gin.Context) {
 	c.JSON(http.StatusCreated, workflow)
 }
 
+// UpdateProjectRFEWorkflow updates an existing RFE workflow's repository configuration
+// This is primarily used to fix repository URLs before seeding
+func UpdateProjectRFEWorkflow(c *gin.Context) {
+	project := c.Param("projectName")
+	id := c.Param("id")
+
+	var req types.UpdateRFEWorkflowRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed: " + err.Error()})
+		return
+	}
+
+	// Get the workflow
+	gvr := GetRFEWorkflowResource()
+	_, reqDyn := GetK8sClientsForRequest(c)
+	if reqDyn == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), id, v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		} else if errors.IsForbidden(err) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to access this workflow"})
+		} else {
+			log.Printf("Failed to get workflow %s: %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve workflow"})
+		}
+		return
+	}
+
+	wf := RfeFromUnstructured(item)
+	if wf == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid workflow"})
+		return
+	}
+
+	// Validate no duplicate repository URLs if repositories are being updated
+	if req.UmbrellaRepo != nil || req.SupportingRepos != nil {
+		umbrellaRepo := req.UmbrellaRepo
+		if umbrellaRepo == nil {
+			umbrellaRepo = wf.UmbrellaRepo
+		}
+		supportingRepos := req.SupportingRepos
+		if supportingRepos == nil {
+			supportingRepos = wf.SupportingRepos
+		}
+		if err := validateUniqueRepositories(umbrellaRepo, supportingRepos); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	// Update the CR
+	obj := item.DeepCopy()
+	spec, ok := obj.Object["spec"].(map[string]interface{})
+	if !ok {
+		spec = make(map[string]interface{})
+		obj.Object["spec"] = spec
+	}
+
+	// Update fields if provided
+	if req.Title != nil {
+		spec["title"] = *req.Title
+	}
+	if req.Description != nil {
+		spec["description"] = *req.Description
+	}
+	if req.UmbrellaRepo != nil {
+		spec["umbrellaRepo"] = map[string]interface{}{
+			"url":    req.UmbrellaRepo.URL,
+			"branch": req.UmbrellaRepo.Branch,
+		}
+	}
+	if req.SupportingRepos != nil {
+		repos := make([]interface{}, len(req.SupportingRepos))
+		for i, r := range req.SupportingRepos {
+			repos[i] = map[string]interface{}{
+				"url":    r.URL,
+				"branch": r.Branch,
+			}
+		}
+		spec["supportingRepos"] = repos
+	}
+	if req.ParentOutcome != nil {
+		spec["parentOutcome"] = *req.ParentOutcome
+	}
+
+	// Update the CR
+	updated, err := reqDyn.Resource(gvr).Namespace(project).Update(c.Request.Context(), obj, v1.UpdateOptions{})
+	if err != nil {
+		log.Printf("Failed to update RFEWorkflow CR: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update workflow"})
+		return
+	}
+
+	// Convert back to RFEWorkflow type
+	updatedWf := RfeFromUnstructured(updated)
+	if updatedWf == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse updated workflow"})
+		return
+	}
+
+	c.JSON(http.StatusOK, updatedWf)
+}
+
 // SeedProjectRFEWorkflow seeds the umbrella repo with spec-kit and agents via direct git operations
 func SeedProjectRFEWorkflow(c *gin.Context) {
 	project := c.Param("projectName")
@@ -201,14 +309,21 @@ func SeedProjectRFEWorkflow(c *gin.Context) {
 		return
 	}
 
-	item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), id, v1.GetOptions{})
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), id, v1.GetOptions{})
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		} else if errors.IsForbidden(err) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to access this workflow"})
+		} else {
+			log.Printf("Failed to get workflow %s: %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve workflow"})
+		}
 		return
 	}
 	wf := RfeFromUnstructured(item)
 	if wf == nil || wf.UmbrellaRepo == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No umbrella repo configured"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No spec repo configured"})
 		return
 	}
 
@@ -287,6 +402,7 @@ func SeedProjectRFEWorkflow(c *gin.Context) {
 	branchExisted, seedErr := PerformRepoSeeding(c.Request.Context(), wf, wf.BranchName, githubToken, agentURL, agentBranch, agentPath, specKitRepo, specKitVersion, specKitTemplate)
 
 	if seedErr != nil {
+		log.Printf("Failed to seed RFE workflow %s in project %s: %v", id, project, seedErr)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": seedErr.Error()})
 		return
 	}
@@ -317,14 +433,21 @@ func CheckProjectRFEWorkflowSeeding(c *gin.Context) {
 		return
 	}
 
-	item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), id, v1.GetOptions{})
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), id, v1.GetOptions{})
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		} else if errors.IsForbidden(err) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to access this workflow"})
+		} else {
+			log.Printf("Failed to get workflow %s: %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve workflow"})
+		}
 		return
 	}
 	wf := RfeFromUnstructured(item)
 	if wf == nil || wf.UmbrellaRepo == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No umbrella repo configured"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No spec repo configured"})
 		return
 	}
 
@@ -385,7 +508,7 @@ func CheckProjectRFEWorkflowSeeding(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"isSeeded": isFullySeeded,
-		"umbrellaRepo": gin.H{
+		"specRepo": gin.H{
 			"isSeeded": umbrellaSeeded,
 			"details":  umbrellaDetails,
 		},
@@ -403,7 +526,7 @@ func GetProjectRFEWorkflow(c *gin.Context) {
 	var wf *RFEWorkflow
 	var err error
 	if reqDyn != nil {
-		if item, gerr := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), id, v1.GetOptions{}); gerr == nil {
+		if item, gerr := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), id, v1.GetOptions{}); gerr == nil {
 			wf = RfeFromUnstructured(item)
 			err = nil
 		} else {
@@ -513,7 +636,7 @@ func GetProjectRFEWorkflowSummary(c *gin.Context) {
 	anyFailed := false
 	if reqDyn != nil {
 		selector := fmt.Sprintf("rfe-workflow=%s,project=%s", id, project)
-		if list, err := reqDyn.Resource(gvr).Namespace(project).List(context.TODO(), v1.ListOptions{LabelSelector: selector}); err == nil {
+		if list, err := reqDyn.Resource(gvr).Namespace(project).List(c.Request.Context(), v1.ListOptions{LabelSelector: selector}); err == nil {
 			for _, item := range list.Items {
 				status, _ := item.Object["status"].(map[string]interface{})
 				phaseStr := strings.ToLower(fmt.Sprintf("%v", status["phase"]))
@@ -587,7 +710,7 @@ func DeleteProjectRFEWorkflow(c *gin.Context) {
 	gvr := GetRFEWorkflowResource()
 	_, reqDyn := GetK8sClientsForRequest(c)
 	if reqDyn != nil {
-		_ = reqDyn.Resource(gvr).Namespace(c.Param("projectName")).Delete(context.TODO(), id, v1.DeleteOptions{})
+		_ = reqDyn.Resource(gvr).Namespace(c.Param("projectName")).Delete(c.Request.Context(), id, v1.DeleteOptions{})
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "Workflow deleted successfully"})
 }
@@ -603,7 +726,7 @@ func ListProjectRFEWorkflowSessions(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid user token"})
 		return
 	}
-	list, err := reqDyn.Resource(gvr).Namespace(project).List(context.TODO(), v1.ListOptions{LabelSelector: selector})
+	list, err := reqDyn.Resource(gvr).Namespace(project).List(c.Request.Context(), v1.ListOptions{LabelSelector: selector})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list sessions", "details": err.Error()})
 		return
@@ -636,7 +759,7 @@ func AddProjectRFEWorkflowSession(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid user token"})
 		return
 	}
-	obj, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), req.ExistingName, v1.GetOptions{})
+	obj, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), req.ExistingName, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
@@ -657,7 +780,7 @@ func AddProjectRFEWorkflowSession(c *gin.Context) {
 		labels["rfe-phase"] = req.Phase
 	}
 	// Update the resource
-	updated, err := reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), obj, v1.UpdateOptions{})
+	updated, err := reqDyn.Resource(gvr).Namespace(project).Update(c.Request.Context(), obj, v1.UpdateOptions{})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update session labels", "details": err.Error()})
 		return
@@ -678,7 +801,7 @@ func RemoveProjectRFEWorkflowSession(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing or invalid user token"})
 		return
 	}
-	obj, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
+	obj, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), sessionName, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
@@ -693,7 +816,7 @@ func RemoveProjectRFEWorkflowSession(c *gin.Context) {
 		delete(labels, "rfe-workflow")
 		delete(labels, "rfe-phase")
 	}
-	if _, err := reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), obj, v1.UpdateOptions{}); err != nil {
+	if _, err := reqDyn.Resource(gvr).Namespace(project).Update(c.Request.Context(), obj, v1.UpdateOptions{}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update session labels", "details": err.Error()})
 		return
 	}
@@ -714,14 +837,21 @@ func GetProjectRFEWorkflowAgents(c *gin.Context) {
 		return
 	}
 
-	item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), id, v1.GetOptions{})
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), id, v1.GetOptions{})
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
+		} else if errors.IsForbidden(err) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You don't have permission to access this workflow"})
+		} else {
+			log.Printf("Failed to get workflow %s: %v", id, err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve workflow"})
+		}
 		return
 	}
 	wf := RfeFromUnstructured(item)
 	if wf == nil || wf.UmbrellaRepo == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No umbrella repo configured"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No spec repo configured"})
 		return
 	}
 

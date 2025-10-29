@@ -1,20 +1,24 @@
 "use client";
 
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { FolderTree, AlertCircle, Loader2, Sprout, CheckCircle2, GitBranch } from "lucide-react";
+import { FolderTree, AlertCircle, Loader2, Sprout, CheckCircle2, GitBranch, Edit } from "lucide-react";
 import type { RFEWorkflow } from "@/types/agentic-session";
+import { EditRepositoriesDialog } from "./edit-repositories-dialog";
 
 type RfeWorkspaceCardProps = {
   workflow: RFEWorkflow;
   workflowWorkspace: string;
   isSeeded: boolean;
-  seedingStatus: { checking: boolean };
+  seedingStatus: { checking: boolean; hasChecked?: boolean };
   seedingError: string | null | undefined;
   seeding: boolean;
   onSeedWorkflow: () => Promise<void>;
+  onUpdateRepositories: (data: { umbrellaRepo: { url: string; branch?: string }; supportingRepos: { url: string; branch?: string }[] }) => Promise<void>;
+  updating: boolean;
 };
 
 export function RfeWorkspaceCard({
@@ -25,9 +29,24 @@ export function RfeWorkspaceCard({
   seedingError,
   seeding,
   onSeedWorkflow,
+  onUpdateRepositories,
+  updating,
 }: RfeWorkspaceCardProps) {
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+
   return (
-    <Card>
+    <>
+      <EditRepositoriesDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        workflow={workflow}
+        onSave={async (data) => {
+          await onUpdateRepositories(data);
+          setEditDialogOpen(false);
+        }}
+        isSaving={updating}
+      />
+      <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <FolderTree className="h-5 w-5" />
@@ -95,7 +114,7 @@ export function RfeWorkspaceCard({
           </div>
         )}
 
-        {!isSeeded && !seedingStatus.checking && workflow.umbrellaRepo && (
+        {!isSeeded && !seedingStatus.checking && seedingStatus.hasChecked && workflow.umbrellaRepo && (
           <Alert variant="destructive" className="mt-4">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Spec Repository Not Seeded</AlertTitle>
@@ -111,22 +130,33 @@ export function RfeWorkspaceCard({
               </ul>
               {seedingError && (
                 <div className="mb-3 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
-                  <strong>Check Error:</strong> {seedingError}
+                  <strong>Seeding Failed:</strong> {seedingError}
                 </div>
               )}
-              <Button onClick={onSeedWorkflow} disabled={seeding} size="sm">
-                {seeding ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Seeding Repository...
-                  </>
-                ) : (
-                  <>
-                    <Sprout className="mr-2 h-4 w-4" />
-                    Seed Repository
-                  </>
-                )}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => setEditDialogOpen(true)}
+                  disabled={updating}
+                  size="sm"
+                  variant="outline"
+                >
+                  <Edit className="mr-2 h-4 w-4" />
+                  Edit Repositories
+                </Button>
+                <Button onClick={onSeedWorkflow} disabled={seeding || updating} size="sm">
+                  {seeding ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Seeding Repository...
+                    </>
+                  ) : (
+                    <>
+                      <Sprout className="mr-2 h-4 w-4" />
+                      {seedingError ? "Retry Seeding" : "Seed Repository"}
+                    </>
+                  )}
+                </Button>
+              </div>
             </AlertDescription>
           </Alert>
         )}
@@ -139,12 +169,24 @@ export function RfeWorkspaceCard({
         )}
 
         {isSeeded && (
-          <div className="mt-4 flex items-center gap-2 text-green-700 bg-green-50 p-3 rounded-lg">
-            <CheckCircle2 className="h-5 w-5 text-green-600" />
-            <span className="text-sm font-medium">Repository seeded and ready</span>
+          <div className="mt-4 flex items-center justify-between text-green-700 bg-green-50 p-3 rounded-lg">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <span className="text-sm font-medium">Repository seeded and ready</span>
+            </div>
+            <Button
+              onClick={() => setEditDialogOpen(true)}
+              disabled={updating}
+              size="sm"
+              variant="outline"
+            >
+              <Edit className="mr-2 h-4 w-4" />
+              Edit Repositories
+            </Button>
           </div>
         )}
       </CardContent>
     </Card>
+    </>
   );
 }
