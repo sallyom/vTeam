@@ -10,9 +10,9 @@ import { env } from "@/lib/env";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Ambient Agentic Runner",
+  title: "Ambient Code Platform",
   description:
-    "Kubernetes application for running automated agentic sessions with Ambient AI",
+    "ACP is an AI-native agentic-powered enterprise software development platform",
 };
 
 export default function RootLayout({

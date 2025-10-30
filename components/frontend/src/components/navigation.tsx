@@ -25,7 +25,7 @@ export function Navigation() {
         <div className="flex h-16 items-center justify-between gap-4">
           <div className="flex items-center gap-6">
             <Link href="/" className="text-xl font-bold">
-              Ambient Agentic Runner
+              Ambient Code Platform
             </Link>
           </div>
           <div className="flex items-center gap-3">
