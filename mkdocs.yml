@@ -7,6 +7,10 @@ repo_name: red-hat-data-services/vTeam
 repo_url: https://github.com/red-hat-data-services/vTeam
 edit_uri: edit/main/docs/
 
+# Exclude files from the documentation build
+exclude_docs: |
+  README.md
+
 theme:
   name: material
   palette:

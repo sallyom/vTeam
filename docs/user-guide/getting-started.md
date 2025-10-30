@@ -177,7 +177,7 @@ Now that vTeam is running, you're ready to:
 
 If you encounter issues not covered here:
 
-- **Check the CLAUDE.md** → [Project Documentation](../../CLAUDE.md)
+- **Check CLAUDE.md** in the repository root for detailed development documentation
 - **Search existing issues** → [GitHub Issues](https://github.com/red-hat-data-services/vTeam/issues)
 - **Create a new issue** with your error details and environment info
 
