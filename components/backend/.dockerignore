@@ -1,0 +1,59 @@
+# Go test and coverage files
+*.test
+*.out
+*.prof
+*.cpu
+*.mem
+coverage.html
+coverage.out
+
+# Build artifacts
+backend
+main
+ambient-code-backend
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Development and debugging
+tmp/
+gin-bin
+gin.log
+debug.log
+.air.toml
+
+# Dependencies (rebuild in container)
+vendor/
+
+# Environment and secrets
+.env
+.env.local
+private-key.pem
+*.pem
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation and non-code files
+*.md
+LICENSE
+Makefile
+
+# Logs
+*.log
+
+# macOS
+.DS_Store
+
+# Go workspace
+go.work
+go.work.sum

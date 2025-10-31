@@ -1,0 +1,129 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: bugfixworkflows.vteam.ambient-code
+spec:
+  group: vteam.ambient-code
+  names:
+    kind: BugFixWorkflow
+    listKind: BugFixWorkflowList
+    plural: bugfixworkflows
+    singular: bugfixworkflow
+    shortNames:
+    - bugfix
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+            required: [githubIssueNumber, githubIssueURL, title, description, umbrellaRepo, branchName]
+            properties:
+              githubIssueNumber:
+                type: integer
+                description: "GitHub Issue number (e.g., 1234)"
+              githubIssueURL:
+                type: string
+                description: "Full GitHub Issue URL"
+              title:
+                type: string
+                minLength: 5
+                maxLength: 200
+                description: "Bug title"
+              description:
+                type: string
+                minLength: 20
+                maxLength: 5000
+                description: "Bug description"
+              umbrellaRepo:
+                type: object
+                description: "Spec repository for documentation"
+                required: [url]
+                properties:
+                  url:
+                    type: string
+                    description: "GitHub repository URL"
+                  branch:
+                    type: string
+                    default: "main"
+                    description: "Base branch"
+              supportingRepos:
+                type: array
+                description: "Repositories where fix is implemented"
+                items:
+                  type: object
+                  required: [url]
+                  properties:
+                    url:
+                      type: string
+                      description: "GitHub repository URL"
+                    branch:
+                      type: string
+                      default: "main"
+                      description: "Base branch"
+              branchName:
+                type: string
+                description: "Feature branch name (format: bugfix/gh-{issue-number})"
+              jiraTaskKey:
+                type: string
+                description: "Jira Task key (e.g., PROJ-5678), populated after first sync"
+              lastSyncedAt:
+                type: string
+                format: date-time
+                description: "Last Jira sync timestamp (RFC3339 format)"
+              workspacePath:
+                type: string
+                description: "Filesystem path used by sessions"
+              createdBy:
+                type: string
+                description: "User ID who created the workspace"
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+                enum:
+                - "Initializing"
+                - "Ready"
+                default: "Initializing"
+                description: "Workspace lifecycle phase"
+              message:
+                type: string
+                description: "Human-readable status message"
+              bugFolderCreated:
+                type: boolean
+                default: false
+                description: "True if bug-{issue-number}/ exists in spec repo"
+              bugfixMarkdownCreated:
+                type: boolean
+                default: false
+                description: "True if bugfix-gh-{issue-number}.md exists"
+    subresources:
+      status: {}
+    additionalPrinterColumns:
+    - name: Issue
+      type: integer
+      description: GitHub Issue number
+      jsonPath: .spec.githubIssueNumber
+    - name: Phase
+      type: string
+      description: Current phase of the BugFix workflow
+      jsonPath: .status.phase
+    - name: Jira
+      type: string
+      description: Linked Jira Task key
+      jsonPath: .spec.jiraTaskKey
+    - name: Age
+      type: date
+      jsonPath: .metadata.creationTimestamp
