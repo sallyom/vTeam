@@ -12,6 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { Breadcrumbs } from '@/components/breadcrumbs';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+import SessionSelector from '@/components/workspaces/bugfix/SessionSelector';
+import JiraSyncButton from '@/components/workspaces/bugfix/JiraSyncButton';
 import {
   Table,
   TableBody,
@@ -198,7 +200,22 @@ export default function BugFixWorkspaceDetailPage() {
                     <div className="text-sm font-medium text-muted-foreground">Jira Task</div>
                     <div className="mt-1">
                       {workflow.jiraTaskKey ? (
-                        <span className="text-sm font-mono text-primary">{workflow.jiraTaskKey}</span>
+                        <div className="flex items-center gap-2">
+                          <a
+                            href={workflow.jiraTaskURL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm font-mono text-primary hover:underline flex items-center gap-1"
+                          >
+                            {workflow.jiraTaskKey}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                          {workflow.lastJiraSyncedAt && (
+                            <span className="text-xs text-muted-foreground">
+                              (synced {formatDistanceToNow(new Date(workflow.lastJiraSyncedAt), { addSuffix: true })})
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-sm text-muted-foreground">Not synced</span>
                       )}
@@ -328,13 +345,32 @@ export default function BugFixWorkspaceDetailPage() {
                 <p className="text-sm text-muted-foreground mb-3">
                   Start a new agentic session for this bug fix
                 </p>
-                <Button disabled>
-                  <Play className="mr-2 h-4 w-4" />
-                  Create Session
-                </Button>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Session creation coming in next phase
+                <SessionSelector
+                  projectName={projectName}
+                  workflowId={workflowId}
+                  githubIssueNumber={workflow.githubIssueNumber}
+                  disabled={workflow.phase !== 'Ready'}
+                />
+                {workflow.phase !== 'Ready' && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Workspace must be in "Ready" state to create sessions
+                  </p>
+                )}
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-medium mb-2">Jira Synchronization</h3>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Sync this bug to Jira for project management visibility
                 </p>
+                <JiraSyncButton
+                  projectName={projectName}
+                  workflowId={workflowId}
+                  jiraTaskKey={workflow.jiraTaskKey}
+                  jiraTaskURL={workflow.jiraTaskURL}
+                  lastSyncedAt={workflow.lastJiraSyncedAt}
+                  githubIssueNumber={workflow.githubIssueNumber}
+                />
               </div>
 
               <div className="border-t pt-4">
