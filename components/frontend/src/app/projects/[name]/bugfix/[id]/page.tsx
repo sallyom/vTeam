@@ -1,0 +1,375 @@
+'use client';
+
+import React from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { ArrowLeft, Bug, ExternalLink, GitBranch, Clock, Play, Trash2, CheckCircle2 } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
+
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Breadcrumbs } from '@/components/breadcrumbs';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+
+import { bugfixApi } from '@/services/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { successToast, errorToast } from '@/hooks/use-toast';
+import { useBugFixWebSocket } from '@/hooks';
+
+export default function BugFixWorkspaceDetailPage() {
+  const params = useParams();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const projectName = params?.name as string;
+  const workflowId = params?.id as string;
+
+  const { data: workflow, isLoading: workflowLoading } = useQuery({
+    queryKey: ['bugfix-workflow', projectName, workflowId],
+    queryFn: () => bugfixApi.getBugFixWorkflow(projectName, workflowId),
+    enabled: !!projectName && !!workflowId,
+  });
+
+  const { data: sessions, isLoading: sessionsLoading } = useQuery({
+    queryKey: ['bugfix-sessions', projectName, workflowId],
+    queryFn: () => bugfixApi.listBugFixSessions(projectName, workflowId),
+    enabled: !!projectName && !!workflowId,
+  });
+
+  // WebSocket for real-time updates
+  useBugFixWebSocket({
+    projectName,
+    workflowId,
+    onSessionCompleted: () => {
+      successToast('Session completed successfully');
+    },
+    onJiraSyncCompleted: (event) => {
+      successToast(`Synced to Jira: ${event.payload.jiraTaskKey}`);
+    },
+    enabled: !!projectName && !!workflowId,
+  });
+
+  const handleDeleteWorkspace = async () => {
+    try {
+      await bugfixApi.deleteBugFixWorkflow(projectName, workflowId);
+      successToast('Workspace deleted successfully');
+      router.push(`/projects/${projectName}/bugfix`);
+    } catch (error) {
+      errorToast(error instanceof Error ? error.message : 'Failed to delete workspace');
+    }
+  };
+
+  const getPhaseColor = (phase: string) => {
+    switch (phase) {
+      case 'Ready':
+      case 'Completed':
+        return 'bg-green-500/10 text-green-500 border-green-500/20';
+      case 'Running':
+        return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
+      case 'Initializing':
+      case 'Pending':
+        return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
+      case 'Failed':
+        return 'bg-red-500/10 text-red-500 border-red-500/20';
+      default:
+        return 'bg-gray-500/10 text-gray-500 border-gray-500/20';
+    }
+  };
+
+  if (workflowLoading) {
+    return (
+      <div className="container mx-auto py-8">
+        <Skeleton className="h-8 w-3/4 mb-4" />
+        <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  if (!workflow) {
+    return (
+      <div className="container mx-auto py-8">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4">Workspace not found</h2>
+          <Link href={`/projects/${projectName}/bugfix`}>
+            <Button>Back to Workspaces</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="container mx-auto py-8">
+      <Breadcrumbs
+        items={[
+          { label: 'Projects', href: '/projects' },
+          { label: projectName, href: `/projects/${projectName}` },
+          { label: 'BugFix Workspaces', href: `/projects/${projectName}/bugfix` },
+          { label: `#${workflow.githubIssueNumber}`, href: `/projects/${projectName}/bugfix/${workflowId}` },
+        ]}
+      />
+
+      <div className="flex items-center gap-4 mb-6 mt-4">
+        <Link href={`/projects/${projectName}/bugfix`}>
+          <Button variant="ghost" size="sm">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back
+          </Button>
+        </Link>
+        <div className="flex-1">
+          <div className="flex items-center gap-3">
+            <Bug className="h-6 w-6" />
+            <h1 className="text-2xl font-bold">{workflow.title}</h1>
+          </div>
+          <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
+            <a
+              href={workflow.githubIssueURL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 hover:text-primary"
+            >
+              GitHub Issue #{workflow.githubIssueNumber}
+              <ExternalLink className="h-3 w-3" />
+            </a>
+            <div className="flex items-center gap-1">
+              <GitBranch className="h-3 w-3" />
+              <span className="font-mono text-xs">{workflow.branchName}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {workflow.createdAt && formatDistanceToNow(new Date(workflow.createdAt), { addSuffix: true })}
+            </div>
+          </div>
+        </div>
+        <Badge variant="outline" className={getPhaseColor(workflow.phase)}>
+          {workflow.phase}
+        </Badge>
+      </div>
+
+      <Tabs defaultValue="overview" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="sessions">Sessions ({sessions?.length || 0})</TabsTrigger>
+          <TabsTrigger value="actions">Actions</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview">
+          <div className="grid gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Workspace Status</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-sm font-medium text-muted-foreground">Bug Folder</div>
+                    <div className="flex items-center gap-2 mt-1">
+                      {workflow.bugFolderCreated ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-green-500" />
+                          <span className="text-sm">Created</span>
+                        </>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Not created</span>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-muted-foreground">Jira Task</div>
+                    <div className="mt-1">
+                      {workflow.jiraTaskKey ? (
+                        <span className="text-sm font-mono text-primary">{workflow.jiraTaskKey}</span>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Not synced</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                {workflow.description && (
+                  <div>
+                    <div className="text-sm font-medium text-muted-foreground mb-2">Description</div>
+                    <div className="text-sm whitespace-pre-wrap bg-muted p-4 rounded-md max-h-96 overflow-y-auto">
+                      {workflow.description}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Repositories</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {workflow.umbrellaRepo && (
+                    <div>
+                      <div className="text-sm font-medium mb-1">Spec Repository</div>
+                      <a
+                        href={workflow.umbrellaRepo.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-primary hover:underline flex items-center gap-1"
+                      >
+                        {workflow.umbrellaRepo.url}
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  )}
+                  {workflow.supportingRepos && workflow.supportingRepos.length > 0 && (
+                    <div>
+                      <div className="text-sm font-medium mb-1">Implementation Repositories</div>
+                      <div className="space-y-1">
+                        {workflow.supportingRepos.map((repo, idx) => (
+                          <a
+                            key={idx}
+                            href={repo.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-sm text-primary hover:underline flex items-center gap-1"
+                          >
+                            {repo.url}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="sessions">
+          <Card>
+            <CardHeader>
+              <CardTitle>Sessions</CardTitle>
+              <CardDescription>
+                Agentic sessions for this bug fix workspace
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {sessionsLoading && <Skeleton className="h-32 w-full" />}
+              {!sessionsLoading && sessions && sessions.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground">
+                  No sessions created yet
+                </div>
+              )}
+              {!sessionsLoading && sessions && sessions.length > 0 && (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Title</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Created</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sessions.map((session) => (
+                      <TableRow
+                        key={session.id}
+                        className="cursor-pointer hover:bg-muted/50"
+                        onClick={() => router.push(`/projects/${projectName}/sessions/${session.id}`)}
+                      >
+                        <TableCell className="font-medium">{session.title}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{session.sessionType}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={getPhaseColor(session.phase)}>
+                            {session.phase}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {formatDistanceToNow(new Date(session.createdAt), { addSuffix: true })}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="actions">
+          <Card>
+            <CardHeader>
+              <CardTitle>Workspace Actions</CardTitle>
+              <CardDescription>
+                Manage this bug fix workspace
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <h3 className="text-sm font-medium mb-2">Create Session</h3>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Start a new agentic session for this bug fix
+                </p>
+                <Button disabled>
+                  <Play className="mr-2 h-4 w-4" />
+                  Create Session
+                </Button>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Session creation coming in next phase
+                </p>
+              </div>
+
+              <div className="border-t pt-4">
+                <h3 className="text-sm font-medium mb-2 text-destructive">Danger Zone</h3>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Delete this workspace (does not delete GitHub Issue or branch)
+                </p>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive">
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Delete Workspace
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete Workspace?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will delete the BugFix workspace. The GitHub Issue and git branch will not be deleted.
+                        This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteWorkspace}>
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
