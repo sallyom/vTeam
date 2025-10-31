@@ -587,3 +587,197 @@ func (h *Handler) PublishWorkflowFileToJira(c *gin.Context) {
 		"url": fmt.Sprintf("%s/browse/%s", jiraBase, outKey),
 	})
 }
+
+// ============================================================================
+// BugFix Workspace - Jira Integration Functions
+// ============================================================================
+
+// CreateJiraTaskFromGitHubIssue creates a Jira Task from a GitHub Issue
+// Returns the created Jira Task key (e.g., "PROJ-1234") and URL
+func CreateJiraTaskFromGitHubIssue(ctx context.Context, githubIssueTitle, githubIssueBody, githubIssueURL, jiraURL, jiraProject, jiraAuthHeader string) (jiraKey, jiraURL string, err error) {
+	jiraBase := strings.TrimRight(jiraURL, "/")
+	jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue", jiraBase)
+
+	// Build description with GitHub Issue link at the top
+	description := fmt.Sprintf("**GitHub Issue:** %s\n\n---\n\n%s", githubIssueURL, githubIssueBody)
+
+	fields := map[string]interface{}{
+		"project":     map[string]string{"key": jiraProject},
+		"summary":     githubIssueTitle,
+		"description": description,
+		"issuetype":   map[string]string{"name": "Task"},
+	}
+
+	payload := map[string]interface{}{"fields": fields}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal Jira request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", jiraEndpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create Jira request: %v", err)
+	}
+
+	req.Header.Set("Authorization", jiraAuthHeader)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("Jira API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != 201 {
+		return "", "", fmt.Errorf("failed to create Jira Task (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", "", fmt.Errorf("failed to parse Jira response: %v", err)
+	}
+
+	key, ok := result["key"].(string)
+	if !ok {
+		return "", "", fmt.Errorf("Jira response missing 'key' field")
+	}
+
+	taskURL := fmt.Sprintf("%s/browse/%s", jiraBase, key)
+	return key, taskURL, nil
+}
+
+// UpdateJiraTask updates an existing Jira Task's description
+func UpdateJiraTask(ctx context.Context, jiraKey, newDescription, jiraURL, jiraAuthHeader string) error {
+	jiraBase := strings.TrimRight(jiraURL, "/")
+	jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue/%s", jiraBase, jiraKey)
+
+	fields := map[string]interface{}{
+		"description": newDescription,
+	}
+
+	payload := map[string]interface{}{"fields": fields}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Jira request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", jiraEndpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create Jira request: %v", err)
+	}
+
+	req.Header.Set("Authorization", jiraAuthHeader)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Jira API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 204 && resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to update Jira Task (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// AddJiraComment adds a comment to a Jira Task
+func AddJiraComment(ctx context.Context, jiraKey, commentBody, jiraURL, jiraAuthHeader string) error {
+	jiraBase := strings.TrimRight(jiraURL, "/")
+	jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue/%s/comment", jiraBase, jiraKey)
+
+	payload := map[string]interface{}{
+		"body": commentBody,
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Jira request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", jiraEndpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create Jira request: %v", err)
+	}
+
+	req.Header.Set("Authorization", jiraAuthHeader)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Jira API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to add Jira comment (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// AddJiraRemoteLink adds a remote link (bidirectional link to GitHub Issue)
+func AddJiraRemoteLink(ctx context.Context, jiraKey, githubIssueURL, githubIssueTitle, jiraURL, jiraAuthHeader string) error {
+	jiraBase := strings.TrimRight(jiraURL, "/")
+	jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue/%s/remotelink", jiraBase, jiraKey)
+
+	payload := map[string]interface{}{
+		"object": map[string]interface{}{
+			"url":   githubIssueURL,
+			"title": fmt.Sprintf("GitHub Issue: %s", githubIssueTitle),
+			"icon": map[string]string{
+				"url16x16": "https://github.com/favicon.ico",
+			},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Jira request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", jiraEndpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return fmt.Errorf("failed to create Jira request: %v", err)
+	}
+
+	req.Header.Set("Authorization", jiraAuthHeader)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("Jira API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 201 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to add Jira remote link (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// GetJiraAuthHeader determines the correct auth header format (Cloud vs Server)
+func GetJiraAuthHeader(jiraURL, jiraToken string) string {
+	if strings.Contains(jiraURL, "atlassian.net") {
+		// Jira Cloud - assume token is email:api_token format
+		encoded := base64.StdEncoding.EncodeToString([]byte(jiraToken))
+		return "Basic " + encoded
+	}
+	// Jira Server/Data Center
+	return "Bearer " + jiraToken
+}
