@@ -29,6 +29,15 @@ func GetRFEWorkflowResource() schema.GroupVersionResource {
 	}
 }
 
+// GetBugFixWorkflowResource returns the GroupVersionResource for BugFixWorkflow CRD
+func GetBugFixWorkflowResource() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    "vteam.ambient-code",
+		Version:  "v1alpha1",
+		Resource: "bugfixworkflows",
+	}
+}
+
 // GetOpenShiftProjectResource returns the GroupVersionResource for OpenShift Project
 func GetOpenShiftProjectResource() schema.GroupVersionResource {
 	return schema.GroupVersionResource{

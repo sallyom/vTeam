@@ -9,6 +9,7 @@ import (
 	"ambient-code-backend/git"
 	"ambient-code-backend/github"
 	"ambient-code-backend/handlers"
+	bugfixhandlers "ambient-code-backend/handlers/bugfix"
 	"ambient-code-backend/jira"
 	"ambient-code-backend/k8s"
 	"ambient-code-backend/server"
@@ -66,6 +67,7 @@ func main() {
 
 	// Initialize CRD package
 	crd.GetRFEWorkflowResource = k8s.GetRFEWorkflowResource
+	crd.GetBugFixWorkflowResource = k8s.GetBugFixWorkflowResource
 
 	// Initialize content handlers
 	handlers.StateBaseDir = server.StateBaseDir
@@ -96,6 +98,10 @@ func main() {
 	handlers.CheckRepoSeeding = checkRepoSeeding
 	handlers.CheckBranchExists = checkBranchExists
 	handlers.RfeFromUnstructured = jira.RFEFromUnstructured
+
+	// Initialize BugFix workflow handlers
+	bugfixhandlers.GetK8sClientsForRequest = handlers.GetK8sClientsForRequest
+	bugfixhandlers.GetAgenticSessionResource = k8s.GetAgenticSessionV1Alpha1Resource
 
 	// Initialize Jira handler
 	jiraHandler := &jira.Handler{

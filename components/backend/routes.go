@@ -2,6 +2,7 @@ package main
 
 import (
 	"ambient-code-backend/handlers"
+	bugfixhandlers "ambient-code-backend/handlers/bugfix"
 	"ambient-code-backend/jira"
 	"ambient-code-backend/websocket"
 
@@ -72,6 +73,15 @@ func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
 			projectGroup.GET("/rfe-workflows/:id/sessions", handlers.ListProjectRFEWorkflowSessions)
 			projectGroup.POST("/rfe-workflows/:id/sessions/link", handlers.AddProjectRFEWorkflowSession)
 			projectGroup.DELETE("/rfe-workflows/:id/sessions/:sessionName", handlers.RemoveProjectRFEWorkflowSession)
+
+			// BugFix Workspace routes
+			projectGroup.GET("/bugfix-workflows", bugfixhandlers.ListProjectBugFixWorkflows)
+			projectGroup.POST("/bugfix-workflows", bugfixhandlers.CreateProjectBugFixWorkflow)
+			projectGroup.GET("/bugfix-workflows/:id", bugfixhandlers.GetProjectBugFixWorkflow)
+			projectGroup.DELETE("/bugfix-workflows/:id", bugfixhandlers.DeleteProjectBugFixWorkflow)
+			projectGroup.GET("/bugfix-workflows/:id/status", bugfixhandlers.GetProjectBugFixWorkflowStatus)
+			projectGroup.POST("/bugfix-workflows/:id/sessions", bugfixhandlers.CreateProjectBugFixWorkflowSession)
+			projectGroup.GET("/bugfix-workflows/:id/sessions", bugfixhandlers.ListProjectBugFixWorkflowSessions)
 
 			projectGroup.GET("/permissions", handlers.ListProjectPermissions)
 			projectGroup.POST("/permissions", handlers.AddProjectPermission)
