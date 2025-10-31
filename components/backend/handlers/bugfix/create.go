@@ -88,6 +88,28 @@ func CreateProjectBugFixWorkflow(c *gin.Context) {
 	if req.TextDescription != nil {
 		td := req.TextDescription
 
+		// Validate text description fields
+		if strings.TrimSpace(td.Title) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Title is required"})
+			return
+		}
+		if len(strings.TrimSpace(td.Title)) < 10 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Title must be at least 10 characters"})
+			return
+		}
+		if strings.TrimSpace(td.Symptoms) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Symptoms are required"})
+			return
+		}
+		if len(strings.TrimSpace(td.Symptoms)) < 20 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Symptoms must be at least 20 characters"})
+			return
+		}
+		if strings.TrimSpace(td.TargetRepository) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Target repository is required"})
+			return
+		}
+
 		// Parse target repository
 		owner, repo, err := git.ParseGitHubURL(td.TargetRepository)
 		if err != nil {
