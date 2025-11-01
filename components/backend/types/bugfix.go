@@ -11,16 +11,19 @@ type BugFixWorkflow struct {
 	UmbrellaRepo            *GitRepository  `json:"umbrellaRepo,omitempty"`
 	SupportingRepos         []GitRepository `json:"supportingRepos,omitempty"`
 	JiraTaskKey             *string         `json:"jiraTaskKey,omitempty"`
+	JiraTaskURL             *string         `json:"jiraTaskURL,omitempty"`
 	LastSyncedAt            *string         `json:"lastSyncedAt,omitempty"` // RFC3339 format
 	WorkspacePath           string          `json:"workspacePath,omitempty"`
 	CreatedBy               string          `json:"createdBy,omitempty"`
 	CreatedAt               string          `json:"createdAt,omitempty"`
 	UpdatedAt               string          `json:"updatedAt,omitempty"`
 	Project                 string          `json:"project,omitempty"`
-	Phase                   string          `json:"phase,omitempty"` // Initializing, Ready
-	Message                 string          `json:"message,omitempty"`
-	BugFolderCreated        bool            `json:"bugFolderCreated,omitempty"`
-	BugfixMarkdownCreated   bool            `json:"bugfixMarkdownCreated,omitempty"`
+	Phase                   string            `json:"phase,omitempty"` // Initializing, Ready
+	Message                 string            `json:"message,omitempty"`
+	BugFolderCreated        bool              `json:"bugFolderCreated,omitempty"`
+	BugfixMarkdownCreated   bool              `json:"bugfixMarkdownCreated,omitempty"`
+	ImplementationCompleted bool              `json:"implementationCompleted,omitempty"`
+	Annotations             map[string]string `json:"annotations,omitempty"` // Optional metadata
 }
 
 // CreateBugFixWorkflowRequest represents the request to create a BugFix Workspace

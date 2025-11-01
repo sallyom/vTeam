@@ -2,7 +2,6 @@ package bugfix
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -153,7 +152,7 @@ func handleBugReviewCompletion(c *gin.Context, event AgenticSessionWebhookEvent,
 	workflow.Annotations["bug-review-comment-url"] = githubComment.URL
 
 	// Update the workflow CR
-	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, project, workflow)
+	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
 	if err != nil {
 		// Non-fatal: log but continue
 		log.Printf("Failed to update workflow with comment reference: %v", err)
@@ -252,16 +251,29 @@ func handleBugResolutionPlanCompletion(c *gin.Context, event AgenticSessionWebho
 
 	// Create/update bugfix.md file (T062/T063 already implemented)
 	ctx := context.Background()
+
+	// Get spec repo URL from umbrella repo
+	specRepoURL := ""
+	if workflow.UmbrellaRepo != nil {
+		specRepoURL = workflow.UmbrellaRepo.URL
+	}
+
+	// Get Jira task URL (dereference pointer)
+	jiraTaskURL := ""
+	if workflow.JiraTaskURL != nil {
+		jiraTaskURL = *workflow.JiraTaskURL
+	}
+
 	err = bugfix.CreateOrUpdateBugfixMarkdown(
 		ctx,
-		workflow.SpecRepoURL,
+		specRepoURL,
 		workflow.GithubIssueNumber,
 		workflow.BranchName,
 		githubToken,
 		userEmail,
 		userName,
 		workflow.GithubIssueURL,
-		workflow.JiraTaskURL,
+		jiraTaskURL,
 		"Resolution Plan",
 		resolutionPlan,
 	)
@@ -289,7 +301,7 @@ func handleBugResolutionPlanCompletion(c *gin.Context, event AgenticSessionWebho
 	workflow.Annotations["resolution-plan-comment-url"] = githubComment.URL
 
 	// Update the workflow CR
-	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, project, workflow)
+	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
 	if err != nil {
 		// Non-fatal: log but continue
 		log.Printf("Failed to update workflow with resolution plan status: %v", err)
@@ -397,16 +409,29 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 
 	// T072: Update bugfix.md file with implementation details
 	ctx := context.Background()
+
+	// Get spec repo URL from umbrella repo
+	specRepoURL := ""
+	if workflow.UmbrellaRepo != nil {
+		specRepoURL = workflow.UmbrellaRepo.URL
+	}
+
+	// Get Jira task URL (dereference pointer)
+	jiraTaskURL := ""
+	if workflow.JiraTaskURL != nil {
+		jiraTaskURL = *workflow.JiraTaskURL
+	}
+
 	err = bugfix.CreateOrUpdateBugfixMarkdown(
 		ctx,
-		workflow.SpecRepoURL,
+		specRepoURL,
 		workflow.GithubIssueNumber,
 		workflow.BranchName,
 		githubToken,
 		userEmail,
 		userName,
 		workflow.GithubIssueURL,
-		workflow.JiraTaskURL,
+		jiraTaskURL,
 		"Implementation Details",
 		implementationSummary,
 	)
@@ -434,7 +459,7 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 	workflow.Annotations["implementation-comment-url"] = githubComment.URL
 
 	// Update the workflow CR
-	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, project, workflow)
+	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
 	if err != nil {
 		// Non-fatal: log but continue
 		log.Printf("Failed to update workflow with implementation status: %v", err)
@@ -598,17 +623,29 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 			userName = "BugFix Bot"
 		}
 
+		// Get spec repo URL from umbrella repo
+		specRepoURL := ""
+		if workflow.UmbrellaRepo != nil {
+			specRepoURL = workflow.UmbrellaRepo.URL
+		}
+
+		// Get Jira task URL (dereference pointer)
+		jiraTaskURL := ""
+		if workflow.JiraTaskURL != nil {
+			jiraTaskURL = *workflow.JiraTaskURL
+		}
+
 		// Create/update bugfix.md file
 		err = bugfix.CreateOrUpdateBugfixMarkdown(
 			ctx,
-			workflow.SpecRepoURL,
+			specRepoURL,
 			workflow.GithubIssueNumber,
 			workflow.BranchName,
 			githubToken,
 			userEmail,
 			userName,
 			workflow.GithubIssueURL,
-			workflow.JiraTaskURL,
+			jiraTaskURL,
 			"Resolution Plan",
 			output,
 		)
@@ -626,7 +663,7 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 
 		// Update workflow CR
 		workflow.BugfixMarkdownCreated = true
-		err = crd.UpsertProjectBugFixWorkflowCR(client, project, workflow)
+		err = crd.UpsertProjectBugFixWorkflowCR(client, workflow)
 		if err != nil {
 			log.Printf("Failed to update workflow with bugfixMarkdownCreated: %v", err)
 		}
@@ -644,17 +681,29 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 			userName = "BugFix Bot"
 		}
 
+		// Get spec repo URL from umbrella repo
+		specRepoURL := ""
+		if workflow.UmbrellaRepo != nil {
+			specRepoURL = workflow.UmbrellaRepo.URL
+		}
+
+		// Get Jira task URL (dereference pointer)
+		jiraTaskURL := ""
+		if workflow.JiraTaskURL != nil {
+			jiraTaskURL = *workflow.JiraTaskURL
+		}
+
 		// Update bugfix.md file with implementation details
 		err = bugfix.CreateOrUpdateBugfixMarkdown(
 			ctx,
-			workflow.SpecRepoURL,
+			specRepoURL,
 			workflow.GithubIssueNumber,
 			workflow.BranchName,
 			githubToken,
 			userEmail,
 			userName,
 			workflow.GithubIssueURL,
-			workflow.JiraTaskURL,
+			jiraTaskURL,
 			"Implementation Details",
 			output,
 		)
@@ -672,7 +721,7 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 
 		// Update workflow CR
 		workflow.ImplementationCompleted = true
-		err = crd.UpsertProjectBugFixWorkflowCR(client, project, workflow)
+		err = crd.UpsertProjectBugFixWorkflowCR(client, workflow)
 		if err != nil {
 			log.Printf("Failed to update workflow with implementationCompleted: %v", err)
 		}

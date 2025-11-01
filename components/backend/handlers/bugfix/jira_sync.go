@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -85,12 +84,12 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 	authHeader := jira.GetJiraAuthHeader(jiraURL, jiraToken)
 
 	// T051: Determine if this is create or update
-	isUpdate := workflow.JiraTaskKey != ""
+	isUpdate := workflow.JiraTaskKey != nil && *workflow.JiraTaskKey != ""
 	var jiraTaskKey, jiraTaskURL string
 
 	if isUpdate {
 		// Update existing Jira task
-		jiraTaskKey = workflow.JiraTaskKey
+		jiraTaskKey = *workflow.JiraTaskKey
 
 		// T052 (Update path): Update existing Jira task description
 		newDescription := buildJiraDescription(workflow)
@@ -229,12 +228,13 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 		}
 	}
 
-	// T055: Update BugFixWorkflow CR with jiraTaskKey and lastSyncedAt
-	workflow.JiraTaskKey = jiraTaskKey
-	workflow.JiraTaskURL = jiraTaskURL
-	workflow.LastJiraSyncedAt = time.Now().UTC()
+	// T055: Update BugFixWorkflow CR with jiraTaskKey, jiraTaskURL, and lastSyncedAt
+	workflow.JiraTaskKey = &jiraTaskKey
+	workflow.JiraTaskURL = &jiraTaskURL
+	syncedAt := time.Now().UTC().Format(time.RFC3339)
+	workflow.LastSyncedAt = &syncedAt
 
-	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, project, workflow)
+	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
 	if err != nil {
 		// Try to continue even if CR update fails
 		fmt.Printf("Warning: Failed to update workflow CR with Jira info: %v\n", err)
@@ -249,13 +249,13 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 		"jiraTaskKey": jiraTaskKey,
 		"jiraTaskURL": jiraTaskURL,
 		"created":     !isUpdate,
-		"syncedAt":    workflow.LastJiraSyncedAt.Format(time.RFC3339),
+		"syncedAt":    syncedAt,
 		"message":     getSuccessMessage(!isUpdate, jiraTaskKey),
 	})
 }
 
 // buildJiraDescription builds the Jira issue description from the workflow
-func buildJiraDescription(workflow *types.BugFixWorkflowCR) string {
+func buildJiraDescription(workflow *types.BugFixWorkflow) string {
 	var desc strings.Builder
 
 	desc.WriteString("This issue is synchronized from GitHub Issue:\n")
@@ -271,7 +271,7 @@ func buildJiraDescription(workflow *types.BugFixWorkflowCR) string {
 	desc.WriteString("## Details\n")
 	desc.WriteString(fmt.Sprintf("- GitHub Issue: #%d\n", workflow.GithubIssueNumber))
 	desc.WriteString(fmt.Sprintf("- Branch: %s\n", workflow.BranchName))
-	desc.WriteString(fmt.Sprintf("- Created: %s\n", workflow.CreatedAt.Format(time.RFC3339)))
+	desc.WriteString(fmt.Sprintf("- Created: %s\n", workflow.CreatedAt))
 
 	if workflow.BugFolderCreated {
 		desc.WriteString(fmt.Sprintf("- Bug Folder: bug-%d/\n", workflow.GithubIssueNumber))
@@ -304,7 +304,7 @@ func formatBugfixMarkdownComment(content, workflowID string) string {
 }
 
 // getBugfixMarkdownContent retrieves the content of bugfix.md if it exists
-func getBugfixMarkdownContent(workflow *types.BugFixWorkflowCR, project, workflowID string) string {
+func getBugfixMarkdownContent(workflow *types.BugFixWorkflow, project, workflowID string) string {
 	// This is a placeholder - in a real implementation, this would:
 	// 1. Clone or access the spec repository
 	// 2. Read the bugfix-gh-{issue-number}.md file from the bug-{issue-number}/ folder

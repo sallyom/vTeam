@@ -101,6 +101,7 @@ func main() {
 
 	// Initialize BugFix workflow handlers
 	bugfixhandlers.GetK8sClientsForRequest = handlers.GetK8sClientsForRequest
+	bugfixhandlers.GetProjectSettingsResource = k8s.GetProjectSettingsResource
 	bugfixhandlers.GetAgenticSessionResource = k8s.GetAgenticSessionV1Alpha1Resource
 
 	// Initialize Jira handler

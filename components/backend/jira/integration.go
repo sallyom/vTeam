@@ -594,7 +594,7 @@ func (h *Handler) PublishWorkflowFileToJira(c *gin.Context) {
 
 // CreateJiraTaskFromGitHubIssue creates a Jira Task from a GitHub Issue
 // Returns the created Jira Task key (e.g., "PROJ-1234") and URL
-func CreateJiraTaskFromGitHubIssue(ctx context.Context, githubIssueTitle, githubIssueBody, githubIssueURL, jiraURL, jiraProject, jiraAuthHeader string) (jiraKey, jiraURL string, err error) {
+func CreateJiraTaskFromGitHubIssue(ctx context.Context, githubIssueTitle, githubIssueBody, githubIssueURL, jiraURL, jiraProject, jiraAuthHeader string) (jiraKey, jiraTaskURL string, err error) {
 	jiraBase := strings.TrimRight(jiraURL, "/")
 	jiraEndpoint := fmt.Sprintf("%s/rest/api/2/issue", jiraBase)
 

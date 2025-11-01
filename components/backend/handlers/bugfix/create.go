@@ -1,7 +1,6 @@
 package bugfix
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -14,13 +13,15 @@ import (
 	"ambient-code-backend/types"
 
 	"github.com/gin-gonic/gin"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 )
 
 // Package-level dependencies (set from main)
 var (
-	GetK8sClientsForRequest func(*gin.Context) (*kubernetes.Clientset, dynamic.Interface)
+	GetK8sClientsForRequest   func(*gin.Context) (*kubernetes.Clientset, dynamic.Interface)
+	GetProjectSettingsResource func() schema.GroupVersionResource
 )
 
 // CreateProjectBugFixWorkflow handles POST /api/projects/:projectName/bugfix-workflows
@@ -184,12 +185,9 @@ func CreateProjectBugFixWorkflow(c *gin.Context) {
 		return
 	}
 
-	// Generate workspace ID
-	workspaceID := fmt.Sprintf("bugfix-%d", time.Now().Unix())
-
 	// Create BugFixWorkflow object
 	workflow := &types.BugFixWorkflow{
-		ID:                githubIssue.Number,
+		ID:                fmt.Sprintf("%d", githubIssue.Number),
 		GithubIssueNumber: githubIssue.Number,
 		GithubIssueURL:    githubIssueURL,
 		Title:             githubIssue.Title,
