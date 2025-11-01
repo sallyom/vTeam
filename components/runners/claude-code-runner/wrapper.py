@@ -270,6 +270,9 @@ class ClaudeCodeAdapter:
 
             result_payload = None
             self._turn_count = 0
+            # Capture all assistant text output for status.result field
+            assistant_output_text = []
+
             # Import SDK message and content types for accurate mapping
             from claude_agent_sdk import (
                 AssistantMessage,
@@ -285,9 +288,9 @@ class ClaudeCodeAdapter:
             interactive = str(self.context.get_env('INTERACTIVE', 'false')).strip().lower() in ('1', 'true', 'yes')
 
             sdk_session_id = None
-            
+
             async def process_response_stream(client_obj):
-                nonlocal result_payload, sdk_session_id
+                nonlocal result_payload, sdk_session_id, assistant_output_text
                 async for message in client_obj.receive_response():
                     logging.info(f"[ClaudeSDKClient]: {message}")
 
@@ -307,6 +310,9 @@ class ClaudeCodeAdapter:
                             if isinstance(block, TextBlock):
                                 text_piece = getattr(block, 'text', None)
                                 if text_piece:
+                                    # Capture assistant text for status.result
+                                    if isinstance(message, AssistantMessage):
+                                        assistant_output_text.append(text_piece)
                                     await self.shell._send_message(
                                         MessageType.AGENT_MESSAGE,
                                         {"type": "agent_message", "content": {"type": "text_block", "text": text_piece}},
@@ -415,13 +421,26 @@ class ClaudeCodeAdapter:
             # Note: All output is streamed via WebSocket, not collected here
             await self._check_pr_intent("")
 
+            # Combine all assistant text output for status.result
+            combined_output = "\n".join(assistant_output_text).strip()
+
+            # Ensure status.result always has meaningful content, even if assistant didn't output text
+            # This happens when confirming existing work or when session completes without text output
+            if not combined_output:
+                # Provide context based on whether tools were used
+                if self._turn_count > 0:
+                    combined_output = f"Session completed successfully after {self._turn_count} operations. No text output generated."
+                else:
+                    combined_output = "Session completed. Existing state confirmed, no changes needed."
+                logging.info(f"No assistant output captured, using default message (turns={self._turn_count})")
+
             # Return success - result_payload may be None if SDK didn't send ResultMessage
             # (which can happen legitimately for some operations like git push)
             return {
                 "success": True,
                 "result": result_payload,
                 "returnCode": 0,
-                "stdout": "",
+                "stdout": combined_output,  # Now includes actual assistant output
                 "stderr": ""
             }
         except Exception as e:

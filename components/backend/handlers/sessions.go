@@ -581,7 +581,7 @@ func CreateSession(c *gin.Context) {
 	}()
 
 	// Preferred method: provision a per-session ServiceAccount token for the runner (backend SA)
-	if err := provisionRunnerTokenForSession(c, K8sClient, DynamicClient, project, name); err != nil {
+	if err := ProvisionRunnerTokenForSession(c, K8sClient, DynamicClient, project, name); err != nil {
 		// Non-fatal: log and continue. Operator may retry later if implemented.
 		log.Printf("Warning: failed to provision runner token for session %s/%s: %v", project, name, err)
 	}
@@ -595,7 +595,8 @@ func CreateSession(c *gin.Context) {
 
 // provisionRunnerTokenForSession creates a per-session ServiceAccount, grants minimal RBAC,
 // mints a short-lived token, stores it in a Secret, and annotates the AgenticSession with the Secret name.
-func provisionRunnerTokenForSession(c *gin.Context, reqK8s *kubernetes.Clientset, reqDyn dynamic.Interface, project string, sessionName string) error {
+// ProvisionRunnerTokenForSession creates a K8s token secret for the session's runner
+func ProvisionRunnerTokenForSession(c *gin.Context, reqK8s *kubernetes.Clientset, reqDyn dynamic.Interface, project string, sessionName string) error {
 	// Load owning AgenticSession to parent all resources
 	gvr := GetAgenticSessionV1Alpha1Resource()
 	obj, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), sessionName, v1.GetOptions{})
@@ -1362,7 +1363,7 @@ func StartSession(c *gin.Context) {
 
 		// Regenerate runner token for continuation (old token may have expired)
 		log.Printf("StartSession: Regenerating runner token for session continuation")
-		if err := provisionRunnerTokenForSession(c, reqK8s, reqDyn, project, sessionName); err != nil {
+		if err := ProvisionRunnerTokenForSession(c, reqK8s, reqDyn, project, sessionName); err != nil {
 			log.Printf("Warning: failed to regenerate runner token for session %s/%s: %v", project, sessionName, err)
 			// Non-fatal: continue anyway, operator may retry
 		} else {

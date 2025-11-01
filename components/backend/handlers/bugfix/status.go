@@ -37,8 +37,7 @@ func GetProjectBugFixWorkflowStatus(c *gin.Context) {
 		"id":                      workflow.ID,
 		"phase":                   workflow.Phase,
 		"message":                 workflow.Message,
-		"bugFolderCreated":        workflow.BugFolderCreated,
-		"bugfixMarkdownCreated":   workflow.BugfixMarkdownCreated,
+		"implementationCompleted": workflow.ImplementationCompleted,
 		"githubIssueNumber":       workflow.GithubIssueNumber,
 		"githubIssueURL":          workflow.GithubIssueURL,
 	}

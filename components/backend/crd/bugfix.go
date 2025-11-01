@@ -42,34 +42,18 @@ func BugFixWorkflowToCRObject(workflow *types.BugFixWorkflow) map[string]interfa
 		spec["createdBy"] = workflow.CreatedBy
 	}
 
-	// Umbrella repo
-	if workflow.UmbrellaRepo != nil {
-		u := map[string]interface{}{"url": workflow.UmbrellaRepo.URL}
-		if workflow.UmbrellaRepo.Branch != nil {
-			u["branch"] = *workflow.UmbrellaRepo.Branch
-		}
-		spec["umbrellaRepo"] = u
+	// Implementation repo (required)
+	implRepo := map[string]interface{}{"url": workflow.ImplementationRepo.URL}
+	if workflow.ImplementationRepo.Branch != nil {
+		implRepo["branch"] = *workflow.ImplementationRepo.Branch
 	}
-
-	// Supporting repos
-	if len(workflow.SupportingRepos) > 0 {
-		items := make([]map[string]interface{}, 0, len(workflow.SupportingRepos))
-		for _, r := range workflow.SupportingRepos {
-			rm := map[string]interface{}{"url": r.URL}
-			if r.Branch != nil {
-				rm["branch"] = *r.Branch
-			}
-			items = append(items, rm)
-		}
-		spec["supportingRepos"] = items
-	}
+	spec["implementationRepo"] = implRepo
 
 	// Build status
 	status := map[string]interface{}{
 		"phase":                   workflow.Phase,
 		"message":                 workflow.Message,
-		"bugFolderCreated":        workflow.BugFolderCreated,
-		"bugfixMarkdownCreated":   workflow.BugfixMarkdownCreated,
+		"implementationCompleted": workflow.ImplementationCompleted,
 	}
 
 	// Build labels
@@ -79,16 +63,24 @@ func BugFixWorkflowToCRObject(workflow *types.BugFixWorkflow) map[string]interfa
 		"bugfix-issue-number":  fmt.Sprintf("%d", workflow.GithubIssueNumber),
 	}
 
+	// Build metadata
+	metadata := map[string]interface{}{
+		"name":      workflow.ID,
+		"namespace": workflow.Project,
+		"labels":    labels,
+	}
+
+	// Add annotations if present
+	if len(workflow.Annotations) > 0 {
+		metadata["annotations"] = workflow.Annotations
+	}
+
 	return map[string]interface{}{
 		"apiVersion": "vteam.ambient-code/v1alpha1",
 		"kind":       "BugFixWorkflow",
-		"metadata": map[string]interface{}{
-			"name":      workflow.ID,
-			"namespace": workflow.Project,
-			"labels":    labels,
-		},
-		"spec":   spec,
-		"status": status,
+		"metadata":   metadata,
+		"spec":       spec,
+		"status":     status,
 	}
 }
 
@@ -146,34 +138,16 @@ func GetProjectBugFixWorkflowCR(dyn dynamic.Interface, project, id string) (*typ
 			workflow.LastSyncedAt = &val
 		}
 
-		// Parse umbrellaRepo
-		if umbrellaMap, ok := spec["umbrellaRepo"].(map[string]interface{}); ok {
-			repo := &types.GitRepository{}
-			if url, ok := umbrellaMap["url"].(string); ok {
+		// Parse implementationRepo
+		if implMap, ok := spec["implementationRepo"].(map[string]interface{}); ok {
+			repo := types.GitRepository{}
+			if url, ok := implMap["url"].(string); ok {
 				repo.URL = url
 			}
-			if branch, ok := umbrellaMap["branch"].(string); ok && branch != "" {
+			if branch, ok := implMap["branch"].(string); ok && branch != "" {
 				repo.Branch = &branch
 			}
-			workflow.UmbrellaRepo = repo
-		}
-
-		// Parse supportingRepos
-		if reposSlice, ok := spec["supportingRepos"].([]interface{}); ok {
-			repos := make([]types.GitRepository, 0, len(reposSlice))
-			for _, item := range reposSlice {
-				if repoMap, ok := item.(map[string]interface{}); ok {
-					repo := types.GitRepository{}
-					if url, ok := repoMap["url"].(string); ok {
-						repo.URL = url
-					}
-					if branch, ok := repoMap["branch"].(string); ok && branch != "" {
-						repo.Branch = &branch
-					}
-					repos = append(repos, repo)
-				}
-			}
-			workflow.SupportingRepos = repos
+			workflow.ImplementationRepo = repo
 		}
 	}
 
@@ -186,18 +160,24 @@ func GetProjectBugFixWorkflowCR(dyn dynamic.Interface, project, id string) (*typ
 		if val, ok := status["message"].(string); ok {
 			workflow.Message = val
 		}
-		if val, ok := status["bugFolderCreated"].(bool); ok {
-			workflow.BugFolderCreated = val
-		}
-		if val, ok := status["bugfixMarkdownCreated"].(bool); ok {
-			workflow.BugfixMarkdownCreated = val
+		if val, ok := status["implementationCompleted"].(bool); ok {
+			workflow.ImplementationCompleted = val
 		}
 	}
 
-	// Parse metadata timestamps
+	// Parse metadata timestamps and annotations
 	if metadata, found, _ := unstructured.NestedMap(obj.Object, "metadata"); found {
 		if creationTimestamp, ok := metadata["creationTimestamp"].(string); ok {
 			workflow.CreatedAt = creationTimestamp
+		}
+		// Parse annotations
+		if annotations, ok := metadata["annotations"].(map[string]interface{}); ok {
+			workflow.Annotations = make(map[string]string)
+			for k, v := range annotations {
+				if strVal, ok := v.(string); ok {
+					workflow.Annotations[k] = strVal
+				}
+			}
 		}
 	}
 
@@ -247,19 +227,46 @@ func UpsertProjectBugFixWorkflowCR(dyn dynamic.Interface, workflow *types.BugFix
 	}
 
 	gvr := GetBugFixWorkflowResource()
-	obj := &unstructured.Unstructured{Object: BugFixWorkflowToCRObject(workflow)}
 
-	// Try create, if exists then update
-	_, err := dyn.Resource(gvr).Namespace(workflow.Project).Create(context.TODO(), obj, v1.CreateOptions{})
+	// Try to get existing CR first to check if it exists and preserve metadata
+	existing, err := dyn.Resource(gvr).Namespace(workflow.Project).Get(context.TODO(), workflow.ID, v1.GetOptions{})
 	if err != nil {
-		if errors.IsAlreadyExists(err) {
-			_, uerr := dyn.Resource(gvr).Namespace(workflow.Project).Update(context.TODO(), obj, v1.UpdateOptions{})
-			if uerr != nil {
-				return fmt.Errorf("failed to update BugFixWorkflow CR: %v", uerr)
+		if errors.IsNotFound(err) {
+			// CR doesn't exist, create it
+			obj := &unstructured.Unstructured{Object: BugFixWorkflowToCRObject(workflow)}
+			_, err := dyn.Resource(gvr).Namespace(workflow.Project).Create(context.TODO(), obj, v1.CreateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to create BugFixWorkflow CR: %v", err)
 			}
 			return nil
 		}
-		return fmt.Errorf("failed to create BugFixWorkflow CR: %v", err)
+		return fmt.Errorf("failed to get BugFixWorkflow CR: %v", err)
+	}
+
+	// CR exists, update it while preserving critical metadata
+	obj := &unstructured.Unstructured{Object: BugFixWorkflowToCRObject(workflow)}
+
+	// Preserve metadata from existing CR (resourceVersion is required for updates)
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	obj.SetUID(existing.GetUID())
+	obj.SetCreationTimestamp(existing.GetCreationTimestamp())
+
+	// Preserve existing annotations and merge with new ones
+	existingAnnotations := existing.GetAnnotations()
+	if existingAnnotations == nil {
+		existingAnnotations = make(map[string]string)
+	}
+	// Merge workflow.Annotations into existing annotations
+	if workflow.Annotations != nil {
+		for k, v := range workflow.Annotations {
+			existingAnnotations[k] = v
+		}
+	}
+	obj.SetAnnotations(existingAnnotations)
+
+	_, err = dyn.Resource(gvr).Namespace(workflow.Project).Update(context.TODO(), obj, v1.UpdateOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to update BugFixWorkflow CR: %v", err)
 	}
 	return nil
 }
@@ -305,8 +312,7 @@ func UpdateBugFixWorkflowStatus(dyn dynamic.Interface, workflow *types.BugFixWor
 	status := map[string]interface{}{
 		"phase":                   workflow.Phase,
 		"message":                 workflow.Message,
-		"bugFolderCreated":        workflow.BugFolderCreated,
-		"bugfixMarkdownCreated":   workflow.BugfixMarkdownCreated,
+		"implementationCompleted": workflow.ImplementationCompleted,
 	}
 	obj.Object["status"] = status
 

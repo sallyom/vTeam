@@ -106,6 +106,9 @@ func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
 		// Cluster info endpoint (public, no auth required)
 		api.GET("/cluster-info", handlers.GetClusterInfo)
 
+		// Webhook endpoint for operator callbacks (system, no user auth required)
+		api.POST("/webhooks/agentic-sessions", bugfixhandlers.HandleAgenticSessionWebhook)
+
 		api.GET("/projects", handlers.ListProjects)
 		api.POST("/projects", handlers.CreateProject)
 		api.GET("/projects/:projectName", handlers.GetProject)

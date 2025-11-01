@@ -2,15 +2,13 @@ package bugfix
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 
-	"ambient-code-backend/bugfix"
 	"ambient-code-backend/crd"
+	"ambient-code-backend/git"
 	"ambient-code-backend/github"
 	"ambient-code-backend/websocket"
 
@@ -18,6 +16,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
 
 // AgenticSessionWebhookEvent represents the webhook payload from K8s
@@ -29,15 +28,20 @@ type AgenticSessionWebhookEvent struct {
 // HandleAgenticSessionWebhook processes webhook events for AgenticSession status changes
 // This handler watches for BugFix session completions and performs appropriate actions
 func HandleAgenticSessionWebhook(c *gin.Context) {
+	log.Printf("=== BugFix Webhook Called ===")
+
 	var event AgenticSessionWebhookEvent
 	if err := c.ShouldBindJSON(&event); err != nil {
-		log.Printf("Failed to parse webhook event: %v", err)
+		log.Printf("ERROR: Failed to parse webhook event: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid webhook payload"})
 		return
 	}
 
+	log.Printf("Webhook event type: %s, object: %s", event.Type, event.Object.GetName())
+
 	// Only process MODIFIED events (status changes)
 	if event.Type != "MODIFIED" {
+		log.Printf("Ignoring event type: %s", event.Type)
 		c.JSON(http.StatusOK, gin.H{"status": "ignored", "reason": "not a modification"})
 		return
 	}
@@ -48,9 +52,11 @@ func HandleAgenticSessionWebhook(c *gin.Context) {
 	sessionType := labels["bugfix-session-type"]
 	project := labels["project"]
 
-	// Process different session types
+	log.Printf("Processing bugfix session: workflow=%s, type=%s, project=%s, session=%s", workflowID, sessionType, project, event.Object.GetName())
+
+	// Process different session types (now only 2 types: bug-review and bug-implement-fix)
 	switch sessionType {
-	case "bug-review", "bug-resolution-plan", "bug-implement-fix":
+	case "bug-review", "bug-implement-fix":
 		// Continue processing
 	default:
 		c.JSON(http.StatusOK, gin.H{"status": "ignored", "reason": fmt.Sprintf("session type %s not handled", sessionType)})
@@ -71,8 +77,6 @@ func HandleAgenticSessionWebhook(c *gin.Context) {
 	switch sessionType {
 	case "bug-review":
 		handleBugReviewCompletion(c, event, workflowID, project)
-	case "bug-resolution-plan":
-		handleBugResolutionPlanCompletion(c, event, workflowID, project)
 	case "bug-implement-fix":
 		handleBugImplementFixCompletion(c, event, workflowID, project)
 	default:
@@ -82,81 +86,138 @@ func HandleAgenticSessionWebhook(c *gin.Context) {
 
 // handleBugReviewCompletion processes completed bug-review sessions
 func handleBugReviewCompletion(c *gin.Context, event AgenticSessionWebhookEvent, workflowID, project string) {
-	// Get session output/findings
-	status, _ := event.Object.Object["status"].(map[string]interface{})
-	findings, _ := status["output"].(string)
-	if findings == "" {
-		// Try alternative field names
-		findings, _ = status["findings"].(string)
-		if findings == "" {
-			findings, _ = status["result"].(string)
-		}
-	}
+	sessionName := event.Object.GetName()
+	log.Printf("handleBugReviewCompletion: session=%s, workflow=%s, project=%s", sessionName, workflowID, project)
 
-	if findings == "" {
-		log.Printf("Bug-review session %s completed but no findings available", event.Object.GetName())
-		c.JSON(http.StatusOK, gin.H{"status": "processed", "warning": "no findings to post"})
-		return
-	}
-
-	// Get K8s client (using service account in production)
+	// Get K8s clients (try user token first, fall back to service account)
 	_, reqDyn := GetK8sClientsForRequest(c)
 	if reqDyn == nil {
-		// In webhook context, use service account client
+		// In webhook context, use service account clients
+		log.Printf("No user token, using service account client")
 		reqDyn = GetServiceAccountDynamicClient()
 	}
 
+	if reqDyn == nil {
+		log.Printf("ERROR: No dynamic client available (service account client is nil)")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "K8s client not initialized"})
+		return
+	}
+
 	// Get the BugFix Workflow to fetch GitHub details
+	log.Printf("Fetching BugFixWorkflow CR: project=%s, id=%s", project, workflowID)
 	workflow, err := crd.GetProjectBugFixWorkflowCR(reqDyn, project, workflowID)
 	if err != nil || workflow == nil {
-		log.Printf("Failed to get BugFix Workflow %s: %v", workflowID, err)
+		log.Printf("ERROR: Failed to get BugFix Workflow %s in project %s: %v", workflowID, project, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get workflow"})
+		return
+	}
+	log.Printf("Successfully fetched BugFixWorkflow: %s", workflowID)
+
+	// Get session output from status.result field
+	status, _ := event.Object.Object["status"].(map[string]interface{})
+	findings, _ := status["result"].(string)
+	log.Printf("Session status.result length: %d bytes", len(findings))
+
+	if findings == "" {
+		// Session completed but didn't produce output (likely confirmed existing assessment)
+		log.Printf("Bug-review session %s completed with no new findings - existing assessment confirmed", sessionName)
+
+		// Update workflow status to mark assessment as complete
+		workflow.AssessmentStatus = "complete"
+		if err := crd.UpdateBugFixWorkflowStatus(reqDyn, workflow); err != nil {
+			log.Printf("Failed to update workflow assessment status: %v", err)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"status": "processed", "message": "existing assessment confirmed"})
 		return
 	}
 
 	// Parse GitHub Issue URL
+	log.Printf("Parsing GitHub Issue URL: %s", workflow.GithubIssueURL)
 	owner, repo, issueNumber, err := github.ParseGitHubIssueURL(workflow.GithubIssueURL)
 	if err != nil {
-		log.Printf("Failed to parse GitHub Issue URL %s: %v", workflow.GithubIssueURL, err)
+		log.Printf("ERROR: Failed to parse GitHub Issue URL %s: %v", workflow.GithubIssueURL, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid GitHub Issue URL"})
 		return
 	}
+	log.Printf("Parsed issue: owner=%s, repo=%s, issue=%d", owner, repo, issueNumber)
 
-	// Get GitHub token (from environment or secret)
-	githubToken := GetGitHubToken()
-	if githubToken == "" {
-		log.Printf("GitHub token not configured")
+	// Get GitHub token from K8s secret (webhook uses service account, no user context)
+	ctx := context.Background()
+	githubToken, err := git.GetGitHubToken(ctx, K8sClient, DynamicClient, project, "")
+	if err != nil || githubToken == "" {
+		log.Printf("ERROR: Failed to get GitHub token: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "GitHub token not configured"})
 		return
 	}
+	log.Printf("GitHub token obtained (length: %d)", len(githubToken))
 
 	// Format the comment
 	comment := formatBugReviewFindings(findings, event.Object.GetName())
+	log.Printf("Formatted comment (length: %d bytes)", len(comment))
 
 	// Post comment to GitHub Issue
-	ctx := context.Background()
+	log.Printf("Posting comment to GitHub Issue #%d", issueNumber)
 	githubComment, err := github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
 	if err != nil {
-		log.Printf("Failed to post comment to GitHub Issue: %v", err)
+		log.Printf("ERROR: Failed to post comment to GitHub Issue: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to post GitHub comment", "details": err.Error()})
 		return
+	}
+	log.Printf("Successfully posted comment to GitHub Issue (comment ID: %d)", githubComment.ID)
+
+	// Add 'claude' label to the issue to mark that Claude has assessed it
+	// This enables the pattern: future bug-review sessions will detect this and reuse the assessment
+	labels, err := github.GetIssueLabels(ctx, owner, repo, issueNumber, githubToken)
+	if err != nil {
+		log.Printf("Warning: failed to get issue labels: %v", err)
+	} else {
+		// Check if 'claude' label already exists
+		hasClaudeLabel := false
+		labelNames := make([]string, 0, len(labels)+1)
+		for _, label := range labels {
+			labelNames = append(labelNames, label.Name)
+			if strings.ToLower(label.Name) == "claude" {
+				hasClaudeLabel = true
+			}
+		}
+
+		// Add 'claude' label if it doesn't exist
+		if !hasClaudeLabel {
+			labelNames = append(labelNames, "claude")
+			updateReq := &github.UpdateIssueRequest{
+				Labels: labelNames, // Include all existing labels + new 'claude' label
+			}
+			_, err = github.UpdateIssue(ctx, owner, repo, issueNumber, githubToken, updateReq)
+			if err != nil {
+				log.Printf("Warning: failed to add 'claude' label to issue: %v", err)
+			} else {
+				log.Printf("Added 'claude' label to GitHub Issue #%d", issueNumber)
+			}
+		}
 	}
 
 	// Broadcast success event
 	websocket.BroadcastBugFixSessionCompleted(workflowID, event.Object.GetName(), "bug-review")
 
-	// Update workflow with comment reference (optional)
+	// Update workflow with comment reference and assessment status
 	if workflow.Annotations == nil {
 		workflow.Annotations = make(map[string]string)
 	}
 	workflow.Annotations["bug-review-comment-id"] = fmt.Sprintf("%d", githubComment.ID)
 	workflow.Annotations["bug-review-comment-url"] = githubComment.URL
+	workflow.AssessmentStatus = "complete"
 
 	// Update the workflow CR
-	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, project, workflow)
+	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
 	if err != nil {
 		// Non-fatal: log but continue
 		log.Printf("Failed to update workflow with comment reference: %v", err)
+	}
+
+	// Also update status subresource
+	if err := crd.UpdateBugFixWorkflowStatus(reqDyn, workflow); err != nil {
+		log.Printf("Failed to update workflow assessment status: %v", err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -167,11 +228,12 @@ func handleBugReviewCompletion(c *gin.Context, event AgenticSessionWebhookEvent,
 }
 
 // formatBugReviewFindings formats the session findings for GitHub comment
+// Now includes both bug analysis AND resolution plan (combined session)
 func formatBugReviewFindings(findings, sessionID string) string {
 	var comment strings.Builder
 
-	comment.WriteString("## 🔍 Bug Review Analysis\n\n")
-	comment.WriteString("*Automated analysis from BugFix Workspace session: " + sessionID + "*\n\n")
+	comment.WriteString("## 🔍 Bug Review & Assessment\n\n")
+	comment.WriteString("*Automated analysis and resolution plan from BugFix Workspace session: " + sessionID + "*\n\n")
 
 	// Check if findings already have markdown formatting
 	if strings.Contains(findings, "##") || strings.Contains(findings, "**") {
@@ -179,178 +241,26 @@ func formatBugReviewFindings(findings, sessionID string) string {
 		comment.WriteString(findings)
 	} else {
 		// Add basic formatting to plain text findings
-		comment.WriteString("### Technical Analysis\n\n")
+		comment.WriteString("### Analysis & Resolution Plan\n\n")
 		comment.WriteString(findings)
 	}
 
 	comment.WriteString("\n\n---\n")
-	comment.WriteString("*This analysis was generated automatically by the vTeam BugFix Workspace Bug-review session.*\n")
-
-	return comment.String()
-}
-
-// handleBugResolutionPlanCompletion processes completed bug-resolution-plan sessions
-// T064: Posts resolution plan to GitHub Issue
-// T065: Updates workflow CR with bugfixMarkdownCreated=true
-func handleBugResolutionPlanCompletion(c *gin.Context, event AgenticSessionWebhookEvent, workflowID, project string) {
-	// Get session output (resolution plan)
-	status, _ := event.Object.Object["status"].(map[string]interface{})
-	resolutionPlan, _ := status["output"].(string)
-	if resolutionPlan == "" {
-		// Try alternative field names
-		resolutionPlan, _ = status["result"].(string)
-		if resolutionPlan == "" {
-			resolutionPlan, _ = status["plan"].(string)
-		}
-	}
-
-	if resolutionPlan == "" {
-		log.Printf("Bug-resolution-plan session %s completed but no plan available", event.Object.GetName())
-		c.JSON(http.StatusOK, gin.H{"status": "processed", "warning": "no resolution plan to post"})
-		return
-	}
-
-	// Get K8s client
-	_, reqDyn := GetK8sClientsForRequest(c)
-	if reqDyn == nil {
-		reqDyn = GetServiceAccountDynamicClient()
-	}
-
-	// Get the BugFix Workflow
-	workflow, err := crd.GetProjectBugFixWorkflowCR(reqDyn, project, workflowID)
-	if err != nil || workflow == nil {
-		log.Printf("Failed to get BugFix Workflow %s: %v", workflowID, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get workflow"})
-		return
-	}
-
-	// Parse GitHub Issue URL
-	owner, repo, issueNumber, err := github.ParseGitHubIssueURL(workflow.GithubIssueURL)
-	if err != nil {
-		log.Printf("Failed to parse GitHub Issue URL %s: %v", workflow.GithubIssueURL, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid GitHub Issue URL"})
-		return
-	}
-
-	// Get GitHub token
-	githubToken := GetGitHubToken()
-	if githubToken == "" {
-		log.Printf("GitHub token not configured")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "GitHub token not configured"})
-		return
-	}
-
-	// Get user info for Git operations (from annotations or default)
-	userEmail := workflow.Annotations["user-email"]
-	if userEmail == "" {
-		userEmail = "bugfix-bot@vteam.io" // Default email
-	}
-	userName := workflow.Annotations["user-name"]
-	if userName == "" {
-		userName = "BugFix Bot" // Default name
-	}
-
-	// Create/update bugfix.md file (T062/T063 already implemented)
-	ctx := context.Background()
-	err = bugfix.CreateOrUpdateBugfixMarkdown(
-		ctx,
-		workflow.SpecRepoURL,
-		workflow.GithubIssueNumber,
-		workflow.BranchName,
-		githubToken,
-		userEmail,
-		userName,
-		workflow.GithubIssueURL,
-		workflow.JiraTaskURL,
-		"Resolution Plan",
-		resolutionPlan,
-	)
-	if err != nil {
-		log.Printf("Failed to create/update bugfix.md: %v", err)
-		// Continue anyway - we still want to post to GitHub
-	}
-
-	// T064: Format and post resolution plan comment to GitHub Issue
-	comment := formatResolutionPlanComment(resolutionPlan, event.Object.GetName(), workflow.BugFolderCreated)
-
-	githubComment, err := github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
-	if err != nil {
-		log.Printf("Failed to post resolution plan to GitHub Issue: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to post GitHub comment", "details": err.Error()})
-		return
-	}
-
-	// T065: Update workflow CR
-	workflow.BugfixMarkdownCreated = true
-	if workflow.Annotations == nil {
-		workflow.Annotations = make(map[string]string)
-	}
-	workflow.Annotations["resolution-plan-comment-id"] = fmt.Sprintf("%d", githubComment.ID)
-	workflow.Annotations["resolution-plan-comment-url"] = githubComment.URL
-
-	// Update the workflow CR
-	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, project, workflow)
-	if err != nil {
-		// Non-fatal: log but continue
-		log.Printf("Failed to update workflow with resolution plan status: %v", err)
-	}
-
-	// Broadcast success event
-	websocket.BroadcastBugFixSessionCompleted(workflowID, event.Object.GetName(), "bug-resolution-plan")
-
-	c.JSON(http.StatusOK, gin.H{
-		"status":               "processed",
-		"session":              event.Object.GetName(),
-		"commentURL":           githubComment.URL,
-		"bugfixMarkdownCreated": workflow.BugfixMarkdownCreated,
-	})
-}
-
-// formatResolutionPlanComment formats the resolution plan for GitHub comment
-func formatResolutionPlanComment(plan, sessionID string, bugFolderCreated bool) string {
-	var comment strings.Builder
-
-	comment.WriteString("## 📋 Bug Resolution Plan\n\n")
-	comment.WriteString("*Generated by BugFix Workspace session: " + sessionID + "*\n\n")
-
-	// Check if plan already has markdown formatting
-	if strings.Contains(plan, "##") || strings.Contains(plan, "**") {
-		// Plan already formatted, use as-is
-		comment.WriteString(plan)
-	} else {
-		// Add basic formatting to plain text plan
-		comment.WriteString("### Proposed Resolution\n\n")
-		comment.WriteString(plan)
-	}
-
-	// Add note about bugfix.md file if created
-	if bugFolderCreated {
-		comment.WriteString("\n\n### Documentation\n")
-		comment.WriteString("The detailed resolution plan has been documented in the `bugfix.md` file in the spec repository.\n")
-	}
-
-	comment.WriteString("\n\n---\n")
-	comment.WriteString("*This resolution plan was generated automatically by the vTeam BugFix Workspace Bug-resolution-plan session.*\n")
+	comment.WriteString("*This analysis and resolution plan were generated automatically by the vTeam BugFix Workspace.*\n")
 
 	return comment.String()
 }
 
 // handleBugImplementFixCompletion processes completed bug-implement-fix sessions
-// T072: Updates bugfix.md with implementation details
 func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhookEvent, workflowID, project string) {
-	// Get session output (implementation summary)
+	sessionName := event.Object.GetName()
+
+	// Get session output from status.result
 	status, _ := event.Object.Object["status"].(map[string]interface{})
-	implementationSummary, _ := status["output"].(string)
-	if implementationSummary == "" {
-		// Try alternative field names
-		implementationSummary, _ = status["result"].(string)
-		if implementationSummary == "" {
-			implementationSummary, _ = status["summary"].(string)
-		}
-	}
+	implementationSummary, _ := status["result"].(string)
 
 	if implementationSummary == "" {
-		log.Printf("Bug-implement-fix session %s completed but no implementation summary available", event.Object.GetName())
+		log.Printf("Bug-implement-fix session %s completed but no implementation summary in status.result", sessionName)
 		c.JSON(http.StatusOK, gin.H{"status": "processed", "warning": "no implementation details to update"})
 		return
 	}
@@ -377,83 +287,124 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 		return
 	}
 
-	// Get GitHub token
-	githubToken := GetGitHubToken()
-	if githubToken == "" {
-		log.Printf("GitHub token not configured")
+	// Get GitHub token from K8s secret (webhook uses service account, no user context)
+	ctx := context.Background()
+	githubToken, err := git.GetGitHubToken(ctx, K8sClient, DynamicClient, project, "")
+	if err != nil || githubToken == "" {
+		log.Printf("ERROR: Failed to get GitHub token: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "GitHub token not configured"})
 		return
 	}
 
-	// Get user info for Git operations
-	userEmail := workflow.Annotations["user-email"]
-	if userEmail == "" {
-		userEmail = "bugfix-bot@vteam.io"
-	}
-	userName := workflow.Annotations["user-name"]
-	if userName == "" {
-		userName = "BugFix Bot"
+	// Check for existing PR first (regardless of autoCreatePR setting)
+	// This ensures we can include PR link in the comment
+	var existingPR *github.GitHubPullRequest
+	var prCreatedBy string
+
+	// First check workflow annotations for PR info
+	var prURL *string
+	if workflow.Annotations != nil && workflow.Annotations["github-pr-url"] != "" {
+		prURLValue := workflow.Annotations["github-pr-url"]
+		prURL = &prURLValue
+		log.Printf("Found PR URL in workflow annotations: %s", prURLValue)
+	} else {
+		// Query GitHub for existing PRs linked to this issue
+		prs, err := github.GetIssuePullRequests(ctx, owner, repo, issueNumber, githubToken)
+		if err != nil {
+			log.Printf("Warning: failed to check for existing PRs: %v", err)
+		} else {
+			// Look for open PR from our branch
+			for i := range prs {
+				pr := &prs[i]
+				if pr.State == "open" && pr.Head.Ref == workflow.BranchName {
+					existingPR = pr
+					prURL = &pr.URL
+					// Check if PR was created by vTeam (check annotations)
+					if workflow.Annotations != nil && workflow.Annotations["github-pr-number"] == fmt.Sprintf("%d", pr.Number) {
+						prCreatedBy = "vteam"
+					} else {
+						prCreatedBy = "external" // Created by GitHub Action or manually
+					}
+					log.Printf("Found existing PR #%d from branch %s", pr.Number, workflow.BranchName)
+					break
+				}
+			}
+		}
 	}
 
-	// T072: Update bugfix.md file with implementation details
-	ctx := context.Background()
-	err = bugfix.CreateOrUpdateBugfixMarkdown(
-		ctx,
-		workflow.SpecRepoURL,
-		workflow.GithubIssueNumber,
-		workflow.BranchName,
-		githubToken,
-		userEmail,
-		userName,
-		workflow.GithubIssueURL,
-		workflow.JiraTaskURL,
-		"Implementation Details",
-		implementationSummary,
-	)
-	if err != nil {
-		log.Printf("Failed to update bugfix.md with implementation details: %v", err)
-		// Continue anyway - we still want to post to GitHub
-	}
+	// Format implementation summary for GitHub comment with PR link if available
+	comment := formatImplementationComment(implementationSummary, sessionName, workflow.BranchName, workflow.ImplementationRepo.URL, prURL)
 
-	// Format and post implementation summary comment to GitHub Issue
-	comment := formatImplementationComment(implementationSummary, event.Object.GetName(), workflow.BranchName)
-
+	// Post implementation summary to GitHub Issue
+	log.Printf("Posting implementation summary to GitHub Issue #%d", issueNumber)
 	githubComment, err := github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
 	if err != nil {
 		log.Printf("Failed to post implementation summary to GitHub Issue: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to post GitHub comment", "details": err.Error()})
-		return
+	} else {
+		log.Printf("Posted implementation summary to GitHub Issue #%d (comment ID: %d)", issueNumber, githubComment.ID)
+		if workflow.Annotations == nil {
+			workflow.Annotations = make(map[string]string)
+		}
+		workflow.Annotations["implementation-comment-id"] = fmt.Sprintf("%d", githubComment.ID)
+		workflow.Annotations["implementation-comment-url"] = githubComment.URL
 	}
 
-	// Update workflow CR
-	workflow.ImplementationCompleted = true
-	if workflow.Annotations == nil {
-		workflow.Annotations = make(map[string]string)
+	// If PR exists, track it in annotations for reference
+	if existingPR != nil {
+		if workflow.Annotations == nil {
+			workflow.Annotations = make(map[string]string)
+		}
+		if workflow.Annotations["github-pr-number"] == "" {
+			workflow.Annotations["github-pr-number"] = fmt.Sprintf("%d", existingPR.Number)
+			workflow.Annotations["github-pr-url"] = existingPR.URL
+			workflow.Annotations["github-pr-state"] = existingPR.State
+			workflow.Annotations["pr-created-by"] = prCreatedBy
+			log.Printf("Tracked existing PR #%d in workflow annotations", existingPR.Number)
+		}
 	}
-	workflow.Annotations["implementation-comment-id"] = fmt.Sprintf("%d", githubComment.ID)
-	workflow.Annotations["implementation-comment-url"] = githubComment.URL
 
-	// Update the workflow CR
-	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, project, workflow)
+	// Save workflow annotations
+	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
 	if err != nil {
 		// Non-fatal: log but continue
-		log.Printf("Failed to update workflow with implementation status: %v", err)
+		log.Printf("Failed to update workflow annotations: %v", err)
+	}
+
+	// Update status subresource
+	workflow.ImplementationCompleted = true
+	err = crd.UpdateBugFixWorkflowStatus(reqDyn, workflow)
+	if err != nil {
+		// Non-fatal: log but continue
+		log.Printf("Failed to update workflow status (implementationCompleted): %v", err)
 	}
 
 	// Broadcast success event
 	websocket.BroadcastBugFixSessionCompleted(workflowID, event.Object.GetName(), "bug-implement-fix")
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"status":                  "processed",
 		"session":                 event.Object.GetName(),
-		"commentURL":              githubComment.URL,
 		"implementationCompleted": workflow.ImplementationCompleted,
 		"branchName":              workflow.BranchName,
-	})
+	}
+
+	// Add PR info to response
+	if workflow.Annotations != nil {
+		if prNumber := workflow.Annotations["github-pr-number"]; prNumber != "" {
+			response["prNumber"] = prNumber
+			response["prURL"] = workflow.Annotations["github-pr-url"]
+			response["prCreatedBy"] = workflow.Annotations["pr-created-by"]
+		}
+		if commentURL := workflow.Annotations["implementation-comment-url"]; commentURL != "" {
+			response["commentURL"] = commentURL
+		}
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 // formatImplementationComment formats the implementation summary for GitHub comment
-func formatImplementationComment(summary, sessionID, branchName string) string {
+func formatImplementationComment(summary, sessionID, branchName, repoURL string, prURL *string) string {
 	var comment strings.Builder
 
 	comment.WriteString("## 🔧 Implementation Complete\n\n")
@@ -469,14 +420,25 @@ func formatImplementationComment(summary, sessionID, branchName string) string {
 		comment.WriteString(summary)
 	}
 
-	comment.WriteString("\n\n### Branch Information\n")
-	comment.WriteString(fmt.Sprintf("The fix has been implemented in branch: `%s`\n", branchName))
-	comment.WriteString("\n")
-	comment.WriteString("To review the changes:\n")
-	comment.WriteString(fmt.Sprintf("```bash\ngit checkout %s\n```\n", branchName))
+	comment.WriteString("\n\n### 📋 Next Steps\n\n")
 
-	comment.WriteString("\n\n---\n")
-	comment.WriteString("*This implementation was completed automatically by the vTeam BugFix Workspace Bug-implement-fix session.*\n")
+	// If PR already exists, link to it
+	if prURL != nil && *prURL != "" {
+		comment.WriteString(fmt.Sprintf("✅ **Pull Request exists**: [View PR](%s)\n\n", *prURL))
+	} else {
+		// No PR exists - guide user to create one
+		comment.WriteString("**Create a Pull Request** to merge these changes:\n\n")
+		branchURL := fmt.Sprintf("%s/tree/%s", strings.TrimSuffix(repoURL, ".git"), branchName)
+		comment.WriteString(fmt.Sprintf("1. 🌿 View changes: [%s](%s)\n", branchName, branchURL))
+		comment.WriteString(fmt.Sprintf("2. 🔀 Click \"Contribute\" → \"Open pull request\" on GitHub\n"))
+		comment.WriteString(fmt.Sprintf("3. 📝 Review the changes and submit the PR\n\n"))
+	}
+
+	comment.WriteString("**To review locally:**\n")
+	comment.WriteString(fmt.Sprintf("```bash\ngit fetch origin %s\ngit checkout %s\n```\n", branchName, branchName))
+
+	comment.WriteString("\n---\n")
+	comment.WriteString("*This implementation was completed automatically by the vTeam BugFix Workspace.*\n")
 
 	return comment.String()
 }
@@ -520,7 +482,7 @@ func WatchAgenticSessions(project string) error {
 			if phase == "Completed" {
 				// Process the completion based on session type
 				switch sessionType {
-				case "bug-review", "bug-resolution-plan", "bug-implement-fix":
+				case "bug-review", "bug-implement-fix":
 					processSessionCompletion(obj, sessionType)
 				}
 			}
@@ -535,28 +497,32 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 	labels := session.GetLabels()
 	workflowID := labels["bugfix-workflow"]
 	project := labels["project"]
+	sessionName := session.GetName()
 
-	// Get session output
-	status, _ := session.Object["status"].(map[string]interface{})
-	output, _ := status["output"].(string)
-	if output == "" {
-		// Try alternative field names
-		output, _ = status["findings"].(string)
-		if output == "" {
-			output, _ = status["result"].(string)
-		}
-	}
+	// Get service account client
+	dynClient := GetServiceAccountDynamicClient()
 
-	if output == "" {
-		log.Printf("%s session %s completed but no output available", sessionType, session.GetName())
+	// Get workflow details (needed for issue number)
+	workflow, err := crd.GetProjectBugFixWorkflowCR(dynClient, project, workflowID)
+	if err != nil || workflow == nil {
+		log.Printf("Failed to get BugFix Workflow %s: %v", workflowID, err)
 		return
 	}
 
-	// Get workflow details
-	client := GetServiceAccountDynamicClient()
-	workflow, err := crd.GetProjectBugFixWorkflowCR(client, project, workflowID)
-	if err != nil || workflow == nil {
-		log.Printf("Failed to get BugFix Workflow %s: %v", workflowID, err)
+	// Get session output from status.result (runner now always populates this)
+	status, _ := session.Object["status"].(map[string]interface{})
+	output, _ := status["result"].(string)
+
+	if output == "" {
+		// Session completed with empty output (should be rare with updated runner)
+		log.Printf("%s session %s completed with empty status.result", sessionType, sessionName)
+		if sessionType == "bug-review" {
+			// Mark assessment as complete even if empty
+			workflow.AssessmentStatus = "complete"
+			if err := crd.UpdateBugFixWorkflowStatus(dynClient, workflow); err != nil {
+				log.Printf("Failed to update workflow assessment status: %v", err)
+			}
+		}
 		return
 	}
 
@@ -567,135 +533,141 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 		return
 	}
 
-	githubToken := GetGitHubToken()
-	if githubToken == "" {
-		log.Printf("GitHub token not configured")
+	// Get GitHub token from K8s secret (webhook uses service account, no user context)
+	ctx := context.Background()
+	githubToken, err := git.GetGitHubToken(ctx, K8sClient, DynamicClient, project, "")
+	if err != nil || githubToken == "" {
+		log.Printf("ERROR: Failed to get GitHub token: %v", err)
 		return
 	}
-
-	ctx := context.Background()
 
 	// Route based on session type
 	switch sessionType {
 	case "bug-review":
-		// Format and post bug review findings
+		// Format and post bug review & assessment findings (includes analysis + resolution plan)
 		comment := formatBugReviewFindings(output, session.GetName())
-		_, err = github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
+		githubComment, err := github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
 		if err != nil {
 			log.Printf("Failed to post bug review comment to GitHub Issue: %v", err)
 			return
 		}
-		log.Printf("Successfully posted Bug-review findings to GitHub Issue #%d", issueNumber)
+		log.Printf("Successfully posted Bug Review & Assessment to GitHub Issue #%d (comment: %s)", issueNumber, githubComment.URL)
 
-	case "bug-resolution-plan":
-		// Get user info for Git operations
-		userEmail := workflow.Annotations["user-email"]
-		if userEmail == "" {
-			userEmail = "bugfix-bot@vteam.io"
-		}
-		userName := workflow.Annotations["user-name"]
-		if userName == "" {
-			userName = "BugFix Bot"
-		}
-
-		// Create/update bugfix.md file
-		err = bugfix.CreateOrUpdateBugfixMarkdown(
-			ctx,
-			workflow.SpecRepoURL,
-			workflow.GithubIssueNumber,
-			workflow.BranchName,
-			githubToken,
-			userEmail,
-			userName,
-			workflow.GithubIssueURL,
-			workflow.JiraTaskURL,
-			"Resolution Plan",
-			output,
-		)
+		// Add 'claude' label to mark that Claude has assessed this issue
+		labels, err := github.GetIssueLabels(ctx, owner, repo, issueNumber, githubToken)
 		if err != nil {
-			log.Printf("Failed to create/update bugfix.md: %v", err)
-		}
+			log.Printf("Warning: failed to get issue labels: %v", err)
+		} else {
+			hasClaudeLabel := false
+			labelNames := make([]string, 0, len(labels)+1)
+			for _, label := range labels {
+				labelNames = append(labelNames, label.Name)
+				if strings.ToLower(label.Name) == "claude" {
+					hasClaudeLabel = true
+				}
+			}
 
-		// Post resolution plan comment
-		comment := formatResolutionPlanComment(output, session.GetName(), workflow.BugFolderCreated)
-		_, err = github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
-		if err != nil {
-			log.Printf("Failed to post resolution plan to GitHub Issue: %v", err)
-			return
+			if !hasClaudeLabel {
+				labelNames = append(labelNames, "claude")
+				updateReq := &github.UpdateIssueRequest{Labels: labelNames}
+				_, err = github.UpdateIssue(ctx, owner, repo, issueNumber, githubToken, updateReq)
+				if err != nil {
+					log.Printf("Warning: failed to add 'claude' label: %v", err)
+				} else {
+					log.Printf("Added 'claude' label to GitHub Issue #%d", issueNumber)
+				}
+			}
 		}
-
-		// Update workflow CR
-		workflow.BugfixMarkdownCreated = true
-		err = crd.UpsertProjectBugFixWorkflowCR(client, project, workflow)
-		if err != nil {
-			log.Printf("Failed to update workflow with bugfixMarkdownCreated: %v", err)
-		}
-
-		log.Printf("Successfully posted resolution plan to GitHub Issue #%d", issueNumber)
 
 	case "bug-implement-fix":
-		// Get user info for Git operations
-		userEmail := workflow.Annotations["user-email"]
-		if userEmail == "" {
-			userEmail = "bugfix-bot@vteam.io"
-		}
-		userName := workflow.Annotations["user-name"]
-		if userName == "" {
-			userName = "BugFix Bot"
+		// Check for existing PR first (regardless of autoCreatePR setting)
+		// This ensures we can include PR link in the comment
+		var existingPR *github.GitHubPullRequest
+		var prCreatedBy string
+
+		// First check workflow annotations for PR info
+		var prURL *string
+		if workflow.Annotations != nil && workflow.Annotations["github-pr-url"] != "" {
+			prURLValue := workflow.Annotations["github-pr-url"]
+			prURL = &prURLValue
+			log.Printf("Found PR URL in workflow annotations: %s", prURLValue)
+		} else {
+			// Query GitHub for existing PRs linked to this issue
+			prs, err := github.GetIssuePullRequests(ctx, owner, repo, issueNumber, githubToken)
+			if err != nil {
+				log.Printf("Warning: failed to check for existing PRs: %v", err)
+			} else {
+				// Look for open PR from our branch
+				for i := range prs {
+					pr := &prs[i]
+					if pr.State == "open" && pr.Head.Ref == workflow.BranchName {
+						existingPR = pr
+						prURL = &pr.URL
+						if workflow.Annotations != nil && workflow.Annotations["github-pr-number"] == fmt.Sprintf("%d", pr.Number) {
+							prCreatedBy = "vteam"
+						} else {
+							prCreatedBy = "external"
+						}
+						log.Printf("Found existing PR #%d from branch %s", pr.Number, workflow.BranchName)
+						break
+					}
+				}
+			}
 		}
 
-		// Update bugfix.md file with implementation details
-		err = bugfix.CreateOrUpdateBugfixMarkdown(
-			ctx,
-			workflow.SpecRepoURL,
-			workflow.GithubIssueNumber,
-			workflow.BranchName,
-			githubToken,
-			userEmail,
-			userName,
-			workflow.GithubIssueURL,
-			workflow.JiraTaskURL,
-			"Implementation Details",
-			output,
-		)
-		if err != nil {
-			log.Printf("Failed to update bugfix.md: %v", err)
-		}
+		// Format implementation summary for GitHub comment with PR link if available
+		comment := formatImplementationComment(output, session.GetName(), workflow.BranchName, workflow.ImplementationRepo.URL, prURL)
 
-		// Post implementation summary comment
-		comment := formatImplementationComment(output, session.GetName(), workflow.BranchName)
+		// Post implementation summary to GitHub Issue
+		log.Printf("Posting implementation summary to GitHub Issue #%d", issueNumber)
 		_, err = github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
 		if err != nil {
 			log.Printf("Failed to post implementation summary to GitHub Issue: %v", err)
-			return
+		} else {
+			log.Printf("Posted implementation summary to GitHub Issue #%d", issueNumber)
 		}
 
-		// Update workflow CR
+		// If PR exists, track it in annotations for reference
+		if existingPR != nil {
+			if workflow.Annotations == nil {
+				workflow.Annotations = make(map[string]string)
+			}
+			if workflow.Annotations["github-pr-number"] == "" {
+				workflow.Annotations["github-pr-number"] = fmt.Sprintf("%d", existingPR.Number)
+				workflow.Annotations["github-pr-url"] = existingPR.URL
+				workflow.Annotations["github-pr-state"] = existingPR.State
+				workflow.Annotations["pr-created-by"] = prCreatedBy
+				_ = crd.UpsertProjectBugFixWorkflowCR(dynClient, workflow)
+				log.Printf("Tracked existing PR #%d in workflow annotations", existingPR.Number)
+			}
+		}
+
+		// Update workflow status
 		workflow.ImplementationCompleted = true
-		err = crd.UpsertProjectBugFixWorkflowCR(client, project, workflow)
+		err = crd.UpdateBugFixWorkflowStatus(dynClient, workflow)
 		if err != nil {
-			log.Printf("Failed to update workflow with implementationCompleted: %v", err)
+			log.Printf("Failed to update workflow status (implementationCompleted): %v", err)
 		}
 
-		log.Printf("Successfully posted implementation summary to GitHub Issue #%d", issueNumber)
+		log.Printf("Successfully processed implementation completion for Issue #%d", issueNumber)
 	}
 
 	// Broadcast completion
 	websocket.BroadcastBugFixSessionCompleted(workflowID, session.GetName(), sessionType)
 }
 
-// GetGitHubToken retrieves the GitHub token from environment or K8s secret
-// This is a placeholder - implement based on your token management strategy
-func GetGitHubToken() string {
-	// In production, this would retrieve from K8s secret or environment
-	// For now, return from environment variable
-	return os.Getenv("GITHUB_TOKEN")
+// Package-level variables for bugfix handlers (set from main package)
+var (
+	K8sClient     *kubernetes.Clientset
+	DynamicClient dynamic.Interface
+)
+
+// GetServiceAccountK8sClient returns the backend service account K8s client
+func GetServiceAccountK8sClient() *kubernetes.Clientset {
+	return K8sClient
 }
 
-// GetServiceAccountDynamicClient returns a K8s client using service account
-// This is a placeholder - implement based on your K8s client configuration
+// GetServiceAccountDynamicClient returns the backend service account dynamic client
 func GetServiceAccountDynamicClient() dynamic.Interface {
-	// This would be initialized during app startup with in-cluster config
-	// For webhook handlers that don't have user context
-	return nil // Placeholder
+	return DynamicClient
 }

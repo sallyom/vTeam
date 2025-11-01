@@ -2,25 +2,26 @@ package types
 
 // BugFix Workflow Data Structures
 type BugFixWorkflow struct {
-	ID                      string          `json:"id"`
-	GithubIssueNumber       int             `json:"githubIssueNumber"`
-	GithubIssueURL          string          `json:"githubIssueURL"`
-	Title                   string          `json:"title"`
-	Description             string          `json:"description"`
-	BranchName              string          `json:"branchName"`
-	UmbrellaRepo            *GitRepository  `json:"umbrellaRepo,omitempty"`
-	SupportingRepos         []GitRepository `json:"supportingRepos,omitempty"`
-	JiraTaskKey             *string         `json:"jiraTaskKey,omitempty"`
-	LastSyncedAt            *string         `json:"lastSyncedAt,omitempty"` // RFC3339 format
-	WorkspacePath           string          `json:"workspacePath,omitempty"`
-	CreatedBy               string          `json:"createdBy,omitempty"`
-	CreatedAt               string          `json:"createdAt,omitempty"`
-	UpdatedAt               string          `json:"updatedAt,omitempty"`
-	Project                 string          `json:"project,omitempty"`
-	Phase                   string          `json:"phase,omitempty"` // Initializing, Ready
-	Message                 string          `json:"message,omitempty"`
-	BugFolderCreated        bool            `json:"bugFolderCreated,omitempty"`
-	BugfixMarkdownCreated   bool            `json:"bugfixMarkdownCreated,omitempty"`
+	ID                      string            `json:"id"`
+	GithubIssueNumber       int               `json:"githubIssueNumber"`
+	GithubIssueURL          string            `json:"githubIssueURL"`
+	Title                   string            `json:"title"`
+	Description             string            `json:"description"`
+	BranchName              string            `json:"branchName"`
+	ImplementationRepo      GitRepository     `json:"implementationRepo"` // The repository containing the code/bug
+	JiraTaskKey             *string           `json:"jiraTaskKey,omitempty"`
+	JiraTaskURL             *string           `json:"jiraTaskURL,omitempty"`
+	LastSyncedAt            *string           `json:"lastSyncedAt,omitempty"` // RFC3339 format
+	WorkspacePath           string            `json:"workspacePath,omitempty"`
+	CreatedBy               string            `json:"createdBy,omitempty"`
+	CreatedAt               string            `json:"createdAt,omitempty"`
+	UpdatedAt               string            `json:"updatedAt,omitempty"`
+	Project                 string            `json:"project,omitempty"`
+	Phase                   string            `json:"phase,omitempty"` // Initializing, Ready
+	Message                 string            `json:"message,omitempty"`
+	AssessmentStatus        string            `json:"assessmentStatus,omitempty"`        // "", "complete"
+	ImplementationCompleted bool              `json:"implementationCompleted,omitempty"`
+	Annotations             map[string]string `json:"annotations,omitempty"` // Optional metadata
 }
 
 // CreateBugFixWorkflowRequest represents the request to create a BugFix Workspace
@@ -32,9 +33,8 @@ type CreateBugFixWorkflowRequest struct {
 	TextDescription *TextDescriptionInput `json:"textDescription,omitempty"`
 
 	// Common fields
-	UmbrellaRepo    GitRepository   `json:"umbrellaRepo" binding:"required"`
-	SupportingRepos []GitRepository `json:"supportingRepos,omitempty"`
-	BranchName      *string         `json:"branchName,omitempty"` // Optional, auto-generated if not provided
+	ImplementationRepo GitRepository `json:"implementationRepo" binding:"required"` // The repository containing the code/bug
+	BranchName         *string       `json:"branchName,omitempty"`                  // Optional, auto-generated if not provided
 }
 
 // TextDescriptionInput represents input for creating workspace from text description
@@ -50,19 +50,21 @@ type TextDescriptionInput struct {
 
 // UpdateBugFixWorkflowRequest represents updates to workspace
 type UpdateBugFixWorkflowRequest struct {
-	Title           *string         `json:"title,omitempty"`
-	Description     *string         `json:"description,omitempty"`
-	SupportingRepos []GitRepository `json:"supportingRepos,omitempty"`
-	JiraTaskKey     *string         `json:"jiraTaskKey,omitempty"`
-	LastSyncedAt    *string         `json:"lastSyncedAt,omitempty"`
+	Title        *string `json:"title,omitempty"`
+	Description  *string `json:"description,omitempty"`
+	JiraTaskKey  *string `json:"jiraTaskKey,omitempty"`
+	LastSyncedAt *string `json:"lastSyncedAt,omitempty"`
 }
 
 // CreateBugFixSessionRequest represents the request to create a session
 type CreateBugFixSessionRequest struct {
-	SessionType          string              `json:"sessionType" binding:"required"` // bug-review, bug-resolution-plan, bug-implement-fix, generic
+	SessionType          string              `json:"sessionType" binding:"required"` // bug-review, bug-resolution-plan, bug-implement-fix
+	Prompt               *string             `json:"prompt,omitempty"`               // Custom prompt (auto-generated if not provided)
 	Title                *string             `json:"title,omitempty"`
 	Description          *string             `json:"description,omitempty"`
-	SelectedAgents       []string            `json:"selectedAgents,omitempty"` // Agent personas
+	SelectedAgents       []string            `json:"selectedAgents,omitempty"`     // Agent personas
+	Interactive          *bool               `json:"interactive,omitempty"`        // Interactive mode using inbox/outbox (default: false/headless)
+	AutoPushOnComplete   *bool               `json:"autoPushOnComplete,omitempty"` // Auto-push to GitHub on completion (default: true)
 	EnvironmentVariables map[string]string   `json:"environmentVariables,omitempty"`
 	ResourceOverrides    *ResourceOverrides  `json:"resourceOverrides,omitempty"`
 }

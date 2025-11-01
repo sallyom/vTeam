@@ -35,24 +35,26 @@ func GetProjectBugFixWorkflow(c *gin.Context) {
 
 	// Return workflow details
 	response := map[string]interface{}{
-		"id":                      workflow.ID,
-		"githubIssueNumber":       workflow.GithubIssueNumber,
-		"githubIssueURL":          workflow.GithubIssueURL,
-		"title":                   workflow.Title,
-		"description":             workflow.Description,
-		"branchName":              workflow.BranchName,
-		"project":                 workflow.Project,
-		"phase":                   workflow.Phase,
-		"message":                 workflow.Message,
-		"bugFolderCreated":        workflow.BugFolderCreated,
-		"bugfixMarkdownCreated":   workflow.BugfixMarkdownCreated,
-		"createdAt":               workflow.CreatedAt,
-		"createdBy":               workflow.CreatedBy,
+		"id":                    workflow.ID,
+		"githubIssueNumber":     workflow.GithubIssueNumber,
+		"githubIssueURL":        workflow.GithubIssueURL,
+		"title":                 workflow.Title,
+		"description":           workflow.Description,
+		"branchName":            workflow.BranchName,
+		"project":               workflow.Project,
+		"phase":                 workflow.Phase,
+		"message":               workflow.Message,
+		"implementationCompleted": workflow.ImplementationCompleted,
+		"createdAt":             workflow.CreatedAt,
+		"createdBy":             workflow.CreatedBy,
 	}
 
 	// Add optional fields
 	if workflow.JiraTaskKey != nil {
 		response["jiraTaskKey"] = *workflow.JiraTaskKey
+	}
+	if workflow.JiraTaskURL != nil {
+		response["jiraTaskURL"] = *workflow.JiraTaskURL
 	}
 	if workflow.LastSyncedAt != nil {
 		response["lastSyncedAt"] = *workflow.LastSyncedAt
@@ -61,26 +63,12 @@ func GetProjectBugFixWorkflow(c *gin.Context) {
 		response["workspacePath"] = workflow.WorkspacePath
 	}
 
-	// Add repositories
-	if workflow.UmbrellaRepo != nil {
-		u := map[string]interface{}{"url": workflow.UmbrellaRepo.URL}
-		if workflow.UmbrellaRepo.Branch != nil {
-			u["branch"] = *workflow.UmbrellaRepo.Branch
-		}
-		response["umbrellaRepo"] = u
+	// Add implementation repository
+	implRepo := map[string]interface{}{"url": workflow.ImplementationRepo.URL}
+	if workflow.ImplementationRepo.Branch != nil {
+		implRepo["branch"] = *workflow.ImplementationRepo.Branch
 	}
-
-	if len(workflow.SupportingRepos) > 0 {
-		repos := make([]map[string]interface{}, 0, len(workflow.SupportingRepos))
-		for _, r := range workflow.SupportingRepos {
-			rm := map[string]interface{}{"url": r.URL}
-			if r.Branch != nil {
-				rm["branch"] = *r.Branch
-			}
-			repos = append(repos, rm)
-		}
-		response["supportingRepos"] = repos
-	}
+	response["implementationRepo"] = implRepo
 
 	c.JSON(http.StatusOK, response)
 }

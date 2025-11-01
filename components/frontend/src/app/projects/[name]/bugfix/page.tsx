@@ -19,7 +19,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 
-import { bugfixApi, type BugFixWorkflow } from '@/services/api';
+import { bugfixApi } from '@/services/api';
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from '@/components/ui/skeleton';
 

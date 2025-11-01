@@ -307,7 +307,7 @@ func PerformRepoSeeding(ctx context.Context, wf Workflow, branchName, githubToke
 
 	// Validate push access to spec repo before starting
 	log.Printf("Validating push access to spec repo: %s", umbrellaRepo.GetURL())
-	if err := validatePushAccess(ctx, umbrellaRepo.GetURL(), githubToken); err != nil {
+	if err := ValidatePushAccess(ctx, umbrellaRepo.GetURL(), githubToken); err != nil {
 		return false, fmt.Errorf("spec repo access validation failed: %w", err)
 	}
 
@@ -316,7 +316,7 @@ func PerformRepoSeeding(ctx context.Context, wf Workflow, branchName, githubToke
 	if len(supportingRepos) > 0 {
 		log.Printf("Validating push access to %d supporting repos", len(supportingRepos))
 		for i, repo := range supportingRepos {
-			if err := validatePushAccess(ctx, repo.GetURL(), githubToken); err != nil {
+			if err := ValidatePushAccess(ctx, repo.GetURL(), githubToken); err != nil {
 				return false, fmt.Errorf("supporting repo #%d (%s) access validation failed: %w", i+1, repo.GetURL(), err)
 			}
 		}
@@ -638,7 +638,7 @@ func PerformRepoSeeding(ctx context.Context, wf Workflow, branchName, githubToke
 	if len(supportingRepos) > 0 {
 		log.Printf("Creating feature branch %s in %d supporting repos", branchName, len(supportingRepos))
 		for i, repo := range supportingRepos {
-			if err := createBranchInRepo(ctx, repo, branchName, githubToken); err != nil {
+			if err := CreateBranchInRepo(ctx, repo, branchName, githubToken); err != nil {
 				return false, fmt.Errorf("failed to create branch in supporting repo #%d (%s): %w", i+1, repo.GetURL(), err)
 			}
 		}
@@ -994,8 +994,8 @@ func CheckBranchExists(ctx context.Context, repoURL, branchName, githubToken str
 	return false, fmt.Errorf("GitHub API error: %s (body: %s)", resp.Status, string(body))
 }
 
-// validatePushAccess checks if the user has push access to a repository via GitHub API
-func validatePushAccess(ctx context.Context, repoURL, githubToken string) error {
+// ValidatePushAccess checks if the user has push access to a repository via GitHub API
+func ValidatePushAccess(ctx context.Context, repoURL, githubToken string) error {
 	owner, repo, err := ParseGitHubURL(repoURL)
 	if err != nil {
 		return fmt.Errorf("invalid repository URL: %w", err)
@@ -1061,10 +1061,10 @@ func validatePushAccess(ctx context.Context, repoURL, githubToken string) error 
 	return nil
 }
 
-// createBranchInRepo creates a feature branch in a supporting repository
+// CreateBranchInRepo creates a feature branch in a repository
 // Follows the same pattern as umbrella repo seeding but without adding files
 // Note: This function assumes push access has already been validated by the caller
-func createBranchInRepo(ctx context.Context, repo GitRepo, branchName, githubToken string) error {
+func CreateBranchInRepo(ctx context.Context, repo GitRepo, branchName, githubToken string) error {
 	repoURL := repo.GetURL()
 	if repoURL == "" {
 		return fmt.Errorf("repository URL is empty")

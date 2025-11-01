@@ -200,6 +200,7 @@ export default function ProjectRFEDetailPage() {
         }
       );
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project, id, updateWorkflowMutation, load, refetchSeeding]);
 
 

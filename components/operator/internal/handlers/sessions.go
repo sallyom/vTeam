@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -279,8 +282,15 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 			if psSpec, ok := psObj.Object["spec"].(map[string]interface{}); ok {
 				if v, ok := psSpec["runnerSecretsName"].(string); ok {
 					runnerSecretsName = strings.TrimSpace(v)
+					log.Printf("Found runnerSecretsName=%s for session %s in namespace %s", runnerSecretsName, name, sessionNamespace)
+				} else {
+					log.Printf("WARNING: ProjectSettings in namespace %s has no runnerSecretsName field", sessionNamespace)
 				}
+			} else {
+				log.Printf("WARNING: ProjectSettings in namespace %s has no spec", sessionNamespace)
 			}
+		} else {
+			log.Printf("WARNING: Failed to get ProjectSettings in namespace %s: %v", sessionNamespace, err)
 		}
 	}
 
@@ -895,6 +905,11 @@ func monitorJob(jobName, sessionName, sessionNamespace string) {
 			if currentPhase == "Completed" || currentPhase == "Failed" {
 				log.Printf("Runner exited for job %s with phase %s", jobName, currentPhase)
 
+				// Call bugfix webhook if this is a bugfix session
+				if obj != nil && currentPhase == "Completed" {
+					_ = notifyBugfixWebhookIfApplicable(obj)
+				}
+
 				// Ensure session is interactive so it can be restarted
 				_ = ensureSessionIsInteractive(sessionNamespace, sessionName)
 
@@ -1120,6 +1135,76 @@ func CleanupExpiredTempContentPods() {
 			}
 		}
 	}
+}
+
+// notifyBugfixWebhookIfApplicable calls the backend webhook for bugfix session completions
+func notifyBugfixWebhookIfApplicable(obj *unstructured.Unstructured) error {
+	// Check if this is a bugfix session (has bugfix-workflow label)
+	labels := obj.GetLabels()
+	if labels == nil {
+		return nil
+	}
+
+	bugfixWorkflow, hasBugfixLabel := labels["bugfix-workflow"]
+	sessionType := labels["bugfix-session-type"]
+
+	if !hasBugfixLabel || bugfixWorkflow == "" {
+		// Not a bugfix session, skip
+		return nil
+	}
+
+	log.Printf("Notifying bugfix webhook for session %s/%s (workflow: %s, type: %s)",
+		obj.GetNamespace(), obj.GetName(), bugfixWorkflow, sessionType)
+
+	// Build webhook payload
+	payload := map[string]interface{}{
+		"type":   "MODIFIED",
+		"object": obj.Object,
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("Failed to marshal webhook payload: %v", err)
+		return err
+	}
+
+	// Get backend namespace from environment (matches BACKEND_NAMESPACE used in session creation)
+	backendNamespace := os.Getenv("BACKEND_NAMESPACE")
+	if backendNamespace == "" {
+		backendNamespace = "ambient-code"
+	}
+
+	// Construct webhook URL using correct service name (backend-service, not backend-api)
+	webhookURL := fmt.Sprintf("http://backend-service.%s.svc.cluster.local:8080/api/webhooks/agentic-sessions", backendNamespace)
+
+	// POST to webhook (non-blocking, fire and forget)
+	go func() {
+		req, err := http.NewRequest("POST", webhookURL, bytes.NewReader(payloadBytes))
+		if err != nil {
+			log.Printf("Failed to create webhook request: %v", err)
+			return
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("Failed to call bugfix webhook: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			log.Printf("Bugfix webhook called successfully for session %s/%s (status: %d)",
+				obj.GetNamespace(), obj.GetName(), resp.StatusCode)
+		} else {
+			log.Printf("Bugfix webhook returned non-2xx status for session %s/%s: %d",
+				obj.GetNamespace(), obj.GetName(), resp.StatusCode)
+		}
+	}()
+
+	return nil
 }
 
 // Helper functions

@@ -28,7 +28,7 @@ spec:
             type: object
           spec:
             type: object
-            required: [githubIssueNumber, githubIssueURL, title, description, umbrellaRepo, branchName]
+            required: [githubIssueNumber, githubIssueURL, title, description, implementationRepo, branchName]
             properties:
               githubIssueNumber:
                 type: integer
@@ -46,9 +46,9 @@ spec:
                 minLength: 20
                 maxLength: 5000
                 description: "Bug description"
-              umbrellaRepo:
+              implementationRepo:
                 type: object
-                description: "Spec repository for documentation"
+                description: "Repository containing the code/bug to be fixed"
                 required: [url]
                 properties:
                   url:
@@ -58,20 +58,6 @@ spec:
                     type: string
                     default: "main"
                     description: "Base branch"
-              supportingRepos:
-                type: array
-                description: "Repositories where fix is implemented"
-                items:
-                  type: object
-                  required: [url]
-                  properties:
-                    url:
-                      type: string
-                      description: "GitHub repository URL"
-                    branch:
-                      type: string
-                      default: "main"
-                      description: "Base branch"
               branchName:
                 type: string
                 description: "Feature branch name (format: bugfix/gh-{issue-number})"
@@ -101,14 +87,10 @@ spec:
               message:
                 type: string
                 description: "Human-readable status message"
-              bugFolderCreated:
+              implementationCompleted:
                 type: boolean
                 default: false
-                description: "True if bug-{issue-number}/ exists in spec repo"
-              bugfixMarkdownCreated:
-                type: boolean
-                default: false
-                description: "True if bugfix-gh-{issue-number}.md exists"
+                description: "True if bug implementation session has completed"
     subresources:
       status: {}
     additionalPrinterColumns:

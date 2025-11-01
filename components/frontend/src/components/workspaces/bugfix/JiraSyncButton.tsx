@@ -36,7 +36,7 @@ export default function JiraSyncButton({
   jiraTaskKey,
   jiraTaskURL,
   lastSyncedAt,
-  githubIssueNumber,
+  githubIssueNumber, // eslint-disable-line @typescript-eslint/no-unused-vars
   disabled,
   className,
 }: JiraSyncButtonProps) {
@@ -44,7 +44,7 @@ export default function JiraSyncButton({
   const queryClient = useQueryClient();
 
   const syncMutation = useMutation({
-    mutationFn: () => bugfixApi.syncBugFixWorkflowToJira(projectName, workflowId),
+    mutationFn: () => bugfixApi.syncBugFixToJira(projectName, workflowId),
     onSuccess: (result) => {
       const message = result.created
         ? `Created Jira task ${result.jiraTaskKey}`
@@ -141,7 +141,7 @@ export default function JiraSyncButton({
           <div className="bg-muted p-4 rounded-md">
             <p className="text-sm font-medium mb-1">Note about Jira Issue Type</p>
             <p className="text-xs text-muted-foreground">
-              Currently syncing as "Feature Request" type in Jira. After the upcoming Jira Cloud
+              Currently syncing as &quot;Feature Request&quot; type in Jira. After the upcoming Jira Cloud
               migration, bugs will sync as proper Bug/Task types.
             </p>
           </div>

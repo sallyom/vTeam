@@ -47,10 +47,8 @@ func ListProjectBugFixWorkflows(c *gin.Context) {
 			item["jiraTaskKey"] = *w.JiraTaskKey
 		}
 
-		// Add umbrella repo URL
-		if w.UmbrellaRepo != nil {
-			item["umbrellaRepoURL"] = w.UmbrellaRepo.URL
-		}
+		// Add implementation repo URL
+		item["implementationRepoURL"] = w.ImplementationRepo.URL
 
 		summaries = append(summaries, item)
 	}

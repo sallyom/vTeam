@@ -27,6 +27,40 @@ type GitHubComment struct {
 	ID   int    `json:"id"`
 	Body string `json:"body"`
 	URL  string `json:"html_url"`
+	User struct {
+		Login string `json:"login"`
+		Type  string `json:"type"`
+	} `json:"user"`
+}
+
+// GitHubLabel represents a label on a GitHub Issue
+type GitHubLabel struct {
+	Name  string `json:"name"`
+	Color string `json:"color"`
+}
+
+// GitHubPullRequest represents a pull request
+type GitHubPullRequest struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"` // "open", "closed"
+	URL    string `json:"html_url"`
+	Head   struct {
+		Ref string `json:"ref"` // branch name
+	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"` // target branch name
+	} `json:"base"`
+	Merged bool `json:"merged"`
+}
+
+// CreatePullRequestRequest represents the request to create a PR
+type CreatePullRequestRequest struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	Head  string `json:"head"`  // source branch
+	Base  string `json:"base"`  // target branch (e.g., "main")
+	Draft bool   `json:"draft"` // create as draft PR
 }
 
 // CreateIssueRequest represents the request body for creating an issue
@@ -274,6 +308,247 @@ func AddComment(ctx context.Context, owner, repo string, issueNumber int, token,
 		return nil, fmt.Errorf("authentication failed or no permission to comment on issue #%d", issueNumber)
 	case 404:
 		return nil, fmt.Errorf("issue #%d not found in %s/%s", issueNumber, owner, repo)
+	case 429:
+		resetTime := resp.Header.Get("X-RateLimit-Reset")
+		return nil, fmt.Errorf("GitHub API rate limit exceeded (reset at %s)", resetTime)
+	default:
+		return nil, fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+	}
+}
+
+// GetIssueLabels retrieves all labels for a GitHub Issue
+func GetIssueLabels(ctx context.Context, owner, repo string, issueNumber int, token string) ([]GitHubLabel, error) {
+	// GET /repos/{owner}/{repo}/issues/{issue_number}/labels
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/labels", owner, repo, issueNumber)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "vTeam-Backend")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case 200:
+		var labels []GitHubLabel
+		if err := json.Unmarshal(body, &labels); err != nil {
+			return nil, fmt.Errorf("failed to parse labels response: %v", err)
+		}
+		return labels, nil
+	case 404:
+		return nil, fmt.Errorf("issue #%d not found in %s/%s", issueNumber, owner, repo)
+	case 401, 403:
+		return nil, fmt.Errorf("authentication failed or no access to issue #%d", issueNumber)
+	case 429:
+		resetTime := resp.Header.Get("X-RateLimit-Reset")
+		return nil, fmt.Errorf("GitHub API rate limit exceeded (reset at %s)", resetTime)
+	default:
+		return nil, fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+	}
+}
+
+// GetIssueComments retrieves all comments for a GitHub Issue
+func GetIssueComments(ctx context.Context, owner, repo string, issueNumber int, token string) ([]GitHubComment, error) {
+	// GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/comments", owner, repo, issueNumber)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "vTeam-Backend")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case 200:
+		var comments []GitHubComment
+		if err := json.Unmarshal(body, &comments); err != nil {
+			return nil, fmt.Errorf("failed to parse comments response: %v", err)
+		}
+		return comments, nil
+	case 404:
+		return nil, fmt.Errorf("issue #%d not found in %s/%s", issueNumber, owner, repo)
+	case 401, 403:
+		return nil, fmt.Errorf("authentication failed or no access to issue #%d", issueNumber)
+	case 429:
+		resetTime := resp.Header.Get("X-RateLimit-Reset")
+		return nil, fmt.Errorf("GitHub API rate limit exceeded (reset at %s)", resetTime)
+	default:
+		return nil, fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+	}
+}
+
+// GetIssuePullRequests gets all pull requests that reference an issue
+// Returns PRs that mention the issue in their body or are linked via keywords (fixes, closes, etc.)
+func GetIssuePullRequests(ctx context.Context, owner, repo string, issueNumber int, token string) ([]GitHubPullRequest, error) {
+	// Search for PRs that reference this issue
+	// GitHub doesn't have a direct API for "PRs linked to issue", so we search for PRs mentioning the issue
+	searchQuery := fmt.Sprintf("repo:%s/%s type:pr #%d", owner, repo, issueNumber)
+	apiURL := fmt.Sprintf("https://api.github.com/search/issues?q=%s", searchQuery)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "vTeam-Backend")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case 200:
+		var searchResult struct {
+			Items []GitHubPullRequest `json:"items"`
+		}
+		if err := json.Unmarshal(body, &searchResult); err != nil {
+			return nil, fmt.Errorf("failed to parse search response: %v", err)
+		}
+		return searchResult.Items, nil
+	case 429:
+		resetTime := resp.Header.Get("X-RateLimit-Reset")
+		return nil, fmt.Errorf("GitHub API rate limit exceeded (reset at %s)", resetTime)
+	default:
+		return nil, fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+	}
+}
+
+// CreatePullRequest creates a new pull request
+func CreatePullRequest(ctx context.Context, owner, repo, token string, request *CreatePullRequestRequest) (*GitHubPullRequest, error) {
+	if request.Title == "" || request.Head == "" || request.Base == "" {
+		return nil, fmt.Errorf("title, head, and base are required")
+	}
+
+	// POST /repos/{owner}/{repo}/pulls
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls", owner, repo)
+
+	bodyBytes, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "vTeam-Backend")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case 201:
+		var pr GitHubPullRequest
+		if err := json.Unmarshal(body, &pr); err != nil {
+			return nil, fmt.Errorf("failed to parse PR response: %v", err)
+		}
+		return &pr, nil
+	case 401, 403:
+		return nil, fmt.Errorf("authentication failed or no permission to create PR in %s/%s", owner, repo)
+	case 404:
+		return nil, fmt.Errorf("repository not found: %s/%s", owner, repo)
+	case 422:
+		// Validation failed - could be PR already exists or branch doesn't exist
+		return nil, fmt.Errorf("validation failed: %s", string(body))
+	case 429:
+		resetTime := resp.Header.Get("X-RateLimit-Reset")
+		return nil, fmt.Errorf("GitHub API rate limit exceeded (reset at %s)", resetTime)
+	default:
+		return nil, fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+	}
+}
+
+// AddPullRequestComment adds a comment to a pull request
+func AddPullRequestComment(ctx context.Context, owner, repo string, prNumber int, token, commentBody string) (*GitHubComment, error) {
+	if commentBody == "" {
+		return nil, fmt.Errorf("comment body is required")
+	}
+
+	// POST /repos/{owner}/{repo}/issues/{issue_number}/comments
+	// Note: GitHub's API treats PR comments the same as issue comments
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/comments", owner, repo, prNumber)
+
+	request := AddCommentRequest{Body: commentBody}
+	bodyBytes, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "vTeam-Backend")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case 201:
+		var comment GitHubComment
+		if err := json.Unmarshal(body, &comment); err != nil {
+			return nil, fmt.Errorf("failed to parse comment response: %v", err)
+		}
+		return &comment, nil
+	case 401, 403:
+		return nil, fmt.Errorf("authentication failed or no permission to comment on PR #%d", prNumber)
+	case 404:
+		return nil, fmt.Errorf("PR #%d not found in %s/%s", prNumber, owner, repo)
 	case 429:
 		resetTime := resp.Header.Get("X-RateLimit-Reset")
 		return nil, fmt.Errorf("GitHub API rate limit exceeded (reset at %s)", resetTime)

@@ -91,6 +91,10 @@ func main() {
 	handlers.GetGitHubToken = git.GetGitHubToken
 	handlers.DeriveRepoFolderFromURL = git.DeriveRepoFolderFromURL
 
+	// Initialize bugfix handlers
+	bugfixhandlers.K8sClient = server.K8sClient
+	bugfixhandlers.DynamicClient = server.DynamicClient
+
 	// Initialize RFE workflow handlers
 	handlers.GetRFEWorkflowResource = k8s.GetRFEWorkflowResource
 	handlers.UpsertProjectRFEWorkflowCR = crd.UpsertProjectRFEWorkflowCR
@@ -101,6 +105,7 @@ func main() {
 
 	// Initialize BugFix workflow handlers
 	bugfixhandlers.GetK8sClientsForRequest = handlers.GetK8sClientsForRequest
+	bugfixhandlers.GetProjectSettingsResource = k8s.GetProjectSettingsResource
 	bugfixhandlers.GetAgenticSessionResource = k8s.GetAgenticSessionV1Alpha1Resource
 
 	// Initialize Jira handler

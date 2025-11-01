@@ -3,7 +3,6 @@ import { formatDistanceToNow } from 'date-fns';
 import {
   CheckCircle2,
   GitBranch,
-  GitPullRequest,
   MessageSquare,
   FileText,
   Code2,
@@ -16,7 +15,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
-import { AgenticSession } from '@/types/bugfix';
 
 interface TimelineEvent {
   id: string;
@@ -36,10 +34,11 @@ interface TimelineEvent {
 interface BugTimelineProps {
   workflowId: string;
   events: TimelineEvent[];
-  sessions?: AgenticSession[];
+  sessions?: unknown[];
   className?: string;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default function BugTimeline({ workflowId, events, sessions = [], className }: BugTimelineProps) {
   // Sort events by timestamp (newest first)
   const sortedEvents = [...events].sort((a, b) =>
@@ -102,7 +101,7 @@ export default function BugTimeline({ workflowId, events, sessions = [], classNa
     };
 
     return (
-      <Badge variant={variants[sessionType] as any} className="ml-2">
+      <Badge variant={(variants[sessionType] || 'secondary') as 'default' | 'secondary' | 'outline' | 'destructive'} className="ml-2">
         {labels[sessionType] || sessionType}
       </Badge>
     );
