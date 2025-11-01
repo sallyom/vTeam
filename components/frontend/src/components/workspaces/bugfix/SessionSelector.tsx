@@ -157,54 +157,63 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
       </Button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+        <DialogContent className="w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Create New Session</DialogTitle>
+            <DialogTitle>Create Session for Bug #{githubIssueNumber}</DialogTitle>
             <DialogDescription>
-              Select a session type to work on Bug #{githubIssueNumber}
+              Choose a session type and configure your bugfix workflow
             </DialogDescription>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto py-4">
-            <div className="space-y-4">
-              <RadioGroup value={selectedType} onValueChange={setSelectedType}>
-                <div className="grid gap-4">
-                  {SESSION_TYPES.map((type) => (
-                    <Card
-                      key={type.id}
-                      className={`cursor-pointer transition-colors ${
-                        selectedType === type.id ? 'border-primary' : 'hover:border-primary/50'
-                      }`}
-                      onClick={() => setSelectedType(type.id)}
-                    >
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start space-x-3">
-                          <RadioGroupItem value={type.id} id={type.id} />
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <Label htmlFor={type.id} className="cursor-pointer flex items-center gap-2">
+            <div className="space-y-6">
+              {/* Session Type Selection - Always visible, full width */}
+              <div>
+                <h3 className="text-sm font-medium mb-3">Session Type</h3>
+                <RadioGroup value={selectedType} onValueChange={setSelectedType}>
+                  <div className="grid grid-cols-3 gap-4">
+                    {SESSION_TYPES.map((type) => (
+                      <Card
+                        key={type.id}
+                        className={`cursor-pointer transition-all ${
+                          selectedType === type.id
+                            ? 'border-primary shadow-md ring-2 ring-primary/20'
+                            : 'hover:border-primary/50 hover:shadow-sm'
+                        }`}
+                        onClick={() => setSelectedType(type.id)}
+                      >
+                        <CardHeader className="pb-4">
+                          <div className="flex flex-col space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2 text-primary">
                                 {type.icon}
-                                <span className="font-semibold">{type.name}</span>
-                              </Label>
+                                <RadioGroupItem value={type.id} id={type.id} className="sr-only" />
+                              </div>
                               {type.badge && (
                                 <Badge variant="secondary" className="text-xs">
                                   {type.badge}
                                 </Badge>
                               )}
                             </div>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {type.description}
-                            </p>
+                            <div>
+                              <Label htmlFor={type.id} className="cursor-pointer text-base font-semibold">
+                                {type.name}
+                              </Label>
+                              <p className="text-sm text-muted-foreground mt-2 line-clamp-3">
+                                {type.description}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </CardHeader>
-                    </Card>
-                  ))}
-                </div>
-              </RadioGroup>
+                        </CardHeader>
+                      </Card>
+                    ))}
+                  </div>
+                </RadioGroup>
+              </div>
 
               {selectedType && (
-                <div className="space-y-4 border-t pt-4">
+                <div className="space-y-4 border-t pt-6">
+                  <h3 className="text-sm font-medium mb-4">Session Configuration</h3>
                   {/* Interactive Mode */}
                   <div className="flex items-center space-x-2">
                     <Checkbox

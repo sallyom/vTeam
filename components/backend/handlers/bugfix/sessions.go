@@ -136,11 +136,11 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		// Include the GitHub issue URL so Claude can fetch it
 		switch req.SessionType {
 		case "bug-review":
-			prompt = fmt.Sprintf("Review the GitHub issue at %s and analyze the bug report. Focus on understanding the problem, reproduction steps, and affected components.", workflow.GithubIssueURL)
+			prompt = fmt.Sprintf("Review the GitHub issue at %s and analyze the bug report. Focus on understanding the problem, reproduction steps, and affected components. Follow any guidelines in CLAUDE.md if present in the repository.", workflow.GithubIssueURL)
 		case "bug-resolution-plan":
-			prompt = fmt.Sprintf("Create a detailed resolution plan for the bug described in %s. Analyze the bug, identify root cause, and propose a fix strategy.", workflow.GithubIssueURL)
+			prompt = fmt.Sprintf("Create a detailed resolution plan for the bug described in %s. Analyze the bug, identify root cause, and propose a fix strategy. Follow any guidelines in CLAUDE.md if present in the repository.", workflow.GithubIssueURL)
 		case "bug-implement-fix":
-			prompt = fmt.Sprintf("Implement the fix for the bug described in %s based on the resolution plan. Make code changes, add tests, and prepare for review.", workflow.GithubIssueURL)
+			prompt = fmt.Sprintf("Implement the fix for the bug described in %s based on the resolution plan. Make code changes, add tests, and prepare for review. Follow any guidelines in CLAUDE.md if present in the repository.", workflow.GithubIssueURL)
 		}
 		// Add description to prompt if provided
 		if description != "" {
