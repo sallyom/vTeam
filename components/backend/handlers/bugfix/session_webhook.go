@@ -8,7 +8,6 @@ import (
 	"os"
 	"strings"
 
-	"ambient-code-backend/bugfix"
 	"ambient-code-backend/crd"
 	"ambient-code-backend/github"
 	"ambient-code-backend/websocket"
@@ -239,51 +238,9 @@ func handleBugResolutionPlanCompletion(c *gin.Context, event AgenticSessionWebho
 		return
 	}
 
-	// Get user info for Git operations (from annotations or default)
-	userEmail := workflow.Annotations["user-email"]
-	if userEmail == "" {
-		userEmail = "bugfix-bot@vteam.io" // Default email
-	}
-	userName := workflow.Annotations["user-name"]
-	if userName == "" {
-		userName = "BugFix Bot" // Default name
-	}
-
-	// Create/update bugfix.md file (T062/T063 already implemented)
+	// Format and post resolution plan comment to GitHub Issue
 	ctx := context.Background()
-
-	// Get spec repo URL from umbrella repo
-	specRepoURL := ""
-	if workflow.UmbrellaRepo != nil {
-		specRepoURL = workflow.UmbrellaRepo.URL
-	}
-
-	// Get Jira task URL (dereference pointer)
-	jiraTaskURL := ""
-	if workflow.JiraTaskURL != nil {
-		jiraTaskURL = *workflow.JiraTaskURL
-	}
-
-	err = bugfix.CreateOrUpdateBugfixMarkdown(
-		ctx,
-		specRepoURL,
-		workflow.GithubIssueNumber,
-		workflow.BranchName,
-		githubToken,
-		userEmail,
-		userName,
-		workflow.GithubIssueURL,
-		jiraTaskURL,
-		"Resolution Plan",
-		resolutionPlan,
-	)
-	if err != nil {
-		log.Printf("Failed to create/update bugfix.md: %v", err)
-		// Continue anyway - we still want to post to GitHub
-	}
-
-	// T064: Format and post resolution plan comment to GitHub Issue
-	comment := formatResolutionPlanComment(resolutionPlan, event.Object.GetName(), workflow.BugFolderCreated)
+	comment := formatResolutionPlanComment(resolutionPlan, event.Object.GetName())
 
 	githubComment, err := github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
 	if err != nil {
@@ -292,7 +249,7 @@ func handleBugResolutionPlanCompletion(c *gin.Context, event AgenticSessionWebho
 		return
 	}
 
-	// T065: Update workflow CR with annotations (metadata)
+	// Update workflow CR with annotations (metadata)
 	if workflow.Annotations == nil {
 		workflow.Annotations = make(map[string]string)
 	}
@@ -305,27 +262,18 @@ func handleBugResolutionPlanCompletion(c *gin.Context, event AgenticSessionWebho
 		log.Printf("Failed to update workflow annotations: %v", err)
 	}
 
-	// Update status subresource
-	workflow.BugfixMarkdownCreated = true
-	err = crd.UpdateBugFixWorkflowStatus(reqDyn, workflow)
-	if err != nil {
-		// Non-fatal: log but continue
-		log.Printf("Failed to update workflow status (bugfixMarkdownCreated): %v", err)
-	}
-
 	// Broadcast success event
 	websocket.BroadcastBugFixSessionCompleted(workflowID, event.Object.GetName(), "bug-resolution-plan")
 
 	c.JSON(http.StatusOK, gin.H{
-		"status":               "processed",
-		"session":              event.Object.GetName(),
-		"commentURL":           githubComment.URL,
-		"bugfixMarkdownCreated": workflow.BugfixMarkdownCreated,
+		"status":     "processed",
+		"session":    event.Object.GetName(),
+		"commentURL": githubComment.URL,
 	})
 }
 
 // formatResolutionPlanComment formats the resolution plan for GitHub comment
-func formatResolutionPlanComment(plan, sessionID string, bugFolderCreated bool) string {
+func formatResolutionPlanComment(plan, sessionID string) string {
 	var comment strings.Builder
 
 	comment.WriteString("## 📋 Bug Resolution Plan\n\n")
@@ -339,12 +287,6 @@ func formatResolutionPlanComment(plan, sessionID string, bugFolderCreated bool) 
 		// Add basic formatting to plain text plan
 		comment.WriteString("### Proposed Resolution\n\n")
 		comment.WriteString(plan)
-	}
-
-	// Add note about bugfix.md file if created
-	if bugFolderCreated {
-		comment.WriteString("\n\n### Documentation\n")
-		comment.WriteString("The detailed resolution plan has been documented in the `bugfix.md` file in the spec repository.\n")
 	}
 
 	comment.WriteString("\n\n---\n")
@@ -403,50 +345,8 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 		return
 	}
 
-	// Get user info for Git operations
-	userEmail := workflow.Annotations["user-email"]
-	if userEmail == "" {
-		userEmail = "bugfix-bot@vteam.io"
-	}
-	userName := workflow.Annotations["user-name"]
-	if userName == "" {
-		userName = "BugFix Bot"
-	}
-
-	// T072: Update bugfix.md file with implementation details
-	ctx := context.Background()
-
-	// Get spec repo URL from umbrella repo
-	specRepoURL := ""
-	if workflow.UmbrellaRepo != nil {
-		specRepoURL = workflow.UmbrellaRepo.URL
-	}
-
-	// Get Jira task URL (dereference pointer)
-	jiraTaskURL := ""
-	if workflow.JiraTaskURL != nil {
-		jiraTaskURL = *workflow.JiraTaskURL
-	}
-
-	err = bugfix.CreateOrUpdateBugfixMarkdown(
-		ctx,
-		specRepoURL,
-		workflow.GithubIssueNumber,
-		workflow.BranchName,
-		githubToken,
-		userEmail,
-		userName,
-		workflow.GithubIssueURL,
-		jiraTaskURL,
-		"Implementation Details",
-		implementationSummary,
-	)
-	if err != nil {
-		log.Printf("Failed to update bugfix.md with implementation details: %v", err)
-		// Continue anyway - we still want to post to GitHub
-	}
-
 	// Format and post implementation summary comment to GitHub Issue
+	ctx := context.Background()
 	comment := formatImplementationComment(implementationSummary, event.Object.GetName(), workflow.BranchName)
 
 	githubComment, err := github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
@@ -625,104 +525,17 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 		log.Printf("Successfully posted Bug-review findings to GitHub Issue #%d", issueNumber)
 
 	case "bug-resolution-plan":
-		// Get user info for Git operations
-		userEmail := workflow.Annotations["user-email"]
-		if userEmail == "" {
-			userEmail = "bugfix-bot@vteam.io"
-		}
-		userName := workflow.Annotations["user-name"]
-		if userName == "" {
-			userName = "BugFix Bot"
-		}
-
-		// Get spec repo URL from umbrella repo
-		specRepoURL := ""
-		if workflow.UmbrellaRepo != nil {
-			specRepoURL = workflow.UmbrellaRepo.URL
-		}
-
-		// Get Jira task URL (dereference pointer)
-		jiraTaskURL := ""
-		if workflow.JiraTaskURL != nil {
-			jiraTaskURL = *workflow.JiraTaskURL
-		}
-
-		// Create/update bugfix.md file
-		err = bugfix.CreateOrUpdateBugfixMarkdown(
-			ctx,
-			specRepoURL,
-			workflow.GithubIssueNumber,
-			workflow.BranchName,
-			githubToken,
-			userEmail,
-			userName,
-			workflow.GithubIssueURL,
-			jiraTaskURL,
-			"Resolution Plan",
-			output,
-		)
-		if err != nil {
-			log.Printf("Failed to create/update bugfix.md: %v", err)
-		}
-
 		// Post resolution plan comment
-		comment := formatResolutionPlanComment(output, session.GetName(), workflow.BugFolderCreated)
+		comment := formatResolutionPlanComment(output, session.GetName())
 		_, err = github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
 		if err != nil {
 			log.Printf("Failed to post resolution plan to GitHub Issue: %v", err)
 			return
 		}
 
-		// Update workflow status
-		workflow.BugfixMarkdownCreated = true
-		err = crd.UpdateBugFixWorkflowStatus(client, workflow)
-		if err != nil {
-			log.Printf("Failed to update workflow status (bugfixMarkdownCreated): %v", err)
-		}
-
 		log.Printf("Successfully posted resolution plan to GitHub Issue #%d", issueNumber)
 
 	case "bug-implement-fix":
-		// Get user info for Git operations
-		userEmail := workflow.Annotations["user-email"]
-		if userEmail == "" {
-			userEmail = "bugfix-bot@vteam.io"
-		}
-		userName := workflow.Annotations["user-name"]
-		if userName == "" {
-			userName = "BugFix Bot"
-		}
-
-		// Get spec repo URL from umbrella repo
-		specRepoURL := ""
-		if workflow.UmbrellaRepo != nil {
-			specRepoURL = workflow.UmbrellaRepo.URL
-		}
-
-		// Get Jira task URL (dereference pointer)
-		jiraTaskURL := ""
-		if workflow.JiraTaskURL != nil {
-			jiraTaskURL = *workflow.JiraTaskURL
-		}
-
-		// Update bugfix.md file with implementation details
-		err = bugfix.CreateOrUpdateBugfixMarkdown(
-			ctx,
-			specRepoURL,
-			workflow.GithubIssueNumber,
-			workflow.BranchName,
-			githubToken,
-			userEmail,
-			userName,
-			workflow.GithubIssueURL,
-			jiraTaskURL,
-			"Implementation Details",
-			output,
-		)
-		if err != nil {
-			log.Printf("Failed to update bugfix.md: %v", err)
-		}
-
 		// Post implementation summary comment
 		comment := formatImplementationComment(output, session.GetName(), workflow.BranchName)
 		_, err = github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)

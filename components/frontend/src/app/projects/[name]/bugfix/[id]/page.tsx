@@ -143,17 +143,6 @@ export default function BugFixWorkspaceDetailPage() {
         });
       }
 
-      // Bugfix markdown created
-      if (workflow.bugfixMarkdownCreated) {
-        events.push({
-          id: `bugfix-md-created-${workflow.id}`,
-          type: 'bugfix_md_created',
-          title: 'Resolution Plan Created',
-          description: 'bugfix.md file created with implementation plan',
-          timestamp: workflow.createdAt, // TODO: Add actual timestamp when available
-        });
-      }
-
       // Implementation completed
       if (workflow.implementationCompleted) {
         events.push({
@@ -348,15 +337,15 @@ export default function BugFixWorkspaceDetailPage() {
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <div className="text-sm font-medium text-muted-foreground">Bug Folder</div>
+                    <div className="text-sm font-medium text-muted-foreground">Implementation Status</div>
                     <div className="flex items-center gap-2 mt-1">
-                      {workflow.bugFolderCreated ? (
+                      {workflow.implementationCompleted ? (
                         <>
                           <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          <span className="text-sm">Created</span>
+                          <span className="text-sm">Completed</span>
                         </>
                       ) : (
-                        <span className="text-sm text-muted-foreground">Not created</span>
+                        <span className="text-sm text-muted-foreground">In Progress</span>
                       )}
                     </div>
                   </div>
@@ -399,41 +388,27 @@ export default function BugFixWorkspaceDetailPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Repositories</CardTitle>
+                <CardTitle>Repository</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {workflow.umbrellaRepo && (
+                  {workflow.implementationRepo && (
                     <div>
-                      <div className="text-sm font-medium mb-1">Spec Repository</div>
+                      <div className="text-sm font-medium mb-1">Implementation Repository</div>
                       <a
-                        href={workflow.umbrellaRepo.url}
+                        href={workflow.implementationRepo.url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm text-primary hover:underline flex items-center gap-1"
                       >
-                        {workflow.umbrellaRepo.url}
+                        {workflow.implementationRepo.url}
                         <ExternalLink className="h-3 w-3" />
                       </a>
-                    </div>
-                  )}
-                  {workflow.supportingRepos && workflow.supportingRepos.length > 0 && (
-                    <div>
-                      <div className="text-sm font-medium mb-1">Implementation Repositories</div>
-                      <div className="space-y-1">
-                        {workflow.supportingRepos.map((repo, idx) => (
-                          <a
-                            key={idx}
-                            href={repo.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-primary hover:underline flex items-center gap-1"
-                          >
-                            {repo.url}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
-                        ))}
-                      </div>
+                      {workflow.implementationRepo.branch && (
+                        <div className="text-xs text-muted-foreground mt-1">
+                          Branch: <code className="bg-muted px-1 py-0.5 rounded">{workflow.implementationRepo.branch}</code>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

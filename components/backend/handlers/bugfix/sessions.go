@@ -3,10 +3,12 @@ package bugfix
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
 	"ambient-code-backend/crd"
+	"ambient-code-backend/handlers"
 	"ambient-code-backend/types"
 
 	"github.com/gin-gonic/gin"
@@ -32,13 +34,12 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 
 	// Validate session type
 	validTypes := map[string]bool{
-		"bug-review":           true,
-		"bug-resolution-plan":  true,
-		"bug-implement-fix":    true,
-		"generic":              true,
+		"bug-review":          true,
+		"bug-resolution-plan": true,
+		"bug-implement-fix":   true,
 	}
 	if !validTypes[req.SessionType] {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid session type. Must be: bug-review, bug-resolution-plan, bug-implement-fix, or generic"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid session type. Must be: bug-review, bug-resolution-plan, or bug-implement-fix"})
 		return
 	}
 
@@ -82,8 +83,6 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 			title = fmt.Sprintf("Resolution Plan: Issue #%d", workflow.GithubIssueNumber)
 		case "bug-implement-fix":
 			title = fmt.Sprintf("Implement Fix: Issue #%d", workflow.GithubIssueNumber)
-		case "generic":
-			title = fmt.Sprintf("Generic Session: Issue #%d", workflow.GithubIssueNumber)
 		}
 	}
 
@@ -93,46 +92,32 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		description = *req.Description
 	}
 
-	// Build repositories list (umbrella + supporting, all using feature branch)
+	// Build repositories list (implementation repo using feature branch)
 	repos := make([]map[string]interface{}, 0)
 
-	if workflow.UmbrellaRepo != nil {
-		repoInput := map[string]interface{}{
-			"url":    workflow.UmbrellaRepo.URL,
-			"branch": workflow.BranchName,
-		}
-		repoOutput := map[string]interface{}{
-			"url":    workflow.UmbrellaRepo.URL,
-			"branch": workflow.BranchName,
-		}
-		repos = append(repos, map[string]interface{}{
-			"input":  repoInput,
-			"output": repoOutput,
-		})
+	repoInput := map[string]interface{}{
+		"url":    workflow.ImplementationRepo.URL,
+		"branch": workflow.BranchName, // Use feature branch (e.g., bugfix/gh-231)
 	}
-
-	for _, supportingRepo := range workflow.SupportingRepos {
-		repoInput := map[string]interface{}{
-			"url":    supportingRepo.URL,
-			"branch": workflow.BranchName,
-		}
-		repoOutput := map[string]interface{}{
-			"url":    supportingRepo.URL,
-			"branch": workflow.BranchName,
-		}
-		repos = append(repos, map[string]interface{}{
-			"input":  repoInput,
-			"output": repoOutput,
-		})
+	repoOutput := map[string]interface{}{
+		"url":    workflow.ImplementationRepo.URL,
+		"branch": workflow.BranchName, // Push fixes to same feature branch
 	}
+	repos = append(repos, map[string]interface{}{
+		"input":  repoInput,
+		"output": repoOutput,
+	})
 
 	// Build environment variables
+	// NOTE: environmentVariables field is not currently in the AgenticSession CRD schema,
+	// so these will be silently dropped when the CR is created. Include critical info
+	// (like GitHub issue URL) directly in the prompt instead.
 	envVars := map[string]string{
-		"GITHUB_ISSUE_NUMBER":   fmt.Sprintf("%d", workflow.GithubIssueNumber),
-		"GITHUB_ISSUE_URL":      workflow.GithubIssueURL,
-		"BUGFIX_WORKFLOW_ID":    workflowID,
-		"SESSION_TYPE":          req.SessionType,
-		"PROJECT_NAME":          project,
+		"GITHUB_ISSUE_NUMBER": fmt.Sprintf("%d", workflow.GithubIssueNumber),
+		"GITHUB_ISSUE_URL":    workflow.GithubIssueURL,
+		"BUGFIX_WORKFLOW_ID":  workflowID,
+		"SESSION_TYPE":        req.SessionType,
+		"PROJECT_NAME":        project,
 	}
 
 	// Merge user-provided environment variables
@@ -148,15 +133,14 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		prompt = *req.Prompt
 	} else {
 		// Auto-generate prompt based on session type
+		// Include the GitHub issue URL so Claude can fetch it
 		switch req.SessionType {
 		case "bug-review":
-			prompt = fmt.Sprintf("Review GitHub Issue #%d and analyze the bug report. Focus on understanding the problem, reproduction steps, and affected components.", workflow.GithubIssueNumber)
+			prompt = fmt.Sprintf("Review the GitHub issue at %s and analyze the bug report. Focus on understanding the problem, reproduction steps, and affected components.", workflow.GithubIssueURL)
 		case "bug-resolution-plan":
-			prompt = fmt.Sprintf("Create a detailed resolution plan for GitHub Issue #%d. Analyze the bug, identify root cause, and propose a fix strategy.", workflow.GithubIssueNumber)
+			prompt = fmt.Sprintf("Create a detailed resolution plan for the bug described in %s. Analyze the bug, identify root cause, and propose a fix strategy.", workflow.GithubIssueURL)
 		case "bug-implement-fix":
-			prompt = fmt.Sprintf("Implement the fix for GitHub Issue #%d based on the resolution plan. Make code changes, add tests, and prepare for review.", workflow.GithubIssueNumber)
-		case "generic":
-			prompt = fmt.Sprintf("Work on GitHub Issue #%d.", workflow.GithubIssueNumber)
+			prompt = fmt.Sprintf("Implement the fix for the bug described in %s based on the resolution plan. Make code changes, add tests, and prepare for review.", workflow.GithubIssueURL)
 		}
 		// Add description to prompt if provided
 		if description != "" {
@@ -164,17 +148,56 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		}
 	}
 
+	// Determine auto-push setting (default: true for bugfix sessions)
+	autoPush := true
+	if req.AutoPushOnComplete != nil {
+		autoPush = *req.AutoPushOnComplete
+	}
+
+	// Determine LLM settings (use overrides if provided, otherwise defaults)
+	model := "claude-sonnet-4-20250514"
+	temperature := 0.7
+	maxTokens := 8000
+	timeout := 3600 // 1 hour default
+
+	if req.ResourceOverrides != nil {
+		if req.ResourceOverrides.Model != nil {
+			model = *req.ResourceOverrides.Model
+		}
+		if req.ResourceOverrides.Temperature != nil {
+			temperature = *req.ResourceOverrides.Temperature
+		}
+		if req.ResourceOverrides.MaxTokens != nil {
+			maxTokens = *req.ResourceOverrides.MaxTokens
+		}
+		if req.ResourceOverrides.Timeout != nil {
+			timeout = *req.ResourceOverrides.Timeout
+		}
+	}
+
 	// Build AgenticSession spec (following CRD schema)
+	// Note: project field is not in CRD - operator uses namespace to find ProjectSettings
 	sessionSpec := map[string]interface{}{
-		"prompt":      prompt,           // REQUIRED field
-		"displayName": title,             // Use displayName instead of title
-		"repos":       repos,
-		"timeout":     300,
+		"prompt":             prompt,   // REQUIRED field
+		"displayName":        title,    // Use displayName instead of title
+		"repos":              repos,
+		"timeout":            timeout,
+		"autoPushOnComplete": autoPush, // Auto-push changes to feature branch
+		"llmSettings": map[string]interface{}{
+			"model":       model,
+			"temperature": temperature,
+			"maxTokens":   maxTokens,
+		},
 	}
 
 	// Add environment variables if any
 	if len(envVars) > 0 {
 		sessionSpec["environmentVariables"] = envVars
+	}
+
+	// Add interactive mode if requested (default is headless/false)
+	if req.Interactive != nil && *req.Interactive {
+		sessionSpec["interactive"] = true
 	}
 
 	// Add agent personas if provided
@@ -188,9 +211,25 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		}
 	}
 
-	// Add resource overrides if provided
+	// Add resource overrides if provided (infrastructure only - CPU, Memory, StorageClass, PriorityClass)
+	// Note: Model/Temperature/MaxTokens/Timeout are handled separately in llmSettings and timeout fields
 	if req.ResourceOverrides != nil {
-		sessionSpec["resourceOverrides"] = req.ResourceOverrides
+		infraOverrides := make(map[string]interface{})
+		if req.ResourceOverrides.CPU != "" {
+			infraOverrides["cpu"] = req.ResourceOverrides.CPU
+		}
+		if req.ResourceOverrides.Memory != "" {
+			infraOverrides["memory"] = req.ResourceOverrides.Memory
+		}
+		if req.ResourceOverrides.StorageClass != "" {
+			infraOverrides["storageClass"] = req.ResourceOverrides.StorageClass
+		}
+		if req.ResourceOverrides.PriorityClass != "" {
+			infraOverrides["priorityClass"] = req.ResourceOverrides.PriorityClass
+		}
+		if len(infraOverrides) > 0 {
+			sessionSpec["resourceOverrides"] = infraOverrides
+		}
 	}
 
 	// Build labels for linking to BugFix Workflow
@@ -220,6 +259,13 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session", "details": err.Error()})
 		return
+	}
+
+	// Provision runner token for session (creates Secret with K8s token for CR updates)
+	// Use backend service account clients (not user clients) for this operation
+	if err := handlers.ProvisionRunnerTokenForSession(c, handlers.K8sClient, handlers.DynamicClient, project, sessionName); err != nil {
+		// Non-fatal: log and continue. Session will fail to start but can be debugged.
+		log.Printf("Warning: failed to provision runner token for bugfix session %s/%s: %v", project, sessionName, err)
 	}
 
 	// Return created session info
@@ -275,7 +321,7 @@ func ListProjectBugFixWorkflowSessions(c *gin.Context) {
 
 		session := map[string]interface{}{
 			"id":        item.GetName(),
-			"title":     spec["title"],
+			"title":     spec["displayName"], // Use displayName from CRD spec
 			"createdAt": item.GetCreationTimestamp().Time.UTC().Format(time.RFC3339),
 		}
 

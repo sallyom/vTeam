@@ -42,34 +42,18 @@ func BugFixWorkflowToCRObject(workflow *types.BugFixWorkflow) map[string]interfa
 		spec["createdBy"] = workflow.CreatedBy
 	}
 
-	// Umbrella repo
-	if workflow.UmbrellaRepo != nil {
-		u := map[string]interface{}{"url": workflow.UmbrellaRepo.URL}
-		if workflow.UmbrellaRepo.Branch != nil {
-			u["branch"] = *workflow.UmbrellaRepo.Branch
-		}
-		spec["umbrellaRepo"] = u
+	// Implementation repo (required)
+	implRepo := map[string]interface{}{"url": workflow.ImplementationRepo.URL}
+	if workflow.ImplementationRepo.Branch != nil {
+		implRepo["branch"] = *workflow.ImplementationRepo.Branch
 	}
-
-	// Supporting repos
-	if len(workflow.SupportingRepos) > 0 {
-		items := make([]map[string]interface{}, 0, len(workflow.SupportingRepos))
-		for _, r := range workflow.SupportingRepos {
-			rm := map[string]interface{}{"url": r.URL}
-			if r.Branch != nil {
-				rm["branch"] = *r.Branch
-			}
-			items = append(items, rm)
-		}
-		spec["supportingRepos"] = items
-	}
+	spec["implementationRepo"] = implRepo
 
 	// Build status
 	status := map[string]interface{}{
 		"phase":                   workflow.Phase,
 		"message":                 workflow.Message,
-		"bugFolderCreated":        workflow.BugFolderCreated,
-		"bugfixMarkdownCreated":   workflow.BugfixMarkdownCreated,
+		"implementationCompleted": workflow.ImplementationCompleted,
 	}
 
 	// Build labels
@@ -146,34 +130,16 @@ func GetProjectBugFixWorkflowCR(dyn dynamic.Interface, project, id string) (*typ
 			workflow.LastSyncedAt = &val
 		}
 
-		// Parse umbrellaRepo
-		if umbrellaMap, ok := spec["umbrellaRepo"].(map[string]interface{}); ok {
-			repo := &types.GitRepository{}
-			if url, ok := umbrellaMap["url"].(string); ok {
+		// Parse implementationRepo
+		if implMap, ok := spec["implementationRepo"].(map[string]interface{}); ok {
+			repo := types.GitRepository{}
+			if url, ok := implMap["url"].(string); ok {
 				repo.URL = url
 			}
-			if branch, ok := umbrellaMap["branch"].(string); ok && branch != "" {
+			if branch, ok := implMap["branch"].(string); ok && branch != "" {
 				repo.Branch = &branch
 			}
-			workflow.UmbrellaRepo = repo
-		}
-
-		// Parse supportingRepos
-		if reposSlice, ok := spec["supportingRepos"].([]interface{}); ok {
-			repos := make([]types.GitRepository, 0, len(reposSlice))
-			for _, item := range reposSlice {
-				if repoMap, ok := item.(map[string]interface{}); ok {
-					repo := types.GitRepository{}
-					if url, ok := repoMap["url"].(string); ok {
-						repo.URL = url
-					}
-					if branch, ok := repoMap["branch"].(string); ok && branch != "" {
-						repo.Branch = &branch
-					}
-					repos = append(repos, repo)
-				}
-			}
-			workflow.SupportingRepos = repos
+			workflow.ImplementationRepo = repo
 		}
 	}
 
@@ -186,11 +152,8 @@ func GetProjectBugFixWorkflowCR(dyn dynamic.Interface, project, id string) (*typ
 		if val, ok := status["message"].(string); ok {
 			workflow.Message = val
 		}
-		if val, ok := status["bugFolderCreated"].(bool); ok {
-			workflow.BugFolderCreated = val
-		}
-		if val, ok := status["bugfixMarkdownCreated"].(bool); ok {
-			workflow.BugfixMarkdownCreated = val
+		if val, ok := status["implementationCompleted"].(bool); ok {
+			workflow.ImplementationCompleted = val
 		}
 	}
 
@@ -305,8 +268,6 @@ func UpdateBugFixWorkflowStatus(dyn dynamic.Interface, workflow *types.BugFixWor
 	status := map[string]interface{}{
 		"phase":                   workflow.Phase,
 		"message":                 workflow.Message,
-		"bugFolderCreated":        workflow.BugFolderCreated,
-		"bugfixMarkdownCreated":   workflow.BugfixMarkdownCreated,
 		"implementationCompleted": workflow.ImplementationCompleted,
 	}
 	obj.Object["status"] = status

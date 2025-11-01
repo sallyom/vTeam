@@ -31,8 +31,6 @@ describe('BugImplementFixSessionPage', () => {
     githubIssueNumber: 789,
     githubIssueURL: 'https://github.com/test/repo/issues/789',
     branchName: 'bugfix/gh-789',
-    bugfixMarkdownCreated: true,
-    bugFolderCreated: true,
   };
 
   const mockSession = {

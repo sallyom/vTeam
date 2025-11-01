@@ -17,8 +17,6 @@ export interface BugFixWorkflow {
   branchName: string;
   phase: 'Initializing' | 'Ready';
   message?: string;
-  bugFolderCreated: boolean;
-  bugfixMarkdownCreated: boolean;
   implementationCompleted?: boolean;
   project: string;
   createdAt: string;
@@ -27,14 +25,10 @@ export interface BugFixWorkflow {
   jiraTaskURL?: string;
   lastSyncedAt?: string;
   workspacePath?: string;
-  umbrellaRepo?: {
+  implementationRepo: {
     url: string;
     branch?: string;
   };
-  supportingRepos?: Array<{
-    url: string;
-    branch?: string;
-  }>;
 }
 
 export interface TextDescriptionInput {
@@ -50,28 +44,31 @@ export interface TextDescriptionInput {
 export interface CreateBugFixWorkflowRequest {
   githubIssueURL?: string;
   textDescription?: TextDescriptionInput;
-  umbrellaRepo: {
+  implementationRepo: {
     url: string;
     branch?: string;
   };
-  supportingRepos?: Array<{
-    url: string;
-    branch?: string;
-  }>;
   branchName?: string;
 }
 
 export interface CreateBugFixSessionRequest {
-  sessionType: 'bug-review' | 'bug-resolution-plan' | 'bug-implement-fix' | 'generic';
+  sessionType: 'bug-review' | 'bug-resolution-plan' | 'bug-implement-fix';
   title?: string;
+  prompt?: string;
   description?: string;
   selectedAgents?: string[];
+  interactive?: boolean;
+  autoPushOnComplete?: boolean;
   environmentVariables?: Record<string, string>;
   resourceOverrides?: {
     cpu?: string;
     memory?: string;
     storageClass?: string;
     priorityClass?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+    timeout?: number;
   };
 }
 
@@ -79,8 +76,7 @@ export interface BugFixWorkflowStatus {
   id: string;
   phase: string;
   message: string;
-  bugFolderCreated: boolean;
-  bugfixMarkdownCreated: boolean;
+  implementationCompleted: boolean;
   githubIssueNumber: number;
   githubIssueURL: string;
   jiraSynced: boolean;

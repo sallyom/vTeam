@@ -7,6 +7,16 @@ type GitRepository struct {
 	Branch *string `json:"branch,omitempty"`
 }
 
+// GetURL implements git.GitRepo interface
+func (r GitRepository) GetURL() string {
+	return r.URL
+}
+
+// GetBranch implements git.GitRepo interface
+func (r GitRepository) GetBranch() *string {
+	return r.Branch
+}
+
 type UserContext struct {
 	UserID      string   `json:"userId" binding:"required"`
 	DisplayName string   `json:"displayName" binding:"required"`
@@ -18,10 +28,14 @@ type BotAccountRef struct {
 }
 
 type ResourceOverrides struct {
-	CPU           string `json:"cpu,omitempty"`
-	Memory        string `json:"memory,omitempty"`
-	StorageClass  string `json:"storageClass,omitempty"`
-	PriorityClass string `json:"priorityClass,omitempty"`
+	CPU           string   `json:"cpu,omitempty"`
+	Memory        string   `json:"memory,omitempty"`
+	StorageClass  string   `json:"storageClass,omitempty"`
+	PriorityClass string   `json:"priorityClass,omitempty"`
+	Model         *string  `json:"model,omitempty"`
+	Temperature   *float64 `json:"temperature,omitempty"`
+	MaxTokens     *int     `json:"maxTokens,omitempty"`
+	Timeout       *int     `json:"timeout,omitempty"`
 }
 
 type LLMSettings struct {

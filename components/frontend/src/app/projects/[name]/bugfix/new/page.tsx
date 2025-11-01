@@ -32,7 +32,7 @@ const issueUrlSchema = z.object({
   githubIssueURL: z.string()
     .url('Please enter a valid URL')
     .regex(githubIssueUrlRegex, 'Must be a valid GitHub Issue URL (e.g., https://github.com/owner/repo/issues/123)'),
-  umbrellaRepo: repoSchema,
+  implementationRepo: repoSchema,
   branchName: z.string().optional(),
 });
 
@@ -45,7 +45,7 @@ const textDescriptionSchema = z.object({
   actualBehavior: z.string().optional(),
   additionalContext: z.string().optional(),
   targetRepository: z.string().url('Please enter a valid repository URL'),
-  umbrellaRepo: repoSchema,
+  implementationRepo: repoSchema,
   branchName: z.string().optional(),
 });
 
@@ -64,7 +64,7 @@ export default function NewBugFixWorkspacePage() {
     resolver: zodResolver(issueUrlSchema),
     defaultValues: {
       githubIssueURL: '',
-      umbrellaRepo: { url: '', branch: 'main' },
+      implementationRepo: { url: '', branch: 'main' },
       branchName: '',
     },
   });
@@ -80,7 +80,7 @@ export default function NewBugFixWorkspacePage() {
       actualBehavior: '',
       additionalContext: '',
       targetRepository: '',
-      umbrellaRepo: { url: '', branch: 'main' },
+      implementationRepo: { url: '', branch: 'main' },
       branchName: '',
     },
   });
@@ -100,9 +100,9 @@ export default function NewBugFixWorkspacePage() {
     try {
       const request: CreateBugFixWorkflowRequest = {
         githubIssueURL: values.githubIssueURL.trim(),
-        umbrellaRepo: {
-          url: values.umbrellaRepo.url.trim(),
-          branch: values.umbrellaRepo.branch?.trim() || 'main',
+        implementationRepo: {
+          url: values.implementationRepo.url.trim(),
+          branch: values.implementationRepo.branch?.trim() || 'main',
         },
         branchName: values.branchName?.trim() || undefined,
       };
@@ -132,9 +132,9 @@ export default function NewBugFixWorkspacePage() {
           additionalContext: values.additionalContext || undefined,
           targetRepository: values.targetRepository.trim(),
         },
-        umbrellaRepo: {
-          url: values.umbrellaRepo.url.trim(),
-          branch: values.umbrellaRepo.branch?.trim() || 'main',
+        implementationRepo: {
+          url: values.implementationRepo.url.trim(),
+          branch: values.implementationRepo.branch?.trim() || 'main',
         },
         branchName: values.branchName?.trim() || undefined,
       };
@@ -220,18 +220,18 @@ export default function NewBugFixWorkspacePage() {
 
                   <FormField
                     control={issueUrlForm.control}
-                    name="umbrellaRepo.url"
+                    name="implementationRepo.url"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Spec Repository URL *</FormLabel>
+                        <FormLabel>Implementation Repository URL *</FormLabel>
                         <FormControl>
                           <Input
-                            placeholder="https://github.com/owner/specs"
+                            placeholder="https://github.com/owner/repository"
                             {...field}
                           />
                         </FormControl>
                         <FormDescription>
-                          Repository where bug documentation will be stored
+                          Repository containing the code/bug to be fixed
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -396,18 +396,18 @@ export default function NewBugFixWorkspacePage() {
 
                   <FormField
                     control={textDescriptionForm.control}
-                    name="umbrellaRepo.url"
+                    name="implementationRepo.url"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Spec Repository URL *</FormLabel>
+                        <FormLabel>Implementation Repository URL *</FormLabel>
                         <FormControl>
                           <Input
-                            placeholder="https://github.com/owner/specs"
+                            placeholder="https://github.com/owner/repository"
                             {...field}
                           />
                         </FormControl>
                         <FormDescription>
-                          Repository where bug documentation will be stored
+                          Repository containing the code/bug to be fixed
                         </FormDescription>
                         <FormMessage />
                       </FormItem>

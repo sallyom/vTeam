@@ -31,7 +31,6 @@ describe('BugResolutionPlanSessionPage', () => {
     githubIssueNumber: 123,
     githubIssueURL: 'https://github.com/test/repo/issues/123',
     branchName: 'bugfix-123',
-    bugFolderCreated: true,
     jiraTaskKey: 'PROJ-456',
   };
 

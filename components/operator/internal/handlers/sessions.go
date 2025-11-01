@@ -279,8 +279,15 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 			if psSpec, ok := psObj.Object["spec"].(map[string]interface{}); ok {
 				if v, ok := psSpec["runnerSecretsName"].(string); ok {
 					runnerSecretsName = strings.TrimSpace(v)
+					log.Printf("Found runnerSecretsName=%s for session %s in namespace %s", runnerSecretsName, name, sessionNamespace)
+				} else {
+					log.Printf("WARNING: ProjectSettings in namespace %s has no runnerSecretsName field", sessionNamespace)
 				}
+			} else {
+				log.Printf("WARNING: ProjectSettings in namespace %s has no spec", sessionNamespace)
 			}
+		} else {
+			log.Printf("WARNING: Failed to get ProjectSettings in namespace %s: %v", sessionNamespace, err)
 		}
 	}
 

@@ -105,20 +105,6 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 			}
 		} else {
 			jiraTaskURL = fmt.Sprintf("%s/browse/%s", strings.TrimRight(jiraURL, "/"), jiraTaskKey)
-
-			// If bugfix.md exists, add as comment
-			if workflow.BugfixMarkdownCreated {
-				bugfixContent := getBugfixMarkdownContent(workflow, project, workflowID)
-				if bugfixContent != "" {
-					// T073 (partially): Post bugfix.md as comment
-					comment := formatBugfixMarkdownComment(bugfixContent, workflowID)
-					err = jira.AddJiraComment(c.Request.Context(), jiraTaskKey, comment, jiraURL, authHeader)
-					if err != nil {
-						// Non-fatal: Log but continue
-						fmt.Printf("Warning: Failed to add bugfix.md comment to Jira: %v\n", err)
-					}
-				}
-			}
 		}
 	}
 
@@ -273,10 +259,6 @@ func buildJiraDescription(workflow *types.BugFixWorkflow) string {
 	desc.WriteString(fmt.Sprintf("- Branch: %s\n", workflow.BranchName))
 	desc.WriteString(fmt.Sprintf("- Created: %s\n", workflow.CreatedAt))
 
-	if workflow.BugFolderCreated {
-		desc.WriteString(fmt.Sprintf("- Bug Folder: bug-%d/\n", workflow.GithubIssueNumber))
-	}
-
 	desc.WriteString("\n---\n")
 	desc.WriteString("*This issue is automatically synchronized from vTeam BugFix Workspace*\n")
 	desc.WriteString("*Note: Currently created as Feature Request. Will use proper Bug/Task type after Jira Cloud migration.*\n")
@@ -287,31 +269,6 @@ func buildJiraDescription(workflow *types.BugFixWorkflow) string {
 // formatGitHubJiraLinkComment formats the comment to post on GitHub Issue
 func formatGitHubJiraLinkComment(jiraTaskKey, jiraTaskURL string) string {
 	return fmt.Sprintf("## 🔗 Jira Task Created\n\nThis bug has been synchronized to Jira:\n- **Task**: [%s](%s)\n\n*Synchronized by vTeam BugFix Workspace*", jiraTaskKey, jiraTaskURL)
-}
-
-// formatBugfixMarkdownComment formats bugfix.md content as a Jira comment
-func formatBugfixMarkdownComment(content, workflowID string) string {
-	var comment strings.Builder
-
-	comment.WriteString("h3. BugFix Documentation Update\n\n")
-	comment.WriteString(fmt.Sprintf("The bugfix.md file has been updated for workflow %s:\n\n", workflowID))
-	comment.WriteString("{code}\n")
-	comment.WriteString(content)
-	comment.WriteString("\n{code}\n\n")
-	comment.WriteString("_Updated by vTeam BugFix Workspace_\n")
-
-	return comment.String()
-}
-
-// getBugfixMarkdownContent retrieves the content of bugfix.md if it exists
-func getBugfixMarkdownContent(workflow *types.BugFixWorkflow, project, workflowID string) string {
-	// This is a placeholder - in a real implementation, this would:
-	// 1. Clone or access the spec repository
-	// 2. Read the bugfix-gh-{issue-number}.md file from the bug-{issue-number}/ folder
-	// 3. Return the content
-
-	// For now, return empty string
-	return ""
 }
 
 // getSuccessMessage returns appropriate success message

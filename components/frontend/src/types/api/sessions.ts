@@ -18,6 +18,10 @@ export type ResourceOverrides = {
   memory?: string;
   storageClass?: string;
   priorityClass?: string;
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  timeout?: number;
 };
 
 export type AgenticSessionPhase =
