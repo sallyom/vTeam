@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
 import SessionSelector from '@/components/workspaces/bugfix/SessionSelector';
 import JiraSyncButton from '@/components/workspaces/bugfix/JiraSyncButton';
+import BugTimeline from '@/components/workspaces/bugfix/BugTimeline';
 import {
   Table,
   TableBody,
@@ -45,6 +46,7 @@ export default function BugFixWorkspaceDetailPage() {
   const queryClient = useQueryClient();
   const projectName = params?.name as string;
   const workflowId = params?.id as string;
+  const [timelineEvents, setTimelineEvents] = React.useState<any[]>([]);
 
   const { data: workflow, isLoading: workflowLoading } = useQuery({
     queryKey: ['bugfix-workflow', projectName, workflowId],
@@ -64,12 +66,148 @@ export default function BugFixWorkspaceDetailPage() {
     workflowId,
     onSessionCompleted: () => {
       successToast('Session completed successfully');
+      queryClient.invalidateQueries(['bugfix-sessions', projectName, workflowId]);
     },
     onJiraSyncCompleted: (event) => {
       successToast(`Synced to Jira: ${event.payload.jiraTaskKey}`);
+      queryClient.invalidateQueries(['bugfix-workflow', projectName, workflowId]);
     },
     enabled: !!projectName && !!workflowId,
   });
+
+  // Build timeline events from workflow and sessions
+  React.useEffect(() => {
+    const events: any[] = [];
+
+    if (workflow) {
+      // Workspace created event
+      if (workflow.createdAt) {
+        events.push({
+          id: `workspace-created-${workflow.id}`,
+          type: 'workspace_created',
+          title: 'Workspace Created',
+          description: `BugFix workspace created from GitHub Issue #${workflow.githubIssueNumber}`,
+          timestamp: workflow.createdAt,
+        });
+      }
+
+      // Branch created event
+      if (workflow.branchName && workflow.createdAt) {
+        events.push({
+          id: `branch-created-${workflow.id}`,
+          type: 'branch_created',
+          title: 'Feature Branch Created',
+          description: `Branch ${workflow.branchName} created`,
+          timestamp: workflow.createdAt,
+        });
+      }
+
+      // Jira synced event
+      if (workflow.jiraTaskKey && workflow.lastJiraSyncedAt) {
+        events.push({
+          id: `jira-synced-${workflow.jiraTaskKey}`,
+          type: 'jira_synced',
+          title: 'Synced to Jira',
+          description: `Jira task ${workflow.jiraTaskKey} created/updated`,
+          timestamp: workflow.lastJiraSyncedAt,
+          link: workflow.jiraTaskURL ? {
+            url: workflow.jiraTaskURL,
+            label: 'View in Jira',
+          } : undefined,
+        });
+      }
+
+      // Bugfix markdown created
+      if (workflow.bugfixMarkdownCreated) {
+        events.push({
+          id: `bugfix-md-created-${workflow.id}`,
+          type: 'bugfix_md_created',
+          title: 'Resolution Plan Created',
+          description: 'bugfix.md file created with implementation plan',
+          timestamp: workflow.createdAt, // TODO: Add actual timestamp when available
+        });
+      }
+
+      // Implementation completed
+      if (workflow.implementationCompleted) {
+        events.push({
+          id: `implementation-completed-${workflow.id}`,
+          type: 'implementation_completed',
+          title: 'Implementation Completed',
+          description: 'Bug fix implementation completed',
+          timestamp: workflow.createdAt, // TODO: Add actual timestamp when available
+        });
+      }
+    }
+
+    // Add session events
+    if (sessions && sessions.length > 0) {
+      sessions.forEach((session: any) => {
+        // Session started event
+        events.push({
+          id: `session-started-${session.id}`,
+          type: 'session_started',
+          title: `${getSessionTypeLabel(session.sessionType)} Session Started`,
+          sessionType: session.sessionType,
+          sessionId: session.id,
+          timestamp: session.createdAt,
+          status: session.phase === 'Running' ? 'running' : undefined,
+        });
+
+        // Session completed/failed event
+        if (session.phase === 'Completed') {
+          events.push({
+            id: `session-completed-${session.id}`,
+            type: 'session_completed',
+            title: `${getSessionTypeLabel(session.sessionType)} Session Completed`,
+            description: session.description || 'Session completed successfully',
+            sessionType: session.sessionType,
+            sessionId: session.id,
+            timestamp: session.completedAt || session.createdAt,
+            status: 'success',
+          });
+
+          // GitHub comment event for certain session types
+          if (['bug-review', 'bug-resolution-plan', 'bug-implement-fix'].includes(session.sessionType)) {
+            events.push({
+              id: `github-comment-${session.id}`,
+              type: 'github_comment',
+              title: 'Posted to GitHub',
+              description: `${getSessionTypeLabel(session.sessionType)} findings posted to GitHub Issue`,
+              timestamp: session.completedAt || session.createdAt,
+              link: {
+                url: workflow.githubIssueURL,
+                label: 'View on GitHub',
+              },
+            });
+          }
+        } else if (session.phase === 'Failed') {
+          events.push({
+            id: `session-failed-${session.id}`,
+            type: 'session_failed',
+            title: `${getSessionTypeLabel(session.sessionType)} Session Failed`,
+            description: session.error || 'Session failed',
+            sessionType: session.sessionType,
+            sessionId: session.id,
+            timestamp: session.completedAt || session.createdAt,
+            status: 'error',
+          });
+        }
+      });
+    }
+
+    setTimelineEvents(events);
+  }, [workflow, sessions]);
+
+  const getSessionTypeLabel = (sessionType: string) => {
+    const labels: Record<string, string> = {
+      'bug-review': 'Bug Review',
+      'bug-resolution-plan': 'Resolution Plan',
+      'bug-implement-fix': 'Fix Implementation',
+      'generic': 'Generic',
+    };
+    return labels[sessionType] || sessionType;
+  };
 
   const handleDeleteWorkspace = async () => {
     try {
@@ -275,6 +413,13 @@ export default function BugFixWorkspaceDetailPage() {
                 </div>
               </CardContent>
             </Card>
+
+            <BugTimeline
+              workflowId={workflowId}
+              events={timelineEvents}
+              sessions={sessions}
+              className="mt-4"
+            />
           </div>
         </TabsContent>
 
