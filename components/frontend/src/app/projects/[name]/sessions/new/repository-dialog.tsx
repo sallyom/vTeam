@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useGitHubForks } from "@/services/queries";
+import { useGitHubForks, useRepoBranches } from "@/services/queries";
 
 type Repo = {
   input: { url: string; branch: string };
@@ -36,6 +36,13 @@ export function RepositoryDialog({
 
   // Fetch forks using React Query - only when we have an input URL
   const { data: forksData } = useGitHubForks(projectName, repo.input.url);
+
+  // Fetch branches for the input repository
+  const { data: branchesData, isLoading: branchesLoading } = useRepoBranches(
+    projectName,
+    repo.input.url,
+    { enabled: !!repo.input.url && open }
+  );
   
   useEffect(() => {
     if (open && repo.input.url && forksData) {
@@ -66,11 +73,34 @@ export function RepositoryDialog({
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Input Branch</label>
-            <Input
-              placeholder="main"
-              value={repo.input.branch}
-              onChange={(e) => onRepoChange({ ...repo, input: { ...repo.input, branch: e.target.value } })}
-            />
+            <Select
+              value={repo.input.branch || "main"}
+              onValueChange={(value) => onRepoChange({ ...repo, input: { ...repo.input, branch: value } })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder={branchesLoading ? "Loading branches..." : "Select branch"} />
+              </SelectTrigger>
+              <SelectContent>
+                {branchesLoading ? (
+                  <SelectItem value="loading" disabled>Loading branches...</SelectItem>
+                ) : branchesData?.branches && branchesData.branches.length > 0 ? (
+                  branchesData.branches.map((branch) => (
+                    <SelectItem key={branch.name} value={branch.name}>
+                      {branch.name}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <>
+                    <SelectItem value="main">main</SelectItem>
+                    <SelectItem value="master">master</SelectItem>
+                    <SelectItem value="develop">develop</SelectItem>
+                  </>
+                )}
+              </SelectContent>
+            </Select>
+            {!repo.input.url && (
+              <p className="text-xs text-muted-foreground">Enter repository URL first to load branches</p>
+            )}
           </div>
           <div className="space-y-2">
             <label className="text-sm font-medium">Output Repository (optional)</label>

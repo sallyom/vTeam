@@ -31,6 +31,7 @@ func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
 
 			projectGroup.GET("/repo/tree", handlers.GetRepoTree)
 			projectGroup.GET("/repo/blob", handlers.GetRepoBlob)
+			projectGroup.GET("/repo/branches", handlers.ListRepoBranches)
 
 			projectGroup.GET("/agentic-sessions", handlers.ListSessions)
 			projectGroup.POST("/agentic-sessions", handlers.CreateSession)
