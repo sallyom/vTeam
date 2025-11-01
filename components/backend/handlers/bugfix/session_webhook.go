@@ -292,19 +292,25 @@ func handleBugResolutionPlanCompletion(c *gin.Context, event AgenticSessionWebho
 		return
 	}
 
-	// T065: Update workflow CR
-	workflow.BugfixMarkdownCreated = true
+	// T065: Update workflow CR with annotations (metadata)
 	if workflow.Annotations == nil {
 		workflow.Annotations = make(map[string]string)
 	}
 	workflow.Annotations["resolution-plan-comment-id"] = fmt.Sprintf("%d", githubComment.ID)
 	workflow.Annotations["resolution-plan-comment-url"] = githubComment.URL
 
-	// Update the workflow CR
 	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
 	if err != nil {
 		// Non-fatal: log but continue
-		log.Printf("Failed to update workflow with resolution plan status: %v", err)
+		log.Printf("Failed to update workflow annotations: %v", err)
+	}
+
+	// Update status subresource
+	workflow.BugfixMarkdownCreated = true
+	err = crd.UpdateBugFixWorkflowStatus(reqDyn, workflow)
+	if err != nil {
+		// Non-fatal: log but continue
+		log.Printf("Failed to update workflow status (bugfixMarkdownCreated): %v", err)
 	}
 
 	// Broadcast success event
@@ -450,19 +456,25 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 		return
 	}
 
-	// Update workflow CR
-	workflow.ImplementationCompleted = true
+	// Update workflow CR with annotations (metadata)
 	if workflow.Annotations == nil {
 		workflow.Annotations = make(map[string]string)
 	}
 	workflow.Annotations["implementation-comment-id"] = fmt.Sprintf("%d", githubComment.ID)
 	workflow.Annotations["implementation-comment-url"] = githubComment.URL
 
-	// Update the workflow CR
 	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
 	if err != nil {
 		// Non-fatal: log but continue
-		log.Printf("Failed to update workflow with implementation status: %v", err)
+		log.Printf("Failed to update workflow annotations: %v", err)
+	}
+
+	// Update status subresource
+	workflow.ImplementationCompleted = true
+	err = crd.UpdateBugFixWorkflowStatus(reqDyn, workflow)
+	if err != nil {
+		// Non-fatal: log but continue
+		log.Printf("Failed to update workflow status (implementationCompleted): %v", err)
 	}
 
 	// Broadcast success event
@@ -661,11 +673,11 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 			return
 		}
 
-		// Update workflow CR
+		// Update workflow status
 		workflow.BugfixMarkdownCreated = true
-		err = crd.UpsertProjectBugFixWorkflowCR(client, workflow)
+		err = crd.UpdateBugFixWorkflowStatus(client, workflow)
 		if err != nil {
-			log.Printf("Failed to update workflow with bugfixMarkdownCreated: %v", err)
+			log.Printf("Failed to update workflow status (bugfixMarkdownCreated): %v", err)
 		}
 
 		log.Printf("Successfully posted resolution plan to GitHub Issue #%d", issueNumber)
@@ -719,11 +731,11 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 			return
 		}
 
-		// Update workflow CR
+		// Update workflow status
 		workflow.ImplementationCompleted = true
-		err = crd.UpsertProjectBugFixWorkflowCR(client, workflow)
+		err = crd.UpdateBugFixWorkflowStatus(client, workflow)
 		if err != nil {
-			log.Printf("Failed to update workflow with implementationCompleted: %v", err)
+			log.Printf("Failed to update workflow status (implementationCompleted): %v", err)
 		}
 
 		log.Printf("Successfully posted implementation summary to GitHub Issue #%d", issueNumber)

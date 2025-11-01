@@ -307,6 +307,7 @@ func UpdateBugFixWorkflowStatus(dyn dynamic.Interface, workflow *types.BugFixWor
 		"message":                 workflow.Message,
 		"bugFolderCreated":        workflow.BugFolderCreated,
 		"bugfixMarkdownCreated":   workflow.BugfixMarkdownCreated,
+		"implementationCompleted": workflow.ImplementationCompleted,
 	}
 	obj.Object["status"] = status
 

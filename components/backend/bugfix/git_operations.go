@@ -3,6 +3,7 @@ package bugfix
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -34,11 +35,56 @@ func CreateBugFolder(ctx context.Context, specRepoURL string, issueNumber int, b
 		return fmt.Errorf("failed to inject token: %v", err)
 	}
 
-	// Clone repository (shallow clone for speed)
-	cloneArgs := []string{"clone", "--depth", "1", "--branch", branchName, authenticatedURL, repoDir}
+	// Determine base branch (default to "main")
+	baseBranch := "main"
+
+	// Verify base branch exists before cloning
+	verifyCmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", authenticatedURL, baseBranch)
+	verifyOut, verifyErr := verifyCmd.CombinedOutput()
+	if verifyErr != nil || strings.TrimSpace(string(verifyOut)) == "" {
+		return fmt.Errorf("base branch '%s' does not exist in repository", baseBranch)
+	}
+
+	// Clone base branch (shallow clone for speed)
+	cloneArgs := []string{"clone", "--depth", "1", "--branch", baseBranch, authenticatedURL, repoDir}
 	cloneCmd := exec.CommandContext(ctx, "git", cloneArgs...)
 	if out, err := cloneCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git clone failed: %w (output: %s)", err, string(out))
+	}
+
+	// Check if feature branch already exists remotely
+	lsRemoteCmd := exec.CommandContext(ctx, "git", "-C", repoDir, "ls-remote", "--heads", "origin", branchName)
+	lsRemoteOut, lsRemoteErr := lsRemoteCmd.CombinedOutput()
+	branchExistsRemotely := lsRemoteErr == nil && strings.TrimSpace(string(lsRemoteOut)) != ""
+
+	if branchExistsRemotely {
+		// Branch exists remotely - check it out
+		if baseBranch == branchName {
+			// Already on the target branch
+			log.Printf("Feature branch '%s' is the same as base branch - already checked out", branchName)
+		} else {
+			// Fetch and checkout the existing branch
+			fetchCmd := exec.CommandContext(ctx, "git", "-C", repoDir, "fetch", "--depth", "1", "origin", fmt.Sprintf("%s:%s", branchName, branchName))
+			if out, err := fetchCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to fetch existing branch %s: %w (output: %s)", branchName, err, string(out))
+			}
+
+			checkoutCmd := exec.CommandContext(ctx, "git", "-C", repoDir, "checkout", branchName)
+			if out, err := checkoutCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to checkout existing branch %s: %w (output: %s)", branchName, err, string(out))
+			}
+		}
+	} else {
+		// Branch doesn't exist remotely - create it
+		if baseBranch == branchName {
+			log.Printf("Feature branch '%s' is the same as base branch - already on this branch", branchName)
+		} else {
+			log.Printf("Creating new feature branch: %s", branchName)
+			checkoutCmd := exec.CommandContext(ctx, "git", "-C", repoDir, "checkout", "-b", branchName)
+			if out, err := checkoutCmd.CombinedOutput(); err != nil {
+				return fmt.Errorf("failed to create branch %s: %w (output: %s)", branchName, err, string(out))
+			}
+		}
 	}
 
 	// Create bug folder

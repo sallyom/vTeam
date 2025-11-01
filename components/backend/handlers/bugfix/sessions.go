@@ -142,12 +142,39 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		}
 	}
 
-	// Build AgenticSession spec
+	// Build prompt based on session type
+	prompt := ""
+	if req.Prompt != nil && *req.Prompt != "" {
+		prompt = *req.Prompt
+	} else {
+		// Auto-generate prompt based on session type
+		switch req.SessionType {
+		case "bug-review":
+			prompt = fmt.Sprintf("Review GitHub Issue #%d and analyze the bug report. Focus on understanding the problem, reproduction steps, and affected components.", workflow.GithubIssueNumber)
+		case "bug-resolution-plan":
+			prompt = fmt.Sprintf("Create a detailed resolution plan for GitHub Issue #%d. Analyze the bug, identify root cause, and propose a fix strategy.", workflow.GithubIssueNumber)
+		case "bug-implement-fix":
+			prompt = fmt.Sprintf("Implement the fix for GitHub Issue #%d based on the resolution plan. Make code changes, add tests, and prepare for review.", workflow.GithubIssueNumber)
+		case "generic":
+			prompt = fmt.Sprintf("Work on GitHub Issue #%d.", workflow.GithubIssueNumber)
+		}
+		// Add description to prompt if provided
+		if description != "" {
+			prompt = prompt + "\n\n" + description
+		}
+	}
+
+	// Build AgenticSession spec (following CRD schema)
 	sessionSpec := map[string]interface{}{
-		"title":                title,
-		"description":          description,
-		"repos":                repos,
-		"environmentVariables": envVars,
+		"prompt":      prompt,           // REQUIRED field
+		"displayName": title,             // Use displayName instead of title
+		"repos":       repos,
+		"timeout":     300,
+	}
+
+	// Add environment variables if any
+	if len(envVars) > 0 {
+		sessionSpec["environmentVariables"] = envVars
 	}
 
 	// Add agent personas if provided
@@ -157,6 +184,7 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		} else {
 			// Multiple agents: use AGENT_PERSONAS env var
 			envVars["AGENT_PERSONAS"] = joinStrings(req.SelectedAgents, ",")
+			sessionSpec["environmentVariables"] = envVars
 		}
 	}
 

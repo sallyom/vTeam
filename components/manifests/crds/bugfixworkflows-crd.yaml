@@ -109,6 +109,10 @@ spec:
                 type: boolean
                 default: false
                 description: "True if bugfix-gh-{issue-number}.md exists"
+              implementationCompleted:
+                type: boolean
+                default: false
+                description: "True if bug implementation session has completed"
     subresources:
       status: {}
     additionalPrinterColumns:

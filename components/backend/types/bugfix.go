@@ -63,6 +63,7 @@ type UpdateBugFixWorkflowRequest struct {
 // CreateBugFixSessionRequest represents the request to create a session
 type CreateBugFixSessionRequest struct {
 	SessionType          string              `json:"sessionType" binding:"required"` // bug-review, bug-resolution-plan, bug-implement-fix, generic
+	Prompt               *string             `json:"prompt,omitempty"`               // Custom prompt (auto-generated if not provided)
 	Title                *string             `json:"title,omitempty"`
 	Description          *string             `json:"description,omitempty"`
 	SelectedAgents       []string            `json:"selectedAgents,omitempty"` // Agent personas

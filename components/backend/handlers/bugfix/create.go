@@ -2,6 +2,7 @@ package bugfix
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -208,20 +209,28 @@ func CreateProjectBugFixWorkflow(c *gin.Context) {
 	userName := ""
 	// TODO: Get user email/name from user context if available
 
+	log.Printf("Creating bug folder for issue #%d in repo %s on branch %s", githubIssue.Number, req.UmbrellaRepo.URL, branch)
 	err = bugfix.CreateBugFolder(ctx, req.UmbrellaRepo.URL, githubIssue.Number, branch, githubToken, userEmail, userName)
 	if err != nil {
+		log.Printf("Failed to create bug folder for issue #%d: %v", githubIssue.Number, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create bug folder", "details": err.Error()})
 		return
 	}
 
-	// Update workflow status
+	// Create BugFixWorkflow CR first (without status)
+	if err := crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create workflow CR", "details": err.Error()})
+		return
+	}
+
+	// Update workflow status (must be done separately for status subresource)
 	workflow.Phase = "Ready"
 	workflow.Message = "Workspace ready for sessions"
 	workflow.BugFolderCreated = true
 
-	// Create BugFixWorkflow CR
-	if err := crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create workflow CR", "details": err.Error()})
+	if err := crd.UpdateBugFixWorkflowStatus(reqDyn, workflow); err != nil {
+		log.Printf("Failed to update workflow status for #%d: %v", githubIssue.Number, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update workflow status", "details": err.Error()})
 		return
 	}
 
