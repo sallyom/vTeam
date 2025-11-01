@@ -59,7 +59,7 @@ describe('BugImplementFixSessionPage', () => {
   };
 
   let queryClient: QueryClient;
-  let mockWs: any;
+  let mockWs: { on: jest.Mock; off: jest.Mock; connect: jest.Mock; disconnect: jest.Mock };
 
   beforeEach(() => {
     queryClient = new QueryClient({

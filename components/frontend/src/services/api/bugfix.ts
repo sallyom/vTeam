@@ -4,7 +4,6 @@
  */
 
 import { apiClient } from './client';
-import type { AgenticSession } from '@/types/api';
 
 /**
  * BugFix Workspace types
@@ -20,10 +19,12 @@ export interface BugFixWorkflow {
   message?: string;
   bugFolderCreated: boolean;
   bugfixMarkdownCreated: boolean;
+  implementationCompleted?: boolean;
   project: string;
   createdAt: string;
   createdBy: string;
   jiraTaskKey?: string;
+  jiraTaskURL?: string;
   lastSyncedAt?: string;
   workspacePath?: string;
   umbrellaRepo?: {

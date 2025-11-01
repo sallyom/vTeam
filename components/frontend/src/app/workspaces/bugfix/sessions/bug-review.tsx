@@ -8,7 +8,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Skeleton } from '@/components/ui/skeleton';
 
 interface BugReviewSessionProps {
   sessionId: string;
@@ -21,13 +20,13 @@ interface BugReviewSessionProps {
 
 export default function BugReviewSessionPage({
   sessionId,
-  workflowId,
+  workflowId, // eslint-disable-line @typescript-eslint/no-unused-vars
   githubIssueNumber,
   phase,
   progress = 0,
   findings,
 }: BugReviewSessionProps) {
-  const searchParams = useSearchParams();
+  const searchParams = useSearchParams(); // eslint-disable-line @typescript-eslint/no-unused-vars
 
   const getPhaseDetails = () => {
     switch (phase) {
@@ -191,7 +190,7 @@ export default function BugReviewSessionPage({
             The bug has been analyzed and findings posted to GitHub. You can now:
             <ul className="list-disc list-inside mt-2 space-y-1">
               <li>Review the findings in the GitHub Issue comments</li>
-              <li>Create a "Resolution Plan" session to plan the fix</li>
+              <li>Create a &quot;Resolution Plan&quot; session to plan the fix</li>
               <li>Sync the workspace to Jira for project tracking</li>
             </ul>
           </AlertDescription>

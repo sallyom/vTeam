@@ -3,7 +3,7 @@
 import React from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bug, ExternalLink, GitBranch, Clock, Play, Trash2, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Bug, ExternalLink, GitBranch, Clock, Trash2, CheckCircle2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
@@ -40,13 +40,39 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { successToast, errorToast } from '@/hooks/use-toast';
 import { useBugFixWebSocket } from '@/hooks';
 
+type TimelineEvent = {
+  id: string;
+  type: 'workspace_created' | 'jira_synced' | 'session_started' | 'session_completed' | 'session_failed' | 'branch_created' | 'bugfix_md_created' | 'github_comment' | 'implementation_completed';
+  title: string;
+  description?: string;
+  timestamp: string;
+  sessionType?: string;
+  sessionId?: string;
+  status?: 'success' | 'error' | 'running';
+  link?: {
+    url: string;
+    label: string;
+  };
+};
+
+type BugFixSession = {
+  id: string;
+  title: string;
+  sessionType: string;
+  phase: string;
+  createdAt: string;
+  completedAt?: string;
+  description?: string;
+  error?: string;
+};
+
 export default function BugFixWorkspaceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const queryClient = useQueryClient();
   const projectName = params?.name as string;
   const workflowId = params?.id as string;
-  const [timelineEvents, setTimelineEvents] = React.useState<any[]>([]);
+  const [timelineEvents, setTimelineEvents] = React.useState<TimelineEvent[]>([]);
 
   const { data: workflow, isLoading: workflowLoading } = useQuery({
     queryKey: ['bugfix-workflow', projectName, workflowId],
@@ -66,18 +92,18 @@ export default function BugFixWorkspaceDetailPage() {
     workflowId,
     onSessionCompleted: () => {
       successToast('Session completed successfully');
-      queryClient.invalidateQueries(['bugfix-sessions', projectName, workflowId]);
+      queryClient.invalidateQueries({ queryKey: ['bugfix-sessions', projectName, workflowId] });
     },
     onJiraSyncCompleted: (event) => {
       successToast(`Synced to Jira: ${event.payload.jiraTaskKey}`);
-      queryClient.invalidateQueries(['bugfix-workflow', projectName, workflowId]);
+      queryClient.invalidateQueries({ queryKey: ['bugfix-workflow', projectName, workflowId] });
     },
     enabled: !!projectName && !!workflowId,
   });
 
   // Build timeline events from workflow and sessions
   React.useEffect(() => {
-    const events: any[] = [];
+    const events: TimelineEvent[] = [];
 
     if (workflow) {
       // Workspace created event
@@ -103,13 +129,13 @@ export default function BugFixWorkspaceDetailPage() {
       }
 
       // Jira synced event
-      if (workflow.jiraTaskKey && workflow.lastJiraSyncedAt) {
+      if (workflow.jiraTaskKey && workflow.lastSyncedAt) {
         events.push({
           id: `jira-synced-${workflow.jiraTaskKey}`,
           type: 'jira_synced',
           title: 'Synced to Jira',
           description: `Jira task ${workflow.jiraTaskKey} created/updated`,
-          timestamp: workflow.lastJiraSyncedAt,
+          timestamp: workflow.lastSyncedAt,
           link: workflow.jiraTaskURL ? {
             url: workflow.jiraTaskURL,
             label: 'View in Jira',
@@ -142,7 +168,7 @@ export default function BugFixWorkspaceDetailPage() {
 
     // Add session events
     if (sessions && sessions.length > 0) {
-      sessions.forEach((session: any) => {
+      sessions.forEach((session: BugFixSession) => {
         // Session started event
         events.push({
           id: `session-started-${session.id}`,
@@ -168,7 +194,7 @@ export default function BugFixWorkspaceDetailPage() {
           });
 
           // GitHub comment event for certain session types
-          if (['bug-review', 'bug-resolution-plan', 'bug-implement-fix'].includes(session.sessionType)) {
+          if (workflow && ['bug-review', 'bug-resolution-plan', 'bug-implement-fix'].includes(session.sessionType)) {
             events.push({
               id: `github-comment-${session.id}`,
               type: 'github_comment',
@@ -348,9 +374,9 @@ export default function BugFixWorkspaceDetailPage() {
                             {workflow.jiraTaskKey}
                             <ExternalLink className="h-3 w-3" />
                           </a>
-                          {workflow.lastJiraSyncedAt && (
+                          {workflow.lastSyncedAt && (
                             <span className="text-xs text-muted-foreground">
-                              (synced {formatDistanceToNow(new Date(workflow.lastJiraSyncedAt), { addSuffix: true })})
+                              (synced {formatDistanceToNow(new Date(workflow.lastSyncedAt), { addSuffix: true })})
                             </span>
                           )}
                         </div>
@@ -498,7 +524,7 @@ export default function BugFixWorkspaceDetailPage() {
                 />
                 {workflow.phase !== 'Ready' && (
                   <p className="text-xs text-muted-foreground mt-2">
-                    Workspace must be in "Ready" state to create sessions
+                    Workspace must be in &quot;Ready&quot; state to create sessions
                   </p>
                 )}
               </div>
@@ -513,7 +539,7 @@ export default function BugFixWorkspaceDetailPage() {
                   workflowId={workflowId}
                   jiraTaskKey={workflow.jiraTaskKey}
                   jiraTaskURL={workflow.jiraTaskURL}
-                  lastSyncedAt={workflow.lastJiraSyncedAt}
+                  lastSyncedAt={workflow.lastSyncedAt}
                   githubIssueNumber={workflow.githubIssueNumber}
                 />
               </div>

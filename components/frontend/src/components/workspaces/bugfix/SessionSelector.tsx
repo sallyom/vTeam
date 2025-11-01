@@ -14,10 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import {
   Card,
-  CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from '@/components/ui/card';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
@@ -81,7 +78,7 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
   const router = useRouter();
 
   const createSessionMutation = useMutation({
-    mutationFn: (data: { sessionType: string; title?: string; description?: string }) =>
+    mutationFn: (data: { sessionType: 'bug-review' | 'bug-resolution-plan' | 'bug-implement-fix' | 'generic'; title?: string; description?: string }) =>
       bugfixApi.createBugFixSession(projectName, workflowId, data),
     onSuccess: (session) => {
       successToast(`${session.sessionType} session created successfully`);
@@ -98,7 +95,9 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
   const handleCreateSession = () => {
     if (!selectedType) return;
 
-    const data: any = { sessionType: selectedType };
+    const data: { sessionType: 'bug-review' | 'bug-resolution-plan' | 'bug-implement-fix' | 'generic'; title?: string; description?: string } = {
+      sessionType: selectedType as 'bug-review' | 'bug-resolution-plan' | 'bug-implement-fix' | 'generic',
+    };
     if (customTitle) data.title = customTitle;
     if (customDescription) data.description = customDescription;
 

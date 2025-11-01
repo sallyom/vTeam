@@ -9,6 +9,7 @@ export * as projectsApi from './projects';
 export * as sessionsApi from './sessions';
 export * as rfeApi from './rfe';
 export * as bugfixApi from './bugfix';
+export * from './bugfix'; // Export types
 export * as githubApi from './github';
 export * as keysApi from './keys';
 export * as repoApi from './repo';
