@@ -557,6 +557,148 @@ func AddPullRequestComment(ctx context.Context, owner, repo string, prNumber int
 	}
 }
 
+// GitHubGist represents a GitHub Gist
+type GitHubGist struct {
+	ID          string `json:"id"`
+	URL         string `json:"html_url"`
+	Description string `json:"description"`
+	Public      bool   `json:"public"`
+}
+
+// CreateGistRequest represents the request to create a Gist
+type CreateGistRequest struct {
+	Description string                       `json:"description"`
+	Public      bool                         `json:"public"`
+	Files       map[string]CreateGistFile    `json:"files"`
+}
+
+// CreateGistFile represents a file in a Gist
+type CreateGistFile struct {
+	Content string `json:"content"`
+}
+
+// CreateGist creates a new GitHub Gist
+func CreateGist(ctx context.Context, token string, description string, filename string, content string, public bool) (*GitHubGist, error) {
+	if filename == "" || content == "" {
+		return nil, fmt.Errorf("filename and content are required")
+	}
+
+	// POST /gists
+	apiURL := "https://api.github.com/gists"
+
+	request := CreateGistRequest{
+		Description: description,
+		Public:      public,
+		Files: map[string]CreateGistFile{
+			filename: {Content: content},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "vTeam-Backend")
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case 201:
+		var gist GitHubGist
+		if err := json.Unmarshal(body, &gist); err != nil {
+			return nil, fmt.Errorf("failed to parse Gist response: %v", err)
+		}
+		return &gist, nil
+	case 401, 403:
+		return nil, fmt.Errorf("authentication failed or no permission to create Gists")
+	case 404:
+		return nil, fmt.Errorf("Gists API endpoint not found")
+	case 422:
+		return nil, fmt.Errorf("validation failed: %s", string(body))
+	case 429:
+		resetTime := resp.Header.Get("X-RateLimit-Reset")
+		return nil, fmt.Errorf("GitHub API rate limit exceeded (reset at %s)", resetTime)
+	default:
+		return nil, fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+	}
+}
+
+// GetGist fetches the content of a Gist by its URL
+// Returns the raw content of the first file in the Gist
+func GetGist(ctx context.Context, gistURL, token string) (string, error) {
+	// Extract gist ID from URL (e.g., https://gist.github.com/username/abc123 -> abc123)
+	parts := strings.Split(strings.TrimSuffix(gistURL, "/"), "/")
+	if len(parts) < 1 {
+		return "", fmt.Errorf("invalid Gist URL format")
+	}
+	gistID := parts[len(parts)-1]
+
+	// GET /gists/{gist_id}
+	apiURL := fmt.Sprintf("https://api.github.com/gists/%s", gistID)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %v", err)
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	req.Header.Set("User-Agent", "vTeam-Backend")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("GitHub API request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	switch resp.StatusCode {
+	case 200:
+		var gist struct {
+			Files map[string]struct {
+				Content string `json:"content"`
+			} `json:"files"`
+		}
+		if err := json.Unmarshal(body, &gist); err != nil {
+			return "", fmt.Errorf("failed to parse Gist response: %v", err)
+		}
+		// Return content of first file
+		for _, file := range gist.Files {
+			return file.Content, nil
+		}
+		return "", fmt.Errorf("Gist has no files")
+	case 404:
+		return "", fmt.Errorf("Gist not found")
+	case 401, 403:
+		return "", fmt.Errorf("authentication failed or no permission to access Gist")
+	case 429:
+		resetTime := resp.Header.Get("X-RateLimit-Reset")
+		return "", fmt.Errorf("GitHub API rate limit exceeded (reset at %s)", resetTime)
+	default:
+		return "", fmt.Errorf("GitHub API error (status %d): %s", resp.StatusCode, string(body))
+	}
+}
+
 // GenerateIssueTemplate generates a standardized GitHub Issue body from text description
 func GenerateIssueTemplate(title, symptoms, reproSteps, expectedBehavior, actualBehavior, additionalContext string) string {
 	var template strings.Builder

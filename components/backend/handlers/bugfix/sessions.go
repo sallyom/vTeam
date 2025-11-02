@@ -130,19 +130,21 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		description = *req.Description
 	}
 
-	// Build repositories list (implementation repo using feature branch)
+	// Build repositories list
 	repos := make([]map[string]interface{}, 0)
 
 	// Derive repo name from URL (e.g., "https://github.com/owner/repo.git" -> "repo")
 	repoName := deriveRepoNameFromURL(workflow.ImplementationRepo.URL)
 
+	// Both session types clone the base branch and push to feature branch
+	// The feature branch is created on first push if it doesn't exist
 	repoInput := map[string]interface{}{
 		"url":    workflow.ImplementationRepo.URL,
-		"branch": workflow.BranchName, // Use feature branch (e.g., bugfix/gh-231)
+		"branch": workflow.ImplementationRepo.Branch, // base branch (e.g., "main")
 	}
 	repoOutput := map[string]interface{}{
 		"url":    workflow.ImplementationRepo.URL,
-		"branch": workflow.BranchName, // Push fixes to same feature branch
+		"branch": workflow.BranchName, // feature branch (e.g., "bugfix/gh-210")
 	}
 	repos = append(repos, map[string]interface{}{
 		"name":   repoName, // REQUIRED: runner uses this as workspace subdirectory and for push operations
@@ -200,18 +202,23 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 								}
 							}
 
-							// If claude label exists, fetch the assessment from comments
+							// If claude label exists, fetch ALL Claude comments from the issue
 							if hasClaudeLabel {
-								log.Printf("Found 'claude' label on issue #%d, fetching existing assessment", issueNum)
+								log.Printf("Found 'claude' label on issue #%d, fetching all existing Claude comments", issueNum)
 								if comments, err := github.GetIssueComments(ctx, owner, repo, issueNum, githubToken); err == nil {
-									// Look for comment from claude-bot or any user with "claude" in username
+									// Collect ALL comments from claude-bot or any user with "claude" in username
+									claudeComments := []string{}
 									for _, comment := range comments {
 										userLogin := strings.ToLower(comment.User.Login)
 										if strings.Contains(userLogin, "claude") || comment.User.Type == "Bot" {
-											claudeAssessment = comment.Body
-											log.Printf("Found Claude assessment from user: %s", comment.User.Login)
-											break
+											claudeComments = append(claudeComments, comment.Body)
+											log.Printf("Found Claude comment from user: %s", comment.User.Login)
 										}
+									}
+									if len(claudeComments) > 0 {
+										// Join all Claude comments with separators
+										claudeAssessment = strings.Join(claudeComments, "\n\n---\n\n")
+										log.Printf("Collected %d Claude comment(s) for context", len(claudeComments))
 									}
 								}
 							}
@@ -240,31 +247,50 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 			reqK8s, reqDyn := handlers.GetK8sClientsForRequest(c)
 			if reqK8s != nil && reqDyn != nil && userIDStr != "" {
 				if githubToken, err := git.GetGitHubToken(ctx, reqK8s, reqDyn, project, userIDStr); err == nil {
-					// Parse issue URL to get owner, repo, number
-					if owner, repo, issueNum, err := github.ParseGitHubIssueURL(workflow.GithubIssueURL); err == nil {
-						// Check for "claude" label (indicates Claude has reviewed this issue)
-						if labels, err := github.GetIssueLabels(ctx, owner, repo, issueNum, githubToken); err == nil {
-							hasClaudeLabel := false
-							for _, label := range labels {
-								if strings.ToLower(label.Name) == "claude" {
-									hasClaudeLabel = true
-									break
-								}
-							}
+					// First priority: Check for bug-review Gist URL in workflow annotations
+					if workflow.Annotations != nil && workflow.Annotations["bug-review-gist-url"] != "" {
+						gistURL := workflow.Annotations["bug-review-gist-url"]
+						log.Printf("Found bug-review Gist URL in annotations: %s", gistURL)
+						if gistContent, err := github.GetGist(ctx, gistURL, githubToken); err == nil {
+							resolutionPlan = gistContent
+							log.Printf("Successfully fetched bug-review Gist content (%d bytes)", len(gistContent))
+						} else {
+							log.Printf("Warning: failed to fetch Gist content: %v", err)
+						}
+					}
 
-							// If claude label exists, fetch the resolution plan from comments
-							if hasClaudeLabel {
-								log.Printf("Found 'claude' label on issue #%d, fetching resolution plan", issueNum)
-								if comments, err := github.GetIssueComments(ctx, owner, repo, issueNum, githubToken); err == nil {
-									// Look for most recent comment from claude-bot or any user with "claude" in username
-									// Resolution plan is typically the last Claude comment
-									for i := len(comments) - 1; i >= 0; i-- {
-										comment := comments[i]
-										userLogin := strings.ToLower(comment.User.Login)
-										if strings.Contains(userLogin, "claude") || comment.User.Type == "Bot" {
-											resolutionPlan = comment.Body
-											log.Printf("Found resolution plan from user: %s", comment.User.Login)
-											break
+					// Fallback: If no Gist found, try fetching GitHub comments (legacy behavior)
+					if resolutionPlan == "" {
+						// Parse issue URL to get owner, repo, number
+						if owner, repo, issueNum, err := github.ParseGitHubIssueURL(workflow.GithubIssueURL); err == nil {
+							// Check for "claude" label (indicates Claude has reviewed this issue)
+							if labels, err := github.GetIssueLabels(ctx, owner, repo, issueNum, githubToken); err == nil {
+								hasClaudeLabel := false
+								for _, label := range labels {
+									if strings.ToLower(label.Name) == "claude" {
+										hasClaudeLabel = true
+										break
+									}
+								}
+
+								// If claude label exists, fetch ALL Claude comments from the issue
+								if hasClaudeLabel {
+									log.Printf("Found 'claude' label on issue #%d, fetching all Claude comments", issueNum)
+									if comments, err := github.GetIssueComments(ctx, owner, repo, issueNum, githubToken); err == nil {
+										// Collect ALL comments from claude-bot or any user with "claude" in username
+										// This ensures we include both initial assessment AND implementation plan
+										claudeComments := []string{}
+										for _, comment := range comments {
+											userLogin := strings.ToLower(comment.User.Login)
+											if strings.Contains(userLogin, "claude") || comment.User.Type == "Bot" {
+												claudeComments = append(claudeComments, comment.Body)
+												log.Printf("Found Claude comment from user: %s", comment.User.Login)
+											}
+										}
+										if len(claudeComments) > 0 {
+											// Join all Claude comments with separators
+											resolutionPlan = strings.Join(claudeComments, "\n\n---\n\n")
+											log.Printf("Collected %d Claude comment(s) for context", len(claudeComments))
 										}
 									}
 								}
