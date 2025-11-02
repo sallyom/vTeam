@@ -36,6 +36,8 @@ spec:
           value: "image-registry.openshift-image-registry.svc:5000/vteam-dev/vteam-backend:latest"
         - name: IMAGE_PULL_POLICY
           value: "IfNotPresent"
+        - name: SESSION_ACTIVE_DEADLINE_SECONDS
+          value: "14400"  # 4 hours (default) - Maximum runtime for any session Job
         resources:
           requests:
             cpu: 50m

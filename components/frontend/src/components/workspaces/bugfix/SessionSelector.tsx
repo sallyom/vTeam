@@ -79,7 +79,6 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
   const [model, setModel] = useState('claude-sonnet-4-20250514');
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(4000);
-  const [timeout, setTimeout] = useState(300); // 5 minutes default
   const [prConflict, setPRConflict] = useState<PRConflictInfo | null>(null);
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -97,7 +96,6 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
         model?: string;
         temperature?: number;
         maxTokens?: number;
-        timeout?: number;
       };
     }) =>
       bugfixApi.createBugFixSession(projectName, workflowId, data),
@@ -158,7 +156,6 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
         model?: string;
         temperature?: number;
         maxTokens?: number;
-        timeout?: number;
       };
     } = {
       sessionType: selectedType as 'bug-review' | 'bug-implement-fix',
@@ -168,7 +165,6 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
         model,
         temperature,
         maxTokens,
-        timeout,
       },
     };
 
@@ -388,23 +384,6 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
                         <p className="text-xs text-muted-foreground">Maximum response length (default: 4000)</p>
                       </div>
                     </div>
-
-                    {/* Timeout */}
-                    <div className="space-y-2">
-                      <Label htmlFor="timeout" className="text-sm">
-                        Timeout (seconds)
-                      </Label>
-                      <Input
-                        id="timeout"
-                        type="number"
-                        min="60"
-                        max="7200"
-                        step="60"
-                        value={timeout}
-                        onChange={(e) => setTimeout(parseInt(e.target.value))}
-                      />
-                      <p className="text-xs text-muted-foreground">Session timeout (default: 300s / 5 minutes)</p>
-                    </div>
                   </div>
                 </div>
             </div>
@@ -488,7 +467,6 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
                     model,
                     temperature,
                     maxTokens,
-                    timeout,
                   },
                 });
                 setPRConflict(null);
@@ -510,7 +488,6 @@ export default function SessionSelector({ projectName, workflowId, githubIssueNu
                     model,
                     temperature,
                     maxTokens,
-                    timeout,
                   },
                 };
                 createSessionMutation.mutate(data);

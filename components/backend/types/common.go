@@ -35,7 +35,6 @@ type ResourceOverrides struct {
 	Model         *string  `json:"model,omitempty"`
 	Temperature   *float64 `json:"temperature,omitempty"`
 	MaxTokens     *int     `json:"maxTokens,omitempty"`
-	Timeout       *int     `json:"timeout,omitempty"`
 }
 
 type LLMSettings struct {

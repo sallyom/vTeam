@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/dynamic"
@@ -19,11 +20,12 @@ var (
 
 // Config holds the operator configuration
 type Config struct {
-	Namespace              string
-	BackendNamespace       string
-	AmbientCodeRunnerImage string
-	ContentServiceImage    string
-	ImagePullPolicy        corev1.PullPolicy
+	Namespace                    string
+	BackendNamespace             string
+	AmbientCodeRunnerImage       string
+	ContentServiceImage          string
+	ImagePullPolicy              corev1.PullPolicy
+	SessionActiveDeadlineSeconds int64
 }
 
 // InitK8sClients initializes the Kubernetes clients
@@ -92,11 +94,20 @@ func LoadConfig() *Config {
 	}
 	imagePullPolicy := corev1.PullPolicy(imagePullPolicyStr)
 
+	// Get session active deadline from environment or use default (4 hours)
+	sessionActiveDeadlineSeconds := int64(14400) // Default: 4 hours
+	if deadlineStr := os.Getenv("SESSION_ACTIVE_DEADLINE_SECONDS"); deadlineStr != "" {
+		if parsed, err := strconv.ParseInt(deadlineStr, 10, 64); err == nil && parsed > 0 {
+			sessionActiveDeadlineSeconds = parsed
+		}
+	}
+
 	return &Config{
-		Namespace:              namespace,
-		BackendNamespace:       backendNamespace,
-		AmbientCodeRunnerImage: ambientCodeRunnerImage,
-		ContentServiceImage:    contentServiceImage,
-		ImagePullPolicy:        imagePullPolicy,
+		Namespace:                    namespace,
+		BackendNamespace:             backendNamespace,
+		AmbientCodeRunnerImage:       ambientCodeRunnerImage,
+		ContentServiceImage:          contentServiceImage,
+		ImagePullPolicy:              imagePullPolicy,
+		SessionActiveDeadlineSeconds: sessionActiveDeadlineSeconds,
 	}
 }

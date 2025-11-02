@@ -92,10 +92,6 @@ spec:
                     type: integer
                     default: 4000
                 description: "LLM configuration settings"
-              timeout:
-                type: integer
-                default: 300
-                description: "Timeout in seconds for the agentic session"
               autoPushOnComplete:
                 type: boolean
                 default: false

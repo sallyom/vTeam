@@ -266,7 +266,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	// Extract spec information from the fresh object
 	spec, _, _ := unstructured.NestedMap(currentObj.Object, "spec")
 	prompt, _, _ := unstructured.NestedString(spec, "prompt")
-	timeout, _, _ := unstructured.NestedInt64(spec, "timeout")
 	interactive, _, _ := unstructured.NestedBool(spec, "interactive")
 
 	llmSettings, _, _ := unstructured.NestedMap(spec, "llmSettings")
@@ -338,7 +337,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:          int32Ptr(3),
-			ActiveDeadlineSeconds: int64Ptr(14400), // 4 hour timeout for safety
+			ActiveDeadlineSeconds: int64Ptr(appConfig.SessionActiveDeadlineSeconds),
 			// Auto-cleanup finished Jobs if TTL controller is enabled in the cluster
 			TTLSecondsAfterFinished: int32Ptr(600),
 			Template: corev1.PodTemplateSpec{
@@ -441,7 +440,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									{Name: "LLM_MODEL", Value: model},
 									{Name: "LLM_TEMPERATURE", Value: fmt.Sprintf("%.2f", temperature)},
 									{Name: "LLM_MAX_TOKENS", Value: fmt.Sprintf("%d", maxTokens)},
-									{Name: "TIMEOUT", Value: fmt.Sprintf("%d", timeout)},
 									{Name: "AUTO_PUSH_ON_COMPLETE", Value: fmt.Sprintf("%t", autoPushOnComplete)},
 									{Name: "BACKEND_API_URL", Value: fmt.Sprintf("http://backend-service.%s.svc.cluster.local:8080/api", appConfig.BackendNamespace)},
 									// WebSocket URL used by runner-shell to connect back to backend

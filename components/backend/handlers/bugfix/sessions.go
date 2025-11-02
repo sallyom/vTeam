@@ -300,7 +300,6 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 	model := "claude-sonnet-4-20250514"
 	temperature := 0.7
 	maxTokens := 4000
-	timeout := 300 // 5 minutes default
 
 	if req.ResourceOverrides != nil {
 		if req.ResourceOverrides.Model != nil {
@@ -312,9 +311,6 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		if req.ResourceOverrides.MaxTokens != nil {
 			maxTokens = *req.ResourceOverrides.MaxTokens
 		}
-		if req.ResourceOverrides.Timeout != nil {
-			timeout = *req.ResourceOverrides.Timeout
-		}
 	}
 
 	// Build AgenticSession spec (following CRD schema)
@@ -323,7 +319,6 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		"prompt":             prompt,   // REQUIRED field
 		"displayName":        title,    // Use displayName instead of title
 		"repos":              repos,
-		"timeout":            timeout,
 		"autoPushOnComplete": autoPush, // Auto-push changes to feature branch
 		"llmSettings": map[string]interface{}{
 			"model":       model,
