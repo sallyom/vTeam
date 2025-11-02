@@ -19,6 +19,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
 
 // SyncProjectBugFixWorkflowToJira handles POST /api/projects/:projectName/bugfix-workflows/:id/sync-jira
@@ -106,6 +108,9 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 			}
 		} else {
 			jiraTaskURL = fmt.Sprintf("%s/browse/%s", strings.TrimRight(jiraURL, "/"), jiraTaskKey)
+			// Refresh attachments for updates (in case new Gists were added)
+			jiraBase := strings.TrimRight(jiraURL, "/")
+			attachGistsToJira(c, workflow, jiraBase, jiraTaskKey, authHeader, reqK8s, reqDyn, project)
 		}
 	}
 
@@ -157,10 +162,23 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 
 		body, _ := io.ReadAll(resp.Body)
 
+		// Log response for debugging
+		fmt.Printf("Jira API response status: %d, body length: %d bytes\n", resp.StatusCode, len(body))
+		fmt.Printf("Response content-type: %s\n", resp.Header.Get("Content-Type"))
+		if len(body) > 0 {
+			// Show first 500 chars to help debug
+			preview := string(body)
+			if len(preview) > 500 {
+				preview = preview[:500]
+			}
+			fmt.Printf("Response body preview: %s\n", preview)
+		}
+
 		// T056: Handle various HTTP status codes properly
 		switch resp.StatusCode {
 		case 201:
-			// Success
+			// Success - continue to parse response
+			fmt.Printf("Jira API success (201), attempting to parse JSON\n")
 		case 401, 403:
 			websocket.BroadcastBugFixJiraSyncFailed(workflowID, workflow.GithubIssueNumber, "Jira authentication failed")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Jira authentication failed", "details": string(body)})
@@ -175,10 +193,19 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 			return
 		}
 
+		// Parse JSON response
 		var result map[string]interface{}
 		if err := json.Unmarshal(body, &result); err != nil {
+			// Log the raw response for debugging
+			fmt.Printf("ERROR: Failed to parse Jira response as JSON: %v\n", err)
+			bodyLen := len(body)
+			fmt.Printf("Response body (first 500 chars): %s\n", string(body[:min(500, bodyLen)]))
 			websocket.BroadcastBugFixJiraSyncFailed(workflowID, workflow.GithubIssueNumber, "Invalid Jira response")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse Jira response", "details": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":           "Failed to parse Jira response",
+				"details":         err.Error(),
+				"responsePreview": string(body[:min(200, bodyLen)]),
+			})
 			return
 		}
 
@@ -199,6 +226,9 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 			fmt.Printf("Warning: Failed to create Jira remote link: %v\n", err)
 		}
 
+		// Attach Gist markdown files to Jira issue
+		attachGistsToJira(c, workflow, jiraBase, jiraTaskKey, authHeader, reqK8s, reqDyn, project)
+
 		// T054: Add comment to GitHub Issue with Jira link
 		userID, _ := c.Get("userID")
 		userIDStr, _ := userID.(string)
@@ -206,12 +236,35 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 		if err == nil && githubToken != "" {
 			owner, repo, issueNumber, err := github.ParseGitHubIssueURL(workflow.GithubIssueURL)
 			if err == nil {
-				comment := formatGitHubJiraLinkComment(jiraTaskKey, jiraTaskURL)
+				comment := formatGitHubJiraLinkComment(jiraTaskKey, jiraTaskURL, workflow)
 				ctx := context.Background()
 				_, err = github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
 				if err != nil {
 					// Non-fatal: Log but continue
 					fmt.Printf("Warning: Failed to add Jira link to GitHub Issue: %v\n", err)
+				} else {
+					fmt.Printf("Posted Jira link comment to GitHub Issue #%d\n", issueNumber)
+				}
+			}
+		}
+	}
+
+	// Also post GitHub comment for updates (not just creates)
+	if isUpdate {
+		userID, _ := c.Get("userID")
+		userIDStr, _ := userID.(string)
+		githubToken, err := git.GetGitHubToken(c.Request.Context(), reqK8s, reqDyn, project, userIDStr)
+		if err == nil && githubToken != "" {
+			owner, repo, issueNumber, err := github.ParseGitHubIssueURL(workflow.GithubIssueURL)
+			if err == nil {
+				comment := formatGitHubJiraUpdateComment(jiraTaskKey, jiraTaskURL, workflow)
+				ctx := context.Background()
+				_, err = github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
+				if err != nil {
+					// Non-fatal: Log but continue
+					fmt.Printf("Warning: Failed to add Jira update to GitHub Issue: %v\n", err)
+				} else {
+					fmt.Printf("Posted Jira update comment to GitHub Issue #%d\n", issueNumber)
 				}
 			}
 		}
@@ -244,34 +297,165 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 }
 
 // buildJiraDescription builds the Jira issue description from the workflow
+// Includes comprehensive information and references to attached Gist files
 func buildJiraDescription(workflow *types.BugFixWorkflow) string {
 	var desc strings.Builder
 
-	desc.WriteString("This issue is synchronized from GitHub Issue:\n")
+	// Header with source
+	desc.WriteString("h1. Bug Report\n\n")
+	desc.WriteString("*Source:* [GitHub Issue #")
+	desc.WriteString(fmt.Sprintf("%d", workflow.GithubIssueNumber))
+	desc.WriteString("|")
 	desc.WriteString(workflow.GithubIssueURL)
-	desc.WriteString("\n\n")
+	desc.WriteString("]\n\n")
+	desc.WriteString("----\n\n")
 
+	// Description
 	if workflow.Description != "" {
-		desc.WriteString("## Description\n")
+		desc.WriteString("h2. Description\n\n")
 		desc.WriteString(workflow.Description)
 		desc.WriteString("\n\n")
 	}
 
-	desc.WriteString("## Details\n")
-	desc.WriteString(fmt.Sprintf("- GitHub Issue: #%d\n", workflow.GithubIssueNumber))
-	desc.WriteString(fmt.Sprintf("- Branch: %s\n", workflow.BranchName))
-	desc.WriteString(fmt.Sprintf("- Created: %s\n", workflow.CreatedAt))
+	// Repository and branch information
+	desc.WriteString("h2. Repository Information\n\n")
+	desc.WriteString(fmt.Sprintf("* *Repository:* %s\n", workflow.ImplementationRepo.URL))
+	desc.WriteString(fmt.Sprintf("* *Base Branch:* {{%s}}\n", workflow.ImplementationRepo.Branch))
+	desc.WriteString(fmt.Sprintf("* *Feature Branch:* {{%s}}\n", workflow.BranchName))
+	desc.WriteString("\n")
 
-	desc.WriteString("\n---\n")
-	desc.WriteString("*This issue is automatically synchronized from vTeam BugFix Workspace*\n")
-	desc.WriteString("*Note: Currently created as Feature Request. Will use proper Bug/Task type after Jira Cloud migration.*\n")
+	// Status information
+	desc.WriteString("h2. Workflow Status\n\n")
+	desc.WriteString(fmt.Sprintf("* *Created:* %s\n", workflow.CreatedAt))
+	desc.WriteString(fmt.Sprintf("* *Phase:* %s\n", workflow.Phase))
+
+	if workflow.AssessmentStatus != "" {
+		desc.WriteString(fmt.Sprintf("* *Assessment:* %s\n", workflow.AssessmentStatus))
+	}
+	if workflow.ImplementationCompleted {
+		desc.WriteString("* *Implementation:* {color:green}✓ Complete{color}\n")
+	} else {
+		desc.WriteString("* *Implementation:* Pending\n")
+	}
+	desc.WriteString("\n")
+
+	// Analysis documents section
+	hasGists := false
+	if workflow.Annotations != nil {
+		if bugReviewGist := workflow.Annotations["bug-review-gist-url"]; bugReviewGist != "" {
+			hasGists = true
+		}
+		if implGist := workflow.Annotations["implementation-gist-url"]; implGist != "" {
+			hasGists = true
+		}
+	}
+
+	if hasGists {
+		desc.WriteString("h2. Analysis Documents\n\n")
+		desc.WriteString("_Detailed analysis reports are attached to this issue as markdown files. Original Gist links:_\n\n")
+
+		if workflow.Annotations != nil {
+			if bugReviewGist := workflow.Annotations["bug-review-gist-url"]; bugReviewGist != "" {
+				desc.WriteString("* *Bug Review & Assessment:* [bug-review.md attachment|")
+				desc.WriteString(bugReviewGist)
+				desc.WriteString("]\n")
+			}
+			if implGist := workflow.Annotations["implementation-gist-url"]; implGist != "" {
+				desc.WriteString("* *Implementation Details:* [implementation.md attachment|")
+				desc.WriteString(implGist)
+				desc.WriteString("]\n")
+			}
+		}
+		desc.WriteString("\n")
+	}
+
+	// PR information if available
+	if workflow.Annotations != nil {
+		if prURL := workflow.Annotations["github-pr-url"]; prURL != "" {
+			prNumber := workflow.Annotations["github-pr-number"]
+			prState := workflow.Annotations["github-pr-state"]
+			desc.WriteString("h2. Pull Request\n\n")
+			desc.WriteString(fmt.Sprintf("* *PR:* [#%s|%s]\n", prNumber, prURL))
+			desc.WriteString(fmt.Sprintf("* *State:* %s\n", prState))
+			desc.WriteString("\n")
+		}
+	}
+
+	// Footer
+	desc.WriteString("----\n")
+	desc.WriteString("_Synchronized from vTeam BugFix Workspace | [View in vTeam|")
+	desc.WriteString(workflow.GithubIssueURL)
+	desc.WriteString("]_\n")
 
 	return desc.String()
 }
 
-// formatGitHubJiraLinkComment formats the comment to post on GitHub Issue
-func formatGitHubJiraLinkComment(jiraTaskKey, jiraTaskURL string) string {
-	return fmt.Sprintf("## 🔗 Jira Task Created\n\nThis bug has been synchronized to Jira:\n- **Task**: [%s](%s)\n\n*Synchronized by vTeam BugFix Workspace*", jiraTaskKey, jiraTaskURL)
+// formatGitHubJiraLinkComment formats the comment to post on GitHub Issue when creating new Jira task
+func formatGitHubJiraLinkComment(jiraTaskKey, jiraTaskURL string, workflow *types.BugFixWorkflow) string {
+	var comment strings.Builder
+
+	comment.WriteString("## 🔗 Jira Task Created\n\n")
+	comment.WriteString(fmt.Sprintf("This bug has been synchronized to Jira: [**%s**](%s)\n\n", jiraTaskKey, jiraTaskURL))
+
+	// Add links to analysis documents if available
+	if workflow.Annotations != nil {
+		hasGists := false
+		if bugReviewGist := workflow.Annotations["bug-review-gist-url"]; bugReviewGist != "" {
+			if !hasGists {
+				comment.WriteString("### 📄 Analysis Documents\n\n")
+				hasGists = true
+			}
+			comment.WriteString(fmt.Sprintf("- [Bug Review & Assessment](%s)\n", bugReviewGist))
+		}
+		if implGist := workflow.Annotations["implementation-gist-url"]; implGist != "" {
+			if !hasGists {
+				comment.WriteString("### 📄 Analysis Documents\n\n")
+				hasGists = true
+			}
+			comment.WriteString(fmt.Sprintf("- [Implementation Details](%s)\n", implGist))
+		}
+		if hasGists {
+			comment.WriteString("\n")
+		}
+	}
+
+	comment.WriteString("*Synchronized by vTeam BugFix Workspace*")
+
+	return comment.String()
+}
+
+// formatGitHubJiraUpdateComment formats the comment to post on GitHub Issue when updating Jira task
+func formatGitHubJiraUpdateComment(jiraTaskKey, jiraTaskURL string, workflow *types.BugFixWorkflow) string {
+	var comment strings.Builder
+
+	comment.WriteString("## 🔄 Jira Task Updated\n\n")
+	comment.WriteString(fmt.Sprintf("Jira task [**%s**](%s) has been updated with the latest information.\n\n", jiraTaskKey, jiraTaskURL))
+
+	// Add links to analysis documents if available
+	if workflow.Annotations != nil {
+		hasGists := false
+		if bugReviewGist := workflow.Annotations["bug-review-gist-url"]; bugReviewGist != "" {
+			if !hasGists {
+				comment.WriteString("### 📄 Latest Analysis\n\n")
+				hasGists = true
+			}
+			comment.WriteString(fmt.Sprintf("- [Bug Review & Assessment](%s)\n", bugReviewGist))
+		}
+		if implGist := workflow.Annotations["implementation-gist-url"]; implGist != "" {
+			if !hasGists {
+				comment.WriteString("### 📄 Latest Analysis\n\n")
+				hasGists = true
+			}
+			comment.WriteString(fmt.Sprintf("- [Implementation Details](%s)\n", implGist))
+		}
+		if hasGists {
+			comment.WriteString("\n")
+		}
+	}
+
+	comment.WriteString("*Synchronized by vTeam BugFix Workspace*")
+
+	return comment.String()
 }
 
 // getSuccessMessage returns appropriate success message
@@ -280,4 +464,54 @@ func getSuccessMessage(created bool, jiraTaskKey string) string {
 		return fmt.Sprintf("Created Jira task %s", jiraTaskKey)
 	}
 	return fmt.Sprintf("Updated Jira task %s", jiraTaskKey)
+}
+
+// attachGistsToJira fetches Gist content and attaches it as markdown files to the Jira issue
+func attachGistsToJira(c *gin.Context, workflow *types.BugFixWorkflow, jiraBase, jiraTaskKey, authHeader string, reqK8s *kubernetes.Clientset, reqDyn dynamic.Interface, project string) {
+	if workflow.Annotations == nil {
+		return
+	}
+
+	// Get GitHub token for fetching Gists
+	userID, _ := c.Get("userID")
+	userIDStr, _ := userID.(string)
+	githubToken, err := git.GetGitHubToken(c.Request.Context(), reqK8s, reqDyn, project, userIDStr)
+	if err != nil || githubToken == "" {
+		fmt.Printf("Warning: Cannot attach Gists - failed to get GitHub token: %v\n", err)
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Attach bug-review Gist if available
+	if bugReviewGist := workflow.Annotations["bug-review-gist-url"]; bugReviewGist != "" {
+		fmt.Printf("Fetching bug-review Gist from %s\n", bugReviewGist)
+		gistContent, err := github.GetGist(ctx, bugReviewGist, githubToken)
+		if err != nil {
+			fmt.Printf("Warning: Failed to fetch bug-review Gist: %v\n", err)
+		} else {
+			filename := fmt.Sprintf("bug-review-issue-%d.md", workflow.GithubIssueNumber)
+			if attachErr := jira.AttachFileToJiraIssue(ctx, jiraBase, jiraTaskKey, authHeader, filename, []byte(gistContent)); attachErr != nil {
+				fmt.Printf("Warning: Failed to attach bug-review.md to %s: %v\n", jiraTaskKey, attachErr)
+			} else {
+				fmt.Printf("Successfully attached %s to %s\n", filename, jiraTaskKey)
+			}
+		}
+	}
+
+	// Attach implementation Gist if available
+	if implGist := workflow.Annotations["implementation-gist-url"]; implGist != "" {
+		fmt.Printf("Fetching implementation Gist from %s\n", implGist)
+		gistContent, err := github.GetGist(ctx, implGist, githubToken)
+		if err != nil {
+			fmt.Printf("Warning: Failed to fetch implementation Gist: %v\n", err)
+		} else {
+			filename := fmt.Sprintf("implementation-issue-%d.md", workflow.GithubIssueNumber)
+			if attachErr := jira.AttachFileToJiraIssue(ctx, jiraBase, jiraTaskKey, authHeader, filename, []byte(gistContent)); attachErr != nil {
+				fmt.Printf("Warning: Failed to attach implementation.md to %s: %v\n", jiraTaskKey, attachErr)
+			} else {
+				fmt.Printf("Successfully attached %s to %s\n", filename, jiraTaskKey)
+			}
+		}
+	}
 }

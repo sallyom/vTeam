@@ -82,6 +82,7 @@ func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
 			projectGroup.GET("/bugfix-workflows/:id/status", bugfixhandlers.GetProjectBugFixWorkflowStatus)
 			projectGroup.POST("/bugfix-workflows/:id/sessions", bugfixhandlers.CreateProjectBugFixWorkflowSession)
 			projectGroup.GET("/bugfix-workflows/:id/sessions", bugfixhandlers.ListProjectBugFixWorkflowSessions)
+			projectGroup.POST("/bugfix-workflows/:id/sync-jira", bugfixhandlers.SyncProjectBugFixWorkflowToJira)
 
 			projectGroup.GET("/permissions", handlers.ListProjectPermissions)
 			projectGroup.POST("/permissions", handlers.AddProjectPermission)
