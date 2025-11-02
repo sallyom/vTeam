@@ -157,7 +157,7 @@ func getSecretKeys(data map[string][]byte) []string {
 	return keys
 }
 
-// CheckRepoSeeding checks if a repo has been seeded by verifying .claude/commands/ and .specify/ exist
+// CheckRepoSeeding checks if a repo has been seeded by verifying .claude/commands/, .claude/agents/, .specify/, and specs/{branchName}/ exist
 func CheckRepoSeeding(ctx context.Context, repoURL string, branch *string, githubToken string) (bool, map[string]interface{}, error) {
 	owner, repo, err := ParseGitHubURL(repoURL)
 	if err != nil {
@@ -192,15 +192,23 @@ func CheckRepoSeeding(ctx context.Context, repoURL string, branch *string, githu
 		return false, nil, fmt.Errorf("failed to check .specify: %w", err)
 	}
 
+	// Check if specs/{branchName}/ directory exists for this specific workspace
+	specsPath := fmt.Sprintf("specs/%s", branchName)
+	specsPathExists, err := checkGitHubPathExists(ctx, owner, repo, branchName, specsPath, githubToken)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to check %s: %w", specsPath, err)
+	}
+
 	details := map[string]interface{}{
 		"claudeExists":         claudeExists,
 		"claudeCommandsExists": claudeCommandsExists,
 		"claudeAgentsExists":   claudeAgentsExists,
 		"specifyExists":        specifyExists,
+		"specsPathExists":      specsPathExists,
 	}
 
-	// Repo is properly seeded if all critical components exist
-	isSeeded := claudeCommandsExists && claudeAgentsExists && specifyExists
+	// Repo is properly seeded if all critical components exist AND the workspace directory exists
+	isSeeded := claudeCommandsExists && claudeAgentsExists && specifyExists && specsPathExists
 	return isSeeded, details, nil
 }
 
