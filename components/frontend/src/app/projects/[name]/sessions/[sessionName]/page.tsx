@@ -656,7 +656,37 @@ export default function ProjectSessionDetailPage({
     return start ? Math.max(0, end - start) : undefined;
   }, [session?.status?.startTime, session?.status?.completionTime]);
 
-  const subagentStats = useMemo(() => ({ uniqueCount: 0, orderedTypes: [], counts: {} as Record<string, number> }), []);
+  const subagentStats = useMemo(() => {
+    const agentCounts: Record<string, number> = {};
+
+    // Parse streamMessages for tool_use_messages with subagent_type
+    for (const msg of streamMessages) {
+      if (msg.type === 'tool_use_messages') {
+        const toolUseBlock = msg.toolUseBlock;
+
+        // Only count Task tool uses (not other tools like Bash, Read, Write)
+        if (toolUseBlock?.name !== 'Task') continue;
+
+        // Type-safe extraction with runtime checks
+        if (toolUseBlock.input && typeof toolUseBlock.input === 'object') {
+          const inputData = toolUseBlock.input as Record<string, unknown>;
+          const subagentType = inputData.subagent_type;
+
+          if (typeof subagentType === 'string') {
+            agentCounts[subagentType] = (agentCounts[subagentType] || 0) + 1;
+          }
+        }
+      }
+    }
+
+    const orderedTypes = Object.keys(agentCounts).sort();
+
+    return {
+      uniqueCount: orderedTypes.length,
+      orderedTypes,
+      counts: agentCounts,
+    };
+  }, [streamMessages]);
 
   // Loading state - also check if params are loaded
   if (isLoading || !projectName || !sessionName) {
