@@ -209,7 +209,8 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 			return
 		}
 
-		jiraTaskKey, ok := result["key"].(string)
+		var ok bool
+		jiraTaskKey, ok = result["key"].(string)
 		if !ok {
 			websocket.BroadcastBugFixJiraSyncFailed(workflowID, workflow.GithubIssueNumber, "No key in Jira response")
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Jira response missing key field"})
@@ -306,7 +307,11 @@ func buildJiraDescription(workflow *types.BugFixWorkflow) string {
 	// Repository and branch information
 	desc.WriteString("h2. Repository Information\n\n")
 	desc.WriteString(fmt.Sprintf("* *Repository:* %s\n", workflow.ImplementationRepo.URL))
-	desc.WriteString(fmt.Sprintf("* *Base Branch:* {{%s}}\n", workflow.ImplementationRepo.Branch))
+	baseBranch := "main"
+	if workflow.ImplementationRepo.Branch != nil && *workflow.ImplementationRepo.Branch != "" {
+		baseBranch = *workflow.ImplementationRepo.Branch
+	}
+	desc.WriteString(fmt.Sprintf("* *Base Branch:* {{%s}}\n", baseBranch))
 	desc.WriteString(fmt.Sprintf("* *Feature Branch:* {{%s}}\n", workflow.BranchName))
 	desc.WriteString("\n")
 
