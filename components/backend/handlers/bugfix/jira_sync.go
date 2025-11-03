@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -152,6 +153,7 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
 
+		// Use context from request for proper cancellation propagation
 		client := &http.Client{Timeout: 30 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -187,26 +189,29 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 			return
 		case 404:
 			websocket.BroadcastBugFixJiraSyncFailed(workflowID, workflow.GithubIssueNumber, "Jira project not found")
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Jira project not found", "details": string(body)})
+			// Don't expose Jira error details to user - may contain sensitive info
+			log.Printf("Jira 404 error details: %s", string(body))
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Jira project not found"})
 			return
 		default:
-			websocket.BroadcastBugFixJiraSyncFailed(workflowID, workflow.GithubIssueNumber, fmt.Sprintf("Jira API error: %s", string(body)))
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("Failed to create Jira issue (status %d)", resp.StatusCode), "details": string(body)})
+			websocket.BroadcastBugFixJiraSyncFailed(workflowID, workflow.GithubIssueNumber, "Jira API error")
+			// Log details for debugging, but don't expose to user
+			log.Printf("Jira API error (status %d): %s", resp.StatusCode, string(body))
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": fmt.Sprintf("Failed to create Jira issue (status %d)", resp.StatusCode)})
 			return
 		}
 
 		// Parse JSON response
 		var result map[string]interface{}
 		if err := json.Unmarshal(body, &result); err != nil {
-			// Log the raw response for debugging
-			fmt.Printf("ERROR: Failed to parse Jira response as JSON: %v\n", err)
+			// Log the raw response for debugging (server-side only)
+			log.Printf("ERROR: Failed to parse Jira response as JSON: %v", err)
 			bodyLen := len(body)
-			fmt.Printf("Response body (first 500 chars): %s\n", string(body[:min(500, bodyLen)]))
+			log.Printf("Response body (first 500 chars): %s", string(body[:min(500, bodyLen)]))
 			websocket.BroadcastBugFixJiraSyncFailed(workflowID, workflow.GithubIssueNumber, "Invalid Jira response")
+			// Don't expose Jira response body to user - may contain sensitive details
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":           "Failed to parse Jira response",
-				"details":         err.Error(),
-				"responsePreview": string(body[:min(200, bodyLen)]),
+				"error": "Failed to parse Jira response",
 			})
 			return
 		}
@@ -408,40 +413,6 @@ func formatGitHubJiraLinkComment(jiraTaskKey, jiraTaskURL string, workflow *type
 		if implGist := workflow.Annotations["implementation-gist-url"]; implGist != "" {
 			if !hasGists {
 				comment.WriteString("### 📄 Analysis Documents\n\n")
-				hasGists = true
-			}
-			comment.WriteString(fmt.Sprintf("- [Implementation Details](%s)\n", implGist))
-		}
-		if hasGists {
-			comment.WriteString("\n")
-		}
-	}
-
-	comment.WriteString("*Synchronized by vTeam BugFix Workspace*")
-
-	return comment.String()
-}
-
-// formatGitHubJiraUpdateComment formats the comment to post on GitHub Issue when updating Jira task
-func formatGitHubJiraUpdateComment(jiraTaskKey, jiraTaskURL string, workflow *types.BugFixWorkflow) string {
-	var comment strings.Builder
-
-	comment.WriteString("## 🔄 Jira Task Updated\n\n")
-	comment.WriteString(fmt.Sprintf("Jira task [**%s**](%s) has been updated with the latest information.\n\n", jiraTaskKey, jiraTaskURL))
-
-	// Add links to analysis documents if available
-	if workflow.Annotations != nil {
-		hasGists := false
-		if bugReviewGist := workflow.Annotations["bug-review-gist-url"]; bugReviewGist != "" {
-			if !hasGists {
-				comment.WriteString("### 📄 Latest Analysis\n\n")
-				hasGists = true
-			}
-			comment.WriteString(fmt.Sprintf("- [Bug Review & Assessment](%s)\n", bugReviewGist))
-		}
-		if implGist := workflow.Annotations["implementation-gist-url"]; implGist != "" {
-			if !hasGists {
-				comment.WriteString("### 📄 Latest Analysis\n\n")
 				hasGists = true
 			}
 			comment.WriteString(fmt.Sprintf("- [Implementation Details](%s)\n", implGist))

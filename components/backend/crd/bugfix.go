@@ -3,6 +3,7 @@ package crd
 import (
 	"context"
 	"fmt"
+	"log"
 
 	"ambient-code-backend/types"
 
@@ -113,8 +114,16 @@ func GetProjectBugFixWorkflowCR(dyn dynamic.Interface, project, id string) (*typ
 
 	spec, found, _ := unstructured.NestedMap(obj.Object, "spec")
 	if found {
+		// Parse githubIssueNumber with type safety - handle both int64 and float64
+		// JSON unmarshaling can produce either depending on the source
 		if val, ok := spec["githubIssueNumber"].(int64); ok {
 			workflow.GithubIssueNumber = int(val)
+		} else if val, ok := spec["githubIssueNumber"].(float64); ok {
+			workflow.GithubIssueNumber = int(val)
+		} else if spec["githubIssueNumber"] != nil {
+			// Log warning if type assertion fails - helps debug unexpected types
+			log.Printf("Warning: githubIssueNumber has unexpected type %T in BugFixWorkflow %s/%s",
+				spec["githubIssueNumber"], project, id)
 		}
 		if val, ok := spec["githubIssueURL"].(string); ok {
 			workflow.GithubIssueURL = val
@@ -144,16 +153,22 @@ func GetProjectBugFixWorkflowCR(dyn dynamic.Interface, project, id string) (*typ
 			workflow.LastSyncedAt = &val
 		}
 
-		// Parse implementationRepo
+		// Parse implementationRepo (required field)
 		if implMap, ok := spec["implementationRepo"].(map[string]interface{}); ok {
 			repo := types.GitRepository{}
-			if url, ok := implMap["url"].(string); ok {
+			if url, ok := implMap["url"].(string); ok && url != "" {
 				repo.URL = url
+			} else {
+				// Critical field missing - return error instead of zero value
+				return nil, fmt.Errorf("BugFixWorkflow %s/%s missing required field: implementationRepo.url", project, id)
 			}
 			if branch, ok := implMap["branch"].(string); ok && branch != "" {
 				repo.Branch = &branch
 			}
 			workflow.ImplementationRepo = repo
+		} else {
+			// implementationRepo is required
+			return nil, fmt.Errorf("BugFixWorkflow %s/%s missing required field: implementationRepo", project, id)
 		}
 	}
 

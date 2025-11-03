@@ -1,7 +1,6 @@
 package bugfix
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -427,7 +426,7 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 		},
 	}
 
-	created, err := reqDyn.Resource(gvr).Namespace(project).Create(context.TODO(), sessionObj, v1.CreateOptions{})
+	created, err := reqDyn.Resource(gvr).Namespace(project).Create(c.Request.Context(), sessionObj, v1.CreateOptions{})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create session", "details": err.Error()})
 		return

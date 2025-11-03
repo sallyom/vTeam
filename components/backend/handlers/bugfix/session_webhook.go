@@ -90,10 +90,17 @@ func handleBugReviewCompletion(c *gin.Context, event AgenticSessionWebhookEvent,
 	log.Printf("handleBugReviewCompletion: session=%s, workflow=%s, project=%s", sessionName, workflowID, project)
 
 	// Get K8s clients (try user token first, fall back to service account)
+	// NOTE: This webhook is triggered BY the Kubernetes operator when a session
+	// completes, NOT by a user API call. The operator does not include user
+	// authentication headers, so we fall back to service account credentials.
+	// This is a legitimate system operation pattern - the webhook is processing
+	// completed session results on behalf of the system, not a specific user.
+	// Per CLAUDE.md security rules, service account is allowed for:
+	// "Cross-namespace operations backend is authorized for" (webhook processing)
 	_, reqDyn := GetK8sClientsForRequest(c)
 	if reqDyn == nil {
 		// In webhook context, use service account clients
-		log.Printf("No user token, using service account client")
+		log.Printf("No user token, using service account client for system webhook operation")
 		reqDyn = GetServiceAccountDynamicClient()
 	}
 
@@ -112,6 +119,16 @@ func handleBugReviewCompletion(c *gin.Context, event AgenticSessionWebhookEvent,
 		return
 	}
 	log.Printf("Successfully fetched BugFixWorkflow: %s", workflowID)
+
+	// Idempotency check: Prevent duplicate webhook processing
+	// If this session has already been processed (annotation exists), skip to avoid duplicate Gists/comments
+	if workflow.Annotations != nil {
+		if _, exists := workflow.Annotations["bug-review-comment-id"]; exists {
+			log.Printf("Idempotency: Bug-review session %s already processed (comment annotation exists), skipping", sessionName)
+			c.JSON(http.StatusOK, gin.H{"status": "already_processed", "message": "session already processed"})
+			return
+		}
+	}
 
 	// Get session output from status.result field
 	status, _ := event.Object.Object["status"].(map[string]interface{})
@@ -143,7 +160,7 @@ func handleBugReviewCompletion(c *gin.Context, event AgenticSessionWebhookEvent,
 	log.Printf("Parsed issue: owner=%s, repo=%s, issue=%d", owner, repo, issueNumber)
 
 	// Get GitHub token from K8s secret (webhook uses service account, no user context)
-	ctx := context.Background()
+	ctx := c.Request.Context()
 	githubToken, err := git.GetGitHubToken(ctx, K8sClient, DynamicClient, project, "")
 	if err != nil || githubToken == "" {
 		log.Printf("ERROR: Failed to get GitHub token: %v", err)
@@ -151,6 +168,9 @@ func handleBugReviewCompletion(c *gin.Context, event AgenticSessionWebhookEvent,
 		return
 	}
 	log.Printf("GitHub token obtained (length: %d)", len(githubToken))
+
+	// Validate and sanitize Gist content
+	findings = sanitizeGistContent(findings, "bug-review")
 
 	// Create a Gist with the full detailed analysis
 	gistFilename := fmt.Sprintf("bug-review-issue-%d.md", issueNumber)
@@ -268,8 +288,16 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 	}
 
 	// Get K8s client
+	// NOTE: This webhook is triggered BY the Kubernetes operator when a session
+	// completes, NOT by a user API call. The operator does not include user
+	// authentication headers, so we fall back to service account credentials.
+	// This is a legitimate system operation pattern - the webhook is processing
+	// completed session results on behalf of the system, not a specific user.
+	// Per CLAUDE.md security rules, service account is allowed for:
+	// "Cross-namespace operations backend is authorized for" (webhook processing)
 	_, reqDyn := GetK8sClientsForRequest(c)
 	if reqDyn == nil {
+		log.Printf("No user token, using service account client for system webhook operation")
 		reqDyn = GetServiceAccountDynamicClient()
 	}
 
@@ -281,6 +309,16 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 		return
 	}
 
+	// Idempotency check: Prevent duplicate webhook processing
+	// If this session has already been processed (annotation exists), skip to avoid duplicate Gists/comments
+	if workflow.Annotations != nil {
+		if _, exists := workflow.Annotations["implementation-comment-id"]; exists {
+			log.Printf("Idempotency: Implementation session %s already processed (comment annotation exists), skipping", sessionName)
+			c.JSON(http.StatusOK, gin.H{"status": "already_processed", "message": "session already processed"})
+			return
+		}
+	}
+
 	// Parse GitHub Issue URL
 	owner, repo, issueNumber, err := github.ParseGitHubIssueURL(workflow.GithubIssueURL)
 	if err != nil {
@@ -290,7 +328,7 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 	}
 
 	// Get GitHub token from K8s secret (webhook uses service account, no user context)
-	ctx := context.Background()
+	ctx := c.Request.Context()
 	githubToken, err := git.GetGitHubToken(ctx, K8sClient, DynamicClient, project, "")
 	if err != nil || githubToken == "" {
 		log.Printf("ERROR: Failed to get GitHub token: %v", err)
@@ -333,6 +371,9 @@ func handleBugImplementFixCompletion(c *gin.Context, event AgenticSessionWebhook
 			}
 		}
 	}
+
+	// Validate and sanitize Gist content
+	implementationSummary = sanitizeGistContent(implementationSummary, "implementation")
 
 	// Create a Gist with the full implementation details
 	gistFilename := fmt.Sprintf("implementation-issue-%d.md", issueNumber)
@@ -447,8 +488,8 @@ func formatImplementationSummary(gistURL, sessionID, branchName, repoURL string,
 		comment.WriteString("**Create a Pull Request** to merge these changes:\n\n")
 		branchURL := fmt.Sprintf("%s/tree/%s", strings.TrimSuffix(repoURL, ".git"), branchName)
 		comment.WriteString(fmt.Sprintf("1. 🌿 View changes: [%s](%s)\n", branchName, branchURL))
-		comment.WriteString(fmt.Sprintf("2. 🔀 Click \"Contribute\" → \"Open pull request\" on GitHub\n"))
-		comment.WriteString(fmt.Sprintf("3. 📝 Review the changes and submit the PR\n\n"))
+		comment.WriteString("2. 🔀 Click \"Contribute\" → \"Open pull request\" on GitHub\n")
+		comment.WriteString("3. 📝 Review the changes and submit the PR\n\n")
 	}
 
 	comment.WriteString("**To review locally:**\n")
@@ -488,8 +529,8 @@ func formatImplementationComment(summary, sessionID, branchName, repoURL string,
 		comment.WriteString("**Create a Pull Request** to merge these changes:\n\n")
 		branchURL := fmt.Sprintf("%s/tree/%s", strings.TrimSuffix(repoURL, ".git"), branchName)
 		comment.WriteString(fmt.Sprintf("1. 🌿 View changes: [%s](%s)\n", branchName, branchURL))
-		comment.WriteString(fmt.Sprintf("2. 🔀 Click \"Contribute\" → \"Open pull request\" on GitHub\n"))
-		comment.WriteString(fmt.Sprintf("3. 📝 Review the changes and submit the PR\n\n"))
+		comment.WriteString("2. 🔀 Click \"Contribute\" → \"Open pull request\" on GitHub\n")
+		comment.WriteString("3. 📝 Review the changes and submit the PR\n\n")
 	}
 
 	comment.WriteString("**To review locally:**\n")
@@ -602,6 +643,9 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 	// Route based on session type
 	switch sessionType {
 	case "bug-review":
+		// Validate and sanitize Gist content
+		output = sanitizeGistContent(output, "bug-review")
+
 		// Create a Gist with the full detailed analysis
 		gistFilename := fmt.Sprintf("bug-review-issue-%d.md", issueNumber)
 		gistDescription := fmt.Sprintf("Bug Review & Assessment for Issue #%d", issueNumber)
@@ -705,6 +749,9 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 			}
 		}
 
+		// Validate and sanitize Gist content
+		output = sanitizeGistContent(output, "implementation")
+
 		// Create a Gist with the full implementation details
 		gistFilename := fmt.Sprintf("implementation-issue-%d.md", issueNumber)
 		gistDescription := fmt.Sprintf("Implementation Details for Issue #%d", issueNumber)
@@ -765,7 +812,34 @@ func processSessionCompletion(session *unstructured.Unstructured, sessionType st
 	websocket.BroadcastBugFixSessionCompleted(workflowID, session.GetName(), sessionType)
 }
 
+// MaxGistSize is the maximum size for Gist content to prevent oversized uploads
+// GitHub's actual limit is ~100MB per file, but we use 1MB to be conservative
+const MaxGistSize = 1000000
+
+// sanitizeGistContent validates and truncates Gist content if needed
+func sanitizeGistContent(content string, contentType string) string {
+	if len(content) > MaxGistSize {
+		log.Printf("WARNING: %s content too large (%d bytes), truncating to %d bytes",
+			contentType, len(content), MaxGistSize)
+		return content[:MaxGistSize] + "\n\n... (content truncated due to size limit)"
+	}
+	return content
+}
+
 // Package-level variables for bugfix handlers (set from main package)
+// These clients use the backend service account credentials with the following RBAC permissions:
+//
+// Required ClusterRole permissions for BugFix webhook operations:
+// - agenticsessions: get, list, watch (to monitor session completions)
+// - bugfixworkflows: get, update, patch (to read workflow details and update annotations)
+// - secrets: get (to retrieve GitHub tokens for Gist/comment creation)
+//
+// These permissions are defined in components/manifests/rbac/backend-clusterrole.yaml
+// and bound via components/manifests/rbac/backend-clusterrolebinding.yaml
+//
+// Security Note: The service account is used ONLY for system operations triggered
+// by the Kubernetes operator (session completion webhooks), NOT for user-initiated
+// API calls which use user-scoped clients with RBAC enforcement.
 var (
 	K8sClient     *kubernetes.Clientset
 	DynamicClient dynamic.Interface

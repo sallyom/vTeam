@@ -11,7 +11,7 @@ func TestCreateBugFixWorkflow(t *testing.T) {
 	// Test cases:
 	// 1. Valid GitHub Issue URL -> 201 Created
 	// 2. Invalid GitHub Issue URL -> 400 Bad Request
-	// 3. Missing umbrellaRepo -> 400 Bad Request
+	// 3. Missing implementationRepo -> 400 Bad Request
 	// 4. Duplicate workspace (same issue number) -> 409 Conflict
 	// 5. Text description with valid targetRepository -> 201 Created
 	// 6. Both githubIssueURL and textDescription -> 400 Bad Request

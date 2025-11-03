@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,42 @@ var (
 	GetK8sClientsForRequest    func(*gin.Context) (*kubernetes.Clientset, dynamic.Interface)
 	GetProjectSettingsResource func() schema.GroupVersionResource
 )
+
+// Input validation constants to prevent oversized inputs
+const (
+	MaxTitleLength             = 200   // GitHub Issue title limit is 256, use 200 for safety
+	MaxSymptomsLength          = 10000 // ~10KB for symptoms description
+	MaxReproductionStepsLength = 10000 // ~10KB for reproduction steps
+	MaxExpectedBehaviorLength  = 5000  // ~5KB for expected behavior
+	MaxActualBehaviorLength    = 5000  // ~5KB for actual behavior
+	MaxAdditionalContextLength = 10000 // ~10KB for additional context
+	MaxBranchNameLength        = 255   // Git branch name limit
+)
+
+// validBranchNameRegex defines allowed characters in branch names
+// Allows: letters, numbers, hyphens, underscores, forward slashes, and dots
+// Prevents: shell metacharacters, backticks, quotes, semicolons, pipes, etc.
+var validBranchNameRegex = regexp.MustCompile(`^[a-zA-Z0-9/_.-]+$`)
+
+// validateBranchName checks if a branch name is safe to use in git operations
+// Returns error if the branch name contains potentially dangerous characters
+func validateBranchName(branchName string) error {
+	if branchName == "" {
+		return fmt.Errorf("branch name cannot be empty")
+	}
+	if !validBranchNameRegex.MatchString(branchName) {
+		return fmt.Errorf("branch name contains invalid characters (allowed: a-z, A-Z, 0-9, /, _, -, .)")
+	}
+	// Prevent branch names that start with special characters
+	if strings.HasPrefix(branchName, ".") || strings.HasPrefix(branchName, "-") {
+		return fmt.Errorf("branch name cannot start with '.' or '-'")
+	}
+	// Prevent branch names with ".." (path traversal) or "//" (double slashes)
+	if strings.Contains(branchName, "..") || strings.Contains(branchName, "//") {
+		return fmt.Errorf("branch name cannot contain '..' or '//'")
+	}
+	return nil
+}
 
 // CreateProjectBugFixWorkflow handles POST /api/projects/:projectName/bugfix-workflows
 // Creates a new BugFix Workspace from either GitHub Issue URL or text description
@@ -94,16 +131,35 @@ func CreateProjectBugFixWorkflow(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Title is required"})
 			return
 		}
-		if len(strings.TrimSpace(td.Title)) < 10 {
+		titleLen := len(strings.TrimSpace(td.Title))
+		if titleLen < 10 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Title must be at least 10 characters"})
 			return
 		}
+		if titleLen > MaxTitleLength {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   fmt.Sprintf("Title exceeds maximum length of %d characters", MaxTitleLength),
+				"current": titleLen,
+				"max":     MaxTitleLength,
+			})
+			return
+		}
+
 		if strings.TrimSpace(td.Symptoms) == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Symptoms are required"})
 			return
 		}
-		if len(strings.TrimSpace(td.Symptoms)) < 20 {
+		symptomsLen := len(strings.TrimSpace(td.Symptoms))
+		if symptomsLen < 20 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Symptoms must be at least 20 characters"})
+			return
+		}
+		if symptomsLen > MaxSymptomsLength {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   fmt.Sprintf("Symptoms exceed maximum length of %d characters", MaxSymptomsLength),
+				"current": symptomsLen,
+				"max":     MaxSymptomsLength,
+			})
 			return
 		}
 		if strings.TrimSpace(td.TargetRepository) == "" {
@@ -115,6 +171,40 @@ func CreateProjectBugFixWorkflow(c *gin.Context) {
 		owner, repo, err := git.ParseGitHubURL(td.TargetRepository)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid target repository URL", "details": err.Error()})
+			return
+		}
+
+		// Validate optional field lengths
+		if td.ReproductionSteps != nil && len(*td.ReproductionSteps) > MaxReproductionStepsLength {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   fmt.Sprintf("Reproduction steps exceed maximum length of %d characters", MaxReproductionStepsLength),
+				"current": len(*td.ReproductionSteps),
+				"max":     MaxReproductionStepsLength,
+			})
+			return
+		}
+		if td.ExpectedBehavior != nil && len(*td.ExpectedBehavior) > MaxExpectedBehaviorLength {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   fmt.Sprintf("Expected behavior exceeds maximum length of %d characters", MaxExpectedBehaviorLength),
+				"current": len(*td.ExpectedBehavior),
+				"max":     MaxExpectedBehaviorLength,
+			})
+			return
+		}
+		if td.ActualBehavior != nil && len(*td.ActualBehavior) > MaxActualBehaviorLength {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   fmt.Sprintf("Actual behavior exceeds maximum length of %d characters", MaxActualBehaviorLength),
+				"current": len(*td.ActualBehavior),
+				"max":     MaxActualBehaviorLength,
+			})
+			return
+		}
+		if td.AdditionalContext != nil && len(*td.AdditionalContext) > MaxAdditionalContextLength {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   fmt.Sprintf("Additional context exceeds maximum length of %d characters", MaxAdditionalContextLength),
+				"current": len(*td.AdditionalContext),
+				"max":     MaxAdditionalContextLength,
+			})
 			return
 		}
 
@@ -162,9 +252,14 @@ func CreateProjectBugFixWorkflow(c *gin.Context) {
 	}
 
 	// Auto-generate branch name if not provided
-	branch := "main"
+	var branch string
 	if req.BranchName != nil && *req.BranchName != "" {
 		branch = *req.BranchName
+		// Validate user-provided branch name for security
+		if err := validateBranchName(branch); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid branch name", "details": err.Error()})
+			return
+		}
 	} else {
 		// Auto-generate branch name: bugfix/gh-{issue-number}
 		branch = fmt.Sprintf("bugfix/gh-%d", githubIssue.Number)

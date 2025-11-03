@@ -206,6 +206,11 @@ func CheckRepoSeeding(ctx context.Context, repoURL string, branch *string, githu
 
 // ParseGitHubURL extracts owner and repo from a GitHub URL
 func ParseGitHubURL(gitURL string) (owner, repo string, err error) {
+	// Only HTTPS URLs are supported (no SSH git@ URLs)
+	if !strings.HasPrefix(gitURL, "https://") {
+		return "", "", fmt.Errorf("invalid URL scheme: must be https://")
+	}
+
 	gitURL = strings.TrimSuffix(gitURL, ".git")
 
 	if strings.Contains(gitURL, "github.com") {
@@ -218,7 +223,15 @@ func ParseGitHubURL(gitURL string) (owner, repo string, err error) {
 		if len(pathParts) < 2 {
 			return "", "", fmt.Errorf("invalid GitHub URL path")
 		}
-		return pathParts[0], pathParts[1], nil
+
+		// Validate owner and repo are non-empty
+		owner = pathParts[0]
+		repo = pathParts[1]
+		if owner == "" || repo == "" {
+			return "", "", fmt.Errorf("owner and repository name cannot be empty")
+		}
+
+		return owner, repo, nil
 	}
 
 	return "", "", fmt.Errorf("not a GitHub URL")
