@@ -702,14 +702,6 @@ export default function ProjectSessionDetailPage({
         ]}
         className="mb-4"
       />
-      <div className="flex items-center justify-start mb-6">
-        <Link href={backHref || `/projects/${encodeURIComponent(projectName)}/sessions`}>
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            {backLabel || "Back to Sessions"}
-          </Button>
-        </Link>
-      </div>
 
       <div className="space-y-6">
         {/* Header */}
