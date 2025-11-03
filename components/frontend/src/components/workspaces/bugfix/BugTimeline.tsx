@@ -40,8 +40,25 @@ interface BugTimelineProps {
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default function BugTimeline({ workflowId, events, sessions = [], className }: BugTimelineProps) {
+  // Filter out session_started events if there's a corresponding completed/failed event
+  const filteredEvents = events.filter((event) => {
+    // Keep all non-started events
+    if (event.type !== 'session_started') {
+      return true;
+    }
+
+    // For session_started events, only keep if there's no corresponding completed/failed event
+    const hasCompletionEvent = events.some(
+      (e) =>
+        e.sessionId === event.sessionId &&
+        (e.type === 'session_completed' || e.type === 'session_failed')
+    );
+
+    return !hasCompletionEvent;
+  });
+
   // Sort events by timestamp (newest first)
-  const sortedEvents = [...events].sort((a, b) =>
+  const sortedEvents = [...filteredEvents].sort((a, b) =>
     new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
