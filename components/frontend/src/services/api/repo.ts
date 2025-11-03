@@ -4,6 +4,7 @@
  */
 
 import { apiClient } from './client';
+import type { ListBranchesResponse } from '@/types/api';
 
 type RepoParams = {
   repo: string;
@@ -74,5 +75,21 @@ export async function checkFileExists(
   } catch {
     return false;
   }
+}
+
+/**
+ * List all branches in a repository
+ */
+export async function listRepoBranches(
+  projectName: string,
+  repo: string
+): Promise<ListBranchesResponse> {
+  const url = `/projects/${encodeURIComponent(projectName)}/repo/branches`;
+
+  return apiClient.get<ListBranchesResponse>(url, {
+    params: {
+      repo: repo,
+    },
+  });
 }
 

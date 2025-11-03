@@ -90,3 +90,11 @@ export type GitHubConnectResponse = {
 export type GitHubDisconnectResponse = {
   message: string;
 };
+
+export type GitHubBranch = {
+  name: string;
+};
+
+export type ListBranchesResponse = {
+  branches: GitHubBranch[];
+};

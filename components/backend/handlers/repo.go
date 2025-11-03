@@ -317,6 +317,70 @@ func GetRepoTree(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]interface{}{"path": path, "entries": entries})
 }
 
+// ListRepoBranches handles GET /projects/:projectName/repo/branches
+// List all branches in a repository
+func ListRepoBranches(c *gin.Context) {
+	project := c.Param("projectName")
+	repo := c.Query("repo")
+
+	if repo == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "repo query parameter required"})
+		return
+	}
+
+	userID, _ := c.Get("userID")
+	reqK8s, reqDyn := GetK8sClientsForRequestRepo(c)
+
+	// Try to get GitHub token (GitHub App or PAT from runner secret)
+	token, err := GetGitHubTokenRepo(c.Request.Context(), reqK8s, reqDyn, project, userID.(string))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+
+	owner, repoName, err := parseOwnerRepo(repo)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	api := githubAPIBaseURL("github.com")
+	url := fmt.Sprintf("%s/repos/%s/%s/branches", api, owner, repoName)
+	resp, err := doGitHubRequest(c.Request.Context(), http.MethodGet, url, "Bearer "+token, "", nil)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("GitHub request failed: %v", err)})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		c.JSON(resp.StatusCode, gin.H{"error": string(b)})
+		return
+	}
+
+	var branchesResp []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&branchesResp); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("failed to parse GitHub response: %v", err)})
+		return
+	}
+
+	// Map branches to a simpler format
+	branches := make([]map[string]interface{}, 0, len(branchesResp))
+	for _, b := range branchesResp {
+		name, _ := b["name"].(string)
+		if name != "" {
+			branches = append(branches, map[string]interface{}{
+				"name": name,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"branches": branches,
+	})
+}
+
 // GetRepoBlob handles GET /projects/:projectName/repo/blob
 // Fetch blob (text) via backend proxy
 func GetRepoBlob(c *gin.Context) {

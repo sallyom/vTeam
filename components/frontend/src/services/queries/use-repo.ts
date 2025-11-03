@@ -22,6 +22,9 @@ export const repoKeys = {
   trees: () => [...repoKeys.all, 'tree'] as const,
   tree: (projectName: string, params: RepoParams) =>
     [...repoKeys.trees(), projectName, params.repo, params.ref, params.path] as const,
+  branches: () => [...repoKeys.all, 'branches'] as const,
+  repoBranches: (projectName: string, repo: string) =>
+    [...repoKeys.branches(), projectName, repo] as const,
 };
 
 /**
@@ -70,5 +73,21 @@ export function useRepoFileExists(
     queryFn: () => repoApi.checkFileExists(projectName, params),
     enabled: (options?.enabled ?? true) && !!projectName && !!params.repo && !!params.ref && !!params.path,
     staleTime: 5 * 60 * 1000, // 5 minutes
+  });
+}
+
+/**
+ * Hook to fetch all branches in a repository
+ */
+export function useRepoBranches(
+  projectName: string,
+  repo: string,
+  options?: { enabled?: boolean }
+) {
+  return useQuery({
+    queryKey: repoKeys.repoBranches(projectName, repo),
+    queryFn: () => repoApi.listRepoBranches(projectName, repo),
+    enabled: (options?.enabled ?? true) && !!projectName && !!repo,
+    staleTime: 2 * 60 * 1000, // 2 minutes - branches may change more frequently than files
   });
 }
