@@ -342,8 +342,8 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 	// Build AgenticSession spec (following CRD schema)
 	// Note: project field is not in CRD - operator uses namespace to find ProjectSettings
 	sessionSpec := map[string]interface{}{
-		"prompt":             prompt,   // REQUIRED field
-		"displayName":        title,    // Use displayName instead of title
+		"prompt":             prompt, // REQUIRED field
+		"displayName":        title,  // Use displayName instead of title
 		"repos":              repos,
 		"autoPushOnComplete": autoPush, // Auto-push changes to feature branch
 		"llmSettings": map[string]interface{}{
@@ -406,10 +406,10 @@ func CreateProjectBugFixWorkflowSession(c *gin.Context) {
 
 	// Build labels for linking to BugFix Workflow
 	labels := map[string]string{
-		"project":              project,
-		"bugfix-workflow":      workflowID,
-		"bugfix-session-type":  req.SessionType,
-		"bugfix-issue-number":  fmt.Sprintf("%d", workflow.GithubIssueNumber),
+		"project":             project,
+		"bugfix-workflow":     workflowID,
+		"bugfix-session-type": req.SessionType,
+		"bugfix-issue-number": fmt.Sprintf("%d", workflow.GithubIssueNumber),
 	}
 
 	// Create AgenticSession CR
@@ -535,9 +535,10 @@ func joinStrings(strs []string, sep string) string {
 
 // deriveRepoNameFromURL extracts the repository name from a Git URL
 // Examples:
-//   "https://github.com/owner/repo.git" -> "repo"
-//   "https://github.com/owner/repo" -> "repo"
-//   "git@github.com:owner/repo.git" -> "repo"
+//
+//	"https://github.com/owner/repo.git" -> "repo"
+//	"https://github.com/owner/repo" -> "repo"
+//	"git@github.com:owner/repo.git" -> "repo"
 func deriveRepoNameFromURL(url string) string {
 	// Remove trailing .git if present
 	url = strings.TrimSuffix(url, ".git")

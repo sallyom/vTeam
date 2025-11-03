@@ -6,14 +6,14 @@ import (
 
 // BugFix Workspace WebSocket Event Types
 const (
-	EventBugFixWorkspaceCreated    = "bugfix-workspace-created"
-	EventBugFixSessionStarted      = "bugfix-session-started"
-	EventBugFixSessionProgress     = "bugfix-session-progress"
-	EventBugFixSessionCompleted    = "bugfix-session-completed"
-	EventBugFixSessionFailed       = "bugfix-session-failed"
-	EventBugFixJiraSyncStarted     = "bugfix-jira-sync-started"
-	EventBugFixJiraSyncCompleted   = "bugfix-jira-sync-completed"
-	EventBugFixJiraSyncFailed      = "bugfix-jira-sync-failed"
+	EventBugFixWorkspaceCreated  = "bugfix-workspace-created"
+	EventBugFixSessionStarted    = "bugfix-session-started"
+	EventBugFixSessionProgress   = "bugfix-session-progress"
+	EventBugFixSessionCompleted  = "bugfix-session-completed"
+	EventBugFixSessionFailed     = "bugfix-session-failed"
+	EventBugFixJiraSyncStarted   = "bugfix-jira-sync-started"
+	EventBugFixJiraSyncCompleted = "bugfix-jira-sync-completed"
+	EventBugFixJiraSyncFailed    = "bugfix-jira-sync-failed"
 )
 
 // BroadcastBugFixWorkspaceCreated broadcasts when a BugFix Workspace is created
@@ -23,8 +23,8 @@ func BroadcastBugFixWorkspaceCreated(workflowID, githubIssueURL string, issueNum
 		Type:      EventBugFixWorkspaceCreated,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload: map[string]interface{}{
-			"workflowId":       workflowID,
-			"githubIssueURL":   githubIssueURL,
+			"workflowId":        workflowID,
+			"githubIssueURL":    githubIssueURL,
 			"githubIssueNumber": issueNumber,
 		},
 	}

@@ -20,7 +20,7 @@ import (
 
 // Package-level dependencies (set from main)
 var (
-	GetK8sClientsForRequest   func(*gin.Context) (*kubernetes.Clientset, dynamic.Interface)
+	GetK8sClientsForRequest    func(*gin.Context) (*kubernetes.Clientset, dynamic.Interface)
 	GetProjectSettingsResource func() schema.GroupVersionResource
 )
 

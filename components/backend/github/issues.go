@@ -73,9 +73,9 @@ type CreateIssueRequest struct {
 
 // UpdateIssueRequest represents the request body for updating an issue
 type UpdateIssueRequest struct {
-	Title *string  `json:"title,omitempty"`
-	Body  *string  `json:"body,omitempty"`
-	State *string  `json:"state,omitempty"` // "open" or "closed"
+	Title  *string  `json:"title,omitempty"`
+	Body   *string  `json:"body,omitempty"`
+	State  *string  `json:"state,omitempty"` // "open" or "closed"
 	Labels []string `json:"labels,omitempty"`
 }
 
@@ -567,9 +567,9 @@ type GitHubGist struct {
 
 // CreateGistRequest represents the request to create a Gist
 type CreateGistRequest struct {
-	Description string                       `json:"description"`
-	Public      bool                         `json:"public"`
-	Files       map[string]CreateGistFile    `json:"files"`
+	Description string                    `json:"description"`
+	Public      bool                      `json:"public"`
+	Files       map[string]CreateGistFile `json:"files"`
 }
 
 // CreateGistFile represents a file in a Gist

@@ -35,18 +35,18 @@ func GetProjectBugFixWorkflow(c *gin.Context) {
 
 	// Return workflow details
 	response := map[string]interface{}{
-		"id":                    workflow.ID,
-		"githubIssueNumber":     workflow.GithubIssueNumber,
-		"githubIssueURL":        workflow.GithubIssueURL,
-		"title":                 workflow.Title,
-		"description":           workflow.Description,
-		"branchName":            workflow.BranchName,
-		"project":               workflow.Project,
-		"phase":                 workflow.Phase,
-		"message":               workflow.Message,
+		"id":                      workflow.ID,
+		"githubIssueNumber":       workflow.GithubIssueNumber,
+		"githubIssueURL":          workflow.GithubIssueURL,
+		"title":                   workflow.Title,
+		"description":             workflow.Description,
+		"branchName":              workflow.BranchName,
+		"project":                 workflow.Project,
+		"phase":                   workflow.Phase,
+		"message":                 workflow.Message,
 		"implementationCompleted": workflow.ImplementationCompleted,
-		"createdAt":             workflow.CreatedAt,
-		"createdBy":             workflow.CreatedBy,
+		"createdAt":               workflow.CreatedAt,
+		"createdBy":               workflow.CreatedBy,
 	}
 
 	// Add optional fields

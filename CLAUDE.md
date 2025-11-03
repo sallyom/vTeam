@@ -516,6 +516,27 @@ token := strings.TrimSpace(parts[1])
 log.Printf("Processing request with token (len=%d)", len(token))
 ```
 
+**Authorization Header Logging Safety**:
+Our custom Gin logger (server/server.go:19-39) is designed to NEVER log request headers:
+```go
+r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+    // Only logs: method | status | IP | path
+    // NEVER logs headers (including Authorization)
+    return fmt.Sprintf("[GIN] %s | %3d | %s | %s\n",
+        param.Method,
+        param.StatusCode,
+        param.ClientIP,
+        path,
+    )
+}))
+```
+
+This means:
+- ✅ **SAFE**: Setting `req.Header.Set("Authorization", token)` anywhere in the codebase
+- ✅ **SAFE**: Using tokens in HTTP client requests (GitHub, Jira, etc.)
+- ⚠️ **NEVER**: Log tokens directly with fmt.Printf or log.Printf
+- ⚠️ **NEVER**: Include tokens in error messages returned to users
+
 **RBAC Enforcement**:
 ```go
 // Always check permissions before operations

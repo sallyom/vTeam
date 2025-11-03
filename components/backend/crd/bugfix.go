@@ -61,9 +61,9 @@ func BugFixWorkflowToCRObject(workflow *types.BugFixWorkflow) map[string]interfa
 
 	// Build labels
 	labels := map[string]string{
-		"project":              workflow.Project,
-		"bugfix-workflow":      workflow.ID,
-		"bugfix-issue-number":  fmt.Sprintf("%d", workflow.GithubIssueNumber),
+		"project":             workflow.Project,
+		"bugfix-workflow":     workflow.ID,
+		"bugfix-issue-number": fmt.Sprintf("%d", workflow.GithubIssueNumber),
 	}
 
 	// Build metadata

@@ -17,14 +17,19 @@ type RouterFunc func(r *gin.Engine)
 // Run starts the server with the provided route registration function
 func Run(registerRoutes RouterFunc) error {
 	// Setup Gin router with custom logger that redacts tokens
+	// SECURITY: This custom logger ONLY logs method/status/IP/path - it never logs
+	// request headers, which means Authorization headers with tokens are never exposed.
+	// This makes it safe to set Authorization headers throughout the codebase without
+	// risk of token leakage via logging.
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
-		// Redact token from query string
+		// Redact token from query string (for legacy /ws?token= endpoints)
 		path := param.Path
 		if strings.Contains(param.Request.URL.RawQuery, "token=") {
 			path = strings.Split(path, "?")[0] + "?token=[REDACTED]"
 		}
+		// Only log method, status code, client IP, and path - NEVER headers
 		return fmt.Sprintf("[GIN] %s | %3d | %s | %s\n",
 			param.Method,
 			param.StatusCode,

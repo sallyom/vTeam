@@ -146,6 +146,8 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 			return
 		}
 
+		// Note: Setting Authorization header with token is safe - our custom logger
+		// (server/server.go:22-34) only logs method/status/IP/path, never headers
 		req.Header.Set("Authorization", authHeader)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json")
@@ -261,12 +263,17 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 	workflow.LastSyncedAt = &syncedAt
 
 	serviceAccountClient := GetServiceAccountDynamicClient()
-	err = crd.UpsertProjectBugFixWorkflowCR(serviceAccountClient, workflow)
-	if err != nil {
-		// Log error and continue - Jira sync itself succeeded
-		fmt.Printf("Warning: Failed to update workflow CR with Jira info: %v\n", err)
+	if serviceAccountClient == nil {
+		// Log error and continue - Jira sync itself succeeded, but CR update failed
+		fmt.Printf("Warning: Service account client not initialized, cannot update workflow CR\n")
 	} else {
-		fmt.Printf("Successfully updated workflow CR with Jira info: %s -> %s\n", workflowID, jiraTaskKey)
+		err = crd.UpsertProjectBugFixWorkflowCR(serviceAccountClient, workflow)
+		if err != nil {
+			// Log error and continue - Jira sync itself succeeded
+			fmt.Printf("Warning: Failed to update workflow CR with Jira info: %v\n", err)
+		} else {
+			fmt.Printf("Successfully updated workflow CR with Jira info: %s -> %s\n", workflowID, jiraTaskKey)
+		}
 	}
 
 	// Broadcast success
