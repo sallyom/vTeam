@@ -35,6 +35,9 @@ func BugFixWorkflowToCRObject(workflow *types.BugFixWorkflow) map[string]interfa
 	if workflow.JiraTaskKey != nil && *workflow.JiraTaskKey != "" {
 		spec["jiraTaskKey"] = *workflow.JiraTaskKey
 	}
+	if workflow.JiraTaskURL != nil && *workflow.JiraTaskURL != "" {
+		spec["jiraTaskURL"] = *workflow.JiraTaskURL
+	}
 	if workflow.LastSyncedAt != nil && *workflow.LastSyncedAt != "" {
 		spec["lastSyncedAt"] = *workflow.LastSyncedAt
 	}
@@ -133,6 +136,9 @@ func GetProjectBugFixWorkflowCR(dyn dynamic.Interface, project, id string) (*typ
 		}
 		if val, ok := spec["jiraTaskKey"].(string); ok && val != "" {
 			workflow.JiraTaskKey = &val
+		}
+		if val, ok := spec["jiraTaskURL"].(string); ok && val != "" {
+			workflow.JiraTaskURL = &val
 		}
 		if val, ok := spec["lastSyncedAt"].(string); ok && val != "" {
 			workflow.LastSyncedAt = &val

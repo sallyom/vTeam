@@ -64,6 +64,9 @@ spec:
               jiraTaskKey:
                 type: string
                 description: "Jira Task key (e.g., PROJ-5678), populated after first sync"
+              jiraTaskURL:
+                type: string
+                description: "Jira Task URL (e.g., https://jira.example.com/browse/PROJ-5678), populated after first sync"
               lastSyncedAt:
                 type: string
                 format: date-time

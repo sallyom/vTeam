@@ -1,39 +1,20 @@
 'use client';
 
 import React from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { ArrowLeft, Bug, ExternalLink, GitBranch, Clock, Trash2, CheckCircle2 } from 'lucide-react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { CheckCircle2, ExternalLink } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumbs } from '@/components/breadcrumbs';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
-import SessionSelector from '@/components/workspaces/bugfix/SessionSelector';
-import JiraSyncButton from '@/components/workspaces/bugfix/JiraSyncButton';
 import BugTimeline from '@/components/workspaces/bugfix/BugTimeline';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from '@/components/ui/alert-dialog';
+import { BugFixHeader } from './bugfix-header';
+import { BugFixSessionsTable } from './bugfix-sessions-table';
+import { JiraIntegrationCard } from './jira-integration-card';
 
 import { bugfixApi } from '@/services/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -69,10 +50,14 @@ type BugFixSession = {
 export default function BugFixWorkspaceDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const projectName = params?.name as string;
   const workflowId = params?.id as string;
   const [timelineEvents, setTimelineEvents] = React.useState<TimelineEvent[]>([]);
+
+  // Get active tab from URL, default to 'overview'
+  const activeTab = searchParams.get('tab') || 'overview';
 
   const { data: workflow, isLoading: workflowLoading } = useQuery({
     queryKey: ['bugfix-workflow', projectName, workflowId],
@@ -214,6 +199,8 @@ export default function BugFixWorkspaceDetailPage() {
     setTimelineEvents(events);
   }, [workflow, sessions]);
 
+  const [deleting, setDeleting] = React.useState(false);
+
   const getSessionTypeLabel = (sessionType: string) => {
     const labels: Record<string, string> = {
       'bug-review': 'Bug Review',
@@ -224,30 +211,26 @@ export default function BugFixWorkspaceDetailPage() {
     return labels[sessionType] || sessionType;
   };
 
+  const handleTabChange = (value: string) => {
+    // Update URL with new tab
+    const newParams = new URLSearchParams(searchParams.toString());
+    newParams.set('tab', value);
+    router.push(`?${newParams.toString()}`, { scroll: false });
+  };
+
   const handleDeleteWorkspace = async () => {
+    if (!confirm('Are you sure you want to delete this BugFix workspace? This action cannot be undone.')) {
+      return;
+    }
+    setDeleting(true);
     try {
       await bugfixApi.deleteBugFixWorkflow(projectName, workflowId);
       successToast('Workspace deleted successfully');
       router.push(`/projects/${projectName}/bugfix`);
     } catch (error) {
       errorToast(error instanceof Error ? error.message : 'Failed to delete workspace');
-    }
-  };
-
-  const getPhaseColor = (phase: string) => {
-    switch (phase) {
-      case 'Ready':
-      case 'Completed':
-        return 'bg-green-500/10 text-green-500 border-green-500/20';
-      case 'Running':
-        return 'bg-blue-500/10 text-blue-500 border-blue-500/20';
-      case 'Initializing':
-      case 'Pending':
-        return 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20';
-      case 'Failed':
-        return 'bg-red-500/10 text-red-500 border-red-500/20';
-      default:
-        return 'bg-gray-500/10 text-gray-500 border-gray-500/20';
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -263,295 +246,158 @@ export default function BugFixWorkspaceDetailPage() {
   if (!workflow) {
     return (
       <div className="container mx-auto py-8">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">Workspace not found</h2>
-          <Link href={`/projects/${projectName}/bugfix`}>
-            <Button>Back to Workspaces</Button>
-          </Link>
-        </div>
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <p className="text-red-600">Workspace not found</p>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   return (
     <div className="container mx-auto py-8">
-      <Breadcrumbs
-        items={[
-          { label: 'Projects', href: '/projects' },
-          { label: projectName, href: `/projects/${projectName}` },
-          { label: 'BugFix Workspaces', href: `/projects/${projectName}/bugfix` },
-          { label: `#${workflow.githubIssueNumber}`, href: `/projects/${projectName}/bugfix/${workflowId}` },
-        ]}
-      />
+      <div className="max-w-6xl mx-auto space-y-8">
+        <Breadcrumbs
+          items={[
+            { label: 'Projects', href: '/projects' },
+            { label: projectName, href: `/projects/${projectName}` },
+            { label: 'BugFix Workspaces', href: `/projects/${projectName}/bugfix` },
+            { label: `#${workflow.githubIssueNumber}` },
+          ]}
+          className="mb-4"
+        />
 
-      <div className="flex items-center gap-4 mb-6 mt-4">
-        <Link href={`/projects/${projectName}/bugfix`}>
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back
-          </Button>
-        </Link>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <Bug className="h-6 w-6" />
-            <h1 className="text-2xl font-bold">{workflow.title}</h1>
-          </div>
-          <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
-            <a
-              href={workflow.githubIssueURL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 hover:text-primary"
-            >
-              GitHub Issue #{workflow.githubIssueNumber}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-            <div className="flex items-center gap-1">
-              <GitBranch className="h-3 w-3" />
-              <span className="font-mono text-xs">{workflow.branchName}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {workflow.createdAt && formatDistanceToNow(new Date(workflow.createdAt), { addSuffix: true })}
-            </div>
-          </div>
-        </div>
-        <Badge variant="outline" className={getPhaseColor(workflow.phase)}>
-          {workflow.phase}
-        </Badge>
-      </div>
+        <BugFixHeader
+          workflow={workflow}
+          projectName={projectName}
+          deleting={deleting}
+          onDelete={handleDeleteWorkspace}
+        />
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="sessions">Sessions ({sessions?.length || 0})</TabsTrigger>
-          <TabsTrigger value="actions">Actions</TabsTrigger>
-        </TabsList>
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="sessions">Sessions ({sessions?.length || 0})</TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="overview">
-          <div className="grid gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Workspace Status</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-sm font-medium text-muted-foreground">Implementation Status</div>
-                    <div className="flex items-center gap-2 mt-1">
-                      {workflow.implementationCompleted ? (
-                        <>
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                          <span className="text-sm">Completed</span>
-                        </>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">In Progress</span>
-                      )}
+          <TabsContent value="overview">
+            <div className="grid gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Workspace Status</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="text-sm font-medium text-muted-foreground">Implementation Status</div>
+                      <div className="flex items-center gap-2 mt-1">
+                        {workflow.implementationCompleted ? (
+                          <>
+                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                            <span className="text-sm">Completed</span>
+                          </>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">In Progress</span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-muted-foreground">Jira Task</div>
-                    <div className="mt-1">
+                    <div>
+                      <div className="text-sm font-medium text-muted-foreground mb-2">Jira Task</div>
                       {workflow.jiraTaskKey ? (
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={workflow.jiraTaskURL}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm font-mono text-primary hover:underline flex items-center gap-1"
-                          >
-                            {workflow.jiraTaskKey}
-                            <ExternalLink className="h-3 w-3" />
-                          </a>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">{workflow.jiraTaskKey}</Badge>
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="px-0 h-auto"
+                              onClick={() => window.open(workflow.jiraTaskURL, '_blank')}
+                            >
+                              Open in Jira
+                            </Button>
+                          </div>
                           {workflow.lastSyncedAt && (
                             <span className="text-xs text-muted-foreground">
-                              (synced {formatDistanceToNow(new Date(workflow.lastSyncedAt), { addSuffix: true })})
+                              Synced {formatDistanceToNow(new Date(workflow.lastSyncedAt), { addSuffix: true })}
                             </span>
                           )}
                         </div>
                       ) : (
-                        <span className="text-sm text-muted-foreground">Not synced</span>
+                        <span className="text-sm text-muted-foreground">Not synced yet</span>
                       )}
                     </div>
                   </div>
-                </div>
-                {workflow.description && (
-                  <div>
-                    <div className="text-sm font-medium text-muted-foreground mb-2">Description</div>
-                    <div className="text-sm whitespace-pre-wrap bg-muted p-4 rounded-md max-h-96 overflow-y-auto">
-                      {workflow.description}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Repository</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {workflow.implementationRepo && (
+                  {workflow.description && (
                     <div>
-                      <div className="text-sm font-medium mb-1">Implementation Repository</div>
-                      <a
-                        href={workflow.implementationRepo.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-primary hover:underline flex items-center gap-1"
-                      >
-                        {workflow.implementationRepo.url}
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                      {workflow.implementationRepo.branch && (
-                        <div className="text-xs text-muted-foreground mt-1">
-                          Branch: <code className="bg-muted px-1 py-0.5 rounded">{workflow.implementationRepo.branch}</code>
-                        </div>
-                      )}
+                      <div className="text-sm font-medium text-muted-foreground mb-2">Description</div>
+                      <div className="text-sm whitespace-pre-wrap bg-muted p-4 rounded-md max-h-96 overflow-y-auto">
+                        {workflow.description}
+                      </div>
                     </div>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
 
-            <BugTimeline
-              workflowId={workflowId}
-              events={timelineEvents}
-              sessions={sessions}
-              className="mt-4"
-            />
-          </div>
-        </TabsContent>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Repository</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {workflow.implementationRepo && (
+                      <div>
+                        <div className="text-sm font-medium mb-1">Implementation Repository</div>
+                        <a
+                          href={workflow.implementationRepo.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-primary hover:underline flex items-center gap-1"
+                        >
+                          {workflow.implementationRepo.url}
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                        {workflow.implementationRepo.branch && (
+                          <div className="text-xs text-muted-foreground mt-1">
+                            Branch: <code className="bg-muted px-1 py-0.5 rounded">{workflow.implementationRepo.branch}</code>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
 
-        <TabsContent value="sessions">
-          <Card>
-            <CardHeader>
-              <CardTitle>Sessions</CardTitle>
-              <CardDescription>
-                Agentic sessions for this bug fix workspace
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {sessionsLoading && <Skeleton className="h-32 w-full" />}
-              {!sessionsLoading && sessions && sessions.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">
-                  No sessions created yet
-                </div>
-              )}
-              {!sessionsLoading && sessions && sessions.length > 0 && (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Title</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Created</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sessions.map((session) => (
-                      <TableRow
-                        key={session.id}
-                        className="cursor-pointer hover:bg-muted/50"
-                        onClick={() => router.push(`/projects/${projectName}/sessions/${session.id}`)}
-                      >
-                        <TableCell className="font-medium">{session.title}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{session.sessionType}</Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={getPhaseColor(session.phase)}>
-                            {session.phase}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {formatDistanceToNow(new Date(session.createdAt), { addSuffix: true })}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+              <BugTimeline
+                workflowId={workflowId}
+                events={timelineEvents}
+                sessions={sessions}
+                className="mt-4"
+              />
+            </div>
+          </TabsContent>
 
-        <TabsContent value="actions">
-          <Card>
-            <CardHeader>
-              <CardTitle>Workspace Actions</CardTitle>
-              <CardDescription>
-                Manage this bug fix workspace
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <h3 className="text-sm font-medium mb-2">Create Session</h3>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Start a new agentic session for this bug fix
-                </p>
-                <SessionSelector
-                  projectName={projectName}
-                  workflowId={workflowId}
-                  githubIssueNumber={workflow.githubIssueNumber}
-                  disabled={workflow.phase !== 'Ready'}
-                />
-                {workflow.phase !== 'Ready' && (
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Workspace must be in &quot;Ready&quot; state to create sessions
-                  </p>
-                )}
-              </div>
-
-              <div className="border-t pt-4">
-                <h3 className="text-sm font-medium mb-2">Jira Synchronization</h3>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Sync this bug to Jira for project management visibility
-                </p>
-                <JiraSyncButton
-                  projectName={projectName}
-                  workflowId={workflowId}
-                  jiraTaskKey={workflow.jiraTaskKey}
-                  jiraTaskURL={workflow.jiraTaskURL}
-                  lastSyncedAt={workflow.lastSyncedAt}
-                  githubIssueNumber={workflow.githubIssueNumber}
-                />
-              </div>
-
-              <div className="border-t pt-4">
-                <h3 className="text-sm font-medium mb-2 text-destructive">Danger Zone</h3>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Delete this workspace (does not delete GitHub Issue or branch)
-                </p>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive">
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Delete Workspace
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Delete Workspace?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will delete the BugFix workspace. The GitHub Issue and git branch will not be deleted.
-                        This action cannot be undone.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleDeleteWorkspace}>
-                        Delete
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="sessions">
+            <div className="space-y-4">
+              <BugFixSessionsTable
+                sessions={sessions || []}
+                projectName={projectName}
+                workflowId={workflowId}
+                workflow={workflow}
+                sessionsLoading={sessionsLoading}
+              />
+              <JiraIntegrationCard
+                projectName={projectName}
+                workflowId={workflowId}
+                githubIssueNumber={workflow.githubIssueNumber}
+                jiraTaskKey={workflow.jiraTaskKey}
+                jiraTaskURL={workflow.jiraTaskURL}
+                lastSyncedAt={workflow.lastSyncedAt}
+              />
+            </div>
+          </TabsContent>
+        </Tabs>
+      </div>
     </div>
   );
 }

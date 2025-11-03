@@ -172,6 +172,51 @@ func StripExecutionFlow(content string) string {
 	return strings.Join(result, "\n")
 }
 
+// GetJiraIssueAttachments returns a list of attachment filenames for a Jira issue
+func GetJiraIssueAttachments(ctx context.Context, jiraBase, issueKey, authHeader string) (map[string]bool, error) {
+	endpoint := fmt.Sprintf("%s/rest/api/2/issue/%s", jiraBase, url.PathEscape(issueKey))
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	httpReq.Header.Set("Authorization", authHeader)
+	httpReq.Header.Set("Accept", "application/json")
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+	resp, err := httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("jira API error: %s", resp.Status)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Extract attachment filenames
+	attachments := make(map[string]bool)
+	if fields, ok := result["fields"].(map[string]interface{}); ok {
+		if attachmentList, ok := fields["attachment"].([]interface{}); ok {
+			for _, att := range attachmentList {
+				if attMap, ok := att.(map[string]interface{}); ok {
+					if filename, ok := attMap["filename"].(string); ok {
+						attachments[filename] = true
+					}
+				}
+			}
+		}
+	}
+
+	return attachments, nil
+}
+
 // AttachFileToJiraIssue attaches a file to a Jira issue
 func AttachFileToJiraIssue(ctx context.Context, jiraBase, issueKey, authHeader string, filename string, content []byte) error {
 	endpoint := fmt.Sprintf("%s/rest/api/2/issue/%s/attachments", jiraBase, url.PathEscape(issueKey))

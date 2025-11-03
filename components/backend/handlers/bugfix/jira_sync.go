@@ -249,37 +249,23 @@ func SyncProjectBugFixWorkflowToJira(c *gin.Context) {
 		}
 	}
 
-	// Also post GitHub comment for updates (not just creates)
-	if isUpdate {
-		userID, _ := c.Get("userID")
-		userIDStr, _ := userID.(string)
-		githubToken, err := git.GetGitHubToken(c.Request.Context(), reqK8s, reqDyn, project, userIDStr)
-		if err == nil && githubToken != "" {
-			owner, repo, issueNumber, err := github.ParseGitHubIssueURL(workflow.GithubIssueURL)
-			if err == nil {
-				comment := formatGitHubJiraUpdateComment(jiraTaskKey, jiraTaskURL, workflow)
-				ctx := context.Background()
-				_, err = github.AddComment(ctx, owner, repo, issueNumber, githubToken, comment)
-				if err != nil {
-					// Non-fatal: Log but continue
-					fmt.Printf("Warning: Failed to add Jira update to GitHub Issue: %v\n", err)
-				} else {
-					fmt.Printf("Posted Jira update comment to GitHub Issue #%d\n", issueNumber)
-				}
-			}
-		}
-	}
+	// Note: Only post GitHub comment on initial creation, not on updates
+	// This prevents spamming the GitHub Issue with repeated sync comments
 
 	// T055: Update BugFixWorkflow CR with jiraTaskKey, jiraTaskURL, and lastSyncedAt
+	// Use backend service account client for CR write (following handlers/sessions.go:417 pattern)
 	workflow.JiraTaskKey = &jiraTaskKey
 	workflow.JiraTaskURL = &jiraTaskURL
 	syncedAt := time.Now().UTC().Format(time.RFC3339)
 	workflow.LastSyncedAt = &syncedAt
 
-	err = crd.UpsertProjectBugFixWorkflowCR(reqDyn, workflow)
+	serviceAccountClient := GetServiceAccountDynamicClient()
+	err = crd.UpsertProjectBugFixWorkflowCR(serviceAccountClient, workflow)
 	if err != nil {
-		// Try to continue even if CR update fails
+		// Log error and continue - Jira sync itself succeeded
 		fmt.Printf("Warning: Failed to update workflow CR with Jira info: %v\n", err)
+	} else {
+		fmt.Printf("Successfully updated workflow CR with Jira info: %s -> %s\n", workflowID, jiraTaskKey)
 	}
 
 	// Broadcast success
@@ -467,6 +453,7 @@ func getSuccessMessage(created bool, jiraTaskKey string) string {
 }
 
 // attachGistsToJira fetches Gist content and attaches it as markdown files to the Jira issue
+// Only attaches if the file doesn't already exist to prevent duplicates
 func attachGistsToJira(c *gin.Context, workflow *types.BugFixWorkflow, jiraBase, jiraTaskKey, authHeader string, reqK8s *kubernetes.Clientset, reqDyn dynamic.Interface, project string) {
 	if workflow.Annotations == nil {
 		return
@@ -483,34 +470,51 @@ func attachGistsToJira(c *gin.Context, workflow *types.BugFixWorkflow, jiraBase,
 
 	ctx := c.Request.Context()
 
+	// Get existing attachments to avoid duplicates
+	existingAttachments, err := jira.GetJiraIssueAttachments(ctx, jiraBase, jiraTaskKey, authHeader)
+	if err != nil {
+		fmt.Printf("Warning: Failed to get existing Jira attachments: %v (will attempt upload anyway)\n", err)
+		existingAttachments = make(map[string]bool) // Continue with empty map
+	}
+
 	// Attach bug-review Gist if available
 	if bugReviewGist := workflow.Annotations["bug-review-gist-url"]; bugReviewGist != "" {
-		fmt.Printf("Fetching bug-review Gist from %s\n", bugReviewGist)
-		gistContent, err := github.GetGist(ctx, bugReviewGist, githubToken)
-		if err != nil {
-			fmt.Printf("Warning: Failed to fetch bug-review Gist: %v\n", err)
+		filename := fmt.Sprintf("bug-review-issue-%d.md", workflow.GithubIssueNumber)
+
+		if existingAttachments[filename] {
+			fmt.Printf("Skipping %s - already attached to %s\n", filename, jiraTaskKey)
 		} else {
-			filename := fmt.Sprintf("bug-review-issue-%d.md", workflow.GithubIssueNumber)
-			if attachErr := jira.AttachFileToJiraIssue(ctx, jiraBase, jiraTaskKey, authHeader, filename, []byte(gistContent)); attachErr != nil {
-				fmt.Printf("Warning: Failed to attach bug-review.md to %s: %v\n", jiraTaskKey, attachErr)
+			fmt.Printf("Fetching bug-review Gist from %s\n", bugReviewGist)
+			gistContent, err := github.GetGist(ctx, bugReviewGist, githubToken)
+			if err != nil {
+				fmt.Printf("Warning: Failed to fetch bug-review Gist: %v\n", err)
 			} else {
-				fmt.Printf("Successfully attached %s to %s\n", filename, jiraTaskKey)
+				if attachErr := jira.AttachFileToJiraIssue(ctx, jiraBase, jiraTaskKey, authHeader, filename, []byte(gistContent)); attachErr != nil {
+					fmt.Printf("Warning: Failed to attach %s to %s: %v\n", filename, jiraTaskKey, attachErr)
+				} else {
+					fmt.Printf("Successfully attached %s to %s\n", filename, jiraTaskKey)
+				}
 			}
 		}
 	}
 
 	// Attach implementation Gist if available
 	if implGist := workflow.Annotations["implementation-gist-url"]; implGist != "" {
-		fmt.Printf("Fetching implementation Gist from %s\n", implGist)
-		gistContent, err := github.GetGist(ctx, implGist, githubToken)
-		if err != nil {
-			fmt.Printf("Warning: Failed to fetch implementation Gist: %v\n", err)
+		filename := fmt.Sprintf("implementation-issue-%d.md", workflow.GithubIssueNumber)
+
+		if existingAttachments[filename] {
+			fmt.Printf("Skipping %s - already attached to %s\n", filename, jiraTaskKey)
 		} else {
-			filename := fmt.Sprintf("implementation-issue-%d.md", workflow.GithubIssueNumber)
-			if attachErr := jira.AttachFileToJiraIssue(ctx, jiraBase, jiraTaskKey, authHeader, filename, []byte(gistContent)); attachErr != nil {
-				fmt.Printf("Warning: Failed to attach implementation.md to %s: %v\n", jiraTaskKey, attachErr)
+			fmt.Printf("Fetching implementation Gist from %s\n", implGist)
+			gistContent, err := github.GetGist(ctx, implGist, githubToken)
+			if err != nil {
+				fmt.Printf("Warning: Failed to fetch implementation Gist: %v\n", err)
 			} else {
-				fmt.Printf("Successfully attached %s to %s\n", filename, jiraTaskKey)
+				if attachErr := jira.AttachFileToJiraIssue(ctx, jiraBase, jiraTaskKey, authHeader, filename, []byte(gistContent)); attachErr != nil {
+					fmt.Printf("Warning: Failed to attach %s to %s: %v\n", filename, jiraTaskKey, attachErr)
+				} else {
+					fmt.Printf("Successfully attached %s to %s\n", filename, jiraTaskKey)
+				}
 			}
 		}
 	}
