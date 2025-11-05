@@ -547,45 +547,40 @@ func provisionRunnerTokenForSession(c *gin.Context, reqK8s *kubernetes.Clientset
 // GetSession retrieves a single agentic session by name.
 func GetSession(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("sessionName")
-
-	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
-		return
-	}
-
-	_, reqDyn := GetK8sClientsForRequest(c)
+	sessionName := c.Param("sessionName")
+	reqK8s, reqDyn := GetK8sClientsForRequest(c)
+	_ = reqK8s
 	gvr := GetAgenticSessionV1Alpha1Resource()
 
-	obj, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), name, v1.GetOptions{})
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
-		} else {
-			log.Printf("Failed to get agentic session %s in project %s: %v", name, project, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
+			return
 		}
+		log.Printf("Failed to get agentic session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
 		return
 	}
 
-	metadata, ok := GetMetadataMap(obj)
+	metadata, ok := GetMetadataMap(item)
 	if !ok {
-		log.Printf("Session %s missing metadata", name)
+		log.Printf("Session %s missing metadata", sessionName)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid session data"})
 		return
 	}
 
 	session := types.AgenticSession{
-		APIVersion: obj.GetAPIVersion(),
-		Kind:       obj.GetKind(),
+		APIVersion: item.GetAPIVersion(),
+		Kind:       item.GetKind(),
 		Metadata:   metadata,
 	}
 
-	if spec, ok := GetSpecMap(obj); ok {
+	if spec, ok := GetSpecMap(item); ok {
 		session.Spec = parseSpec(spec)
 	}
 
-	if status, ok := GetStatusMap(obj); ok {
+	if status, ok := GetStatusMap(item); ok {
 		session.Status = parseStatus(status)
 	}
 
@@ -596,164 +591,129 @@ func GetSession(c *gin.Context) {
 // Only annotations are supported for patching currently.
 func PatchSession(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("sessionName")
+	sessionName := c.Param("sessionName")
+	_, reqDyn := GetK8sClientsForRequest(c)
 
-	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
-		return
-	}
-
-	var patchReq map[string]interface{}
-	if err := c.ShouldBindJSON(&patchReq); err != nil {
+	var patch map[string]interface{}
+	if err := c.ShouldBindJSON(&patch); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Only support patching annotations
-	if metadata, ok := patchReq["metadata"].(map[string]interface{}); ok {
-		if _, hasAnnotations := metadata["annotations"]; !hasAnnotations {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Only metadata.annotations can be patched"})
-			return
-		}
-	} else {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only metadata.annotations can be patched"})
-		return
-	}
-
-	// Use backend service account for writes
-	if DynamicClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
 		return
 	}
 
 	gvr := GetAgenticSessionV1Alpha1Resource()
 
-	// Create merge patch
-	patchData, err := json.Marshal(patchReq)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal patch data"})
-		return
-	}
-
-	// Apply patch
-	patched, err := DynamicClient.Resource(gvr).Namespace(project).Patch(context.TODO(), name, k8stypes.MergePatchType, patchData, v1.PatchOptions{})
+	// Get current resource
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
-		} else {
-			log.Printf("Failed to patch agentic session %s in project %s: %v", name, project, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to patch agentic session"})
+			return
 		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get session"})
 		return
 	}
 
-	metadata, ok := GetMetadataMap(patched)
-	if !ok {
-		log.Printf("Patched session %s missing metadata", name)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid session data"})
+	// Apply patch to metadata annotations
+	if metaPatch, ok := patch["metadata"].(map[string]interface{}); ok {
+		if annsPatch, ok := metaPatch["annotations"].(map[string]interface{}); ok {
+			metadata := item.Object["metadata"].(map[string]interface{})
+			if metadata["annotations"] == nil {
+				metadata["annotations"] = make(map[string]interface{})
+			}
+			anns := metadata["annotations"].(map[string]interface{})
+			for k, v := range annsPatch {
+				anns[k] = v
+			}
+		}
+	}
+
+	// Update the resource
+	updated, err := reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), item, v1.UpdateOptions{})
+	if err != nil {
+		log.Printf("Failed to patch agentic session %s: %v", sessionName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to patch session"})
 		return
 	}
 
-	session := types.AgenticSession{
-		APIVersion: patched.GetAPIVersion(),
-		Kind:       patched.GetKind(),
-		Metadata:   metadata,
-	}
-
-	if spec, ok := GetSpecMap(patched); ok {
-		session.Spec = parseSpec(spec)
-	}
-
-	if status, ok := GetStatusMap(patched); ok {
-		session.Status = parseStatus(status)
-	}
-
-	c.JSON(http.StatusOK, session)
+	c.JSON(http.StatusOK, gin.H{"message": "Session patched successfully", "annotations": updated.GetAnnotations()})
 }
 
 // UpdateSession updates an agentic session's prompt, displayName, LLMSettings, and timeout.
 func UpdateSession(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("sessionName")
+	sessionName := c.Param("sessionName")
+	reqK8s, reqDyn := GetK8sClientsForRequest(c)
+	_ = reqK8s
 
-	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
-		return
-	}
-
-	var updateReq types.UpdateAgenticSessionRequest
-	if err := c.ShouldBindJSON(&updateReq); err != nil {
+	var req types.CreateAgenticSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Use backend service account for writes
-	if DynamicClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
 		return
 	}
 
 	gvr := GetAgenticSessionV1Alpha1Resource()
 
-	// Get the existing session
-	existing, err := DynamicClient.Resource(gvr).Namespace(project).Get(context.TODO(), name, v1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
-		} else {
-			log.Printf("Failed to get agentic session %s in project %s: %v", name, project, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
+	// Get current resource with brief retry to avoid race on creation
+	var item *unstructured.Unstructured
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		item, err = reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
+		if err == nil {
+			break
 		}
+		if errors.IsNotFound(err) {
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		log.Printf("Failed to get agentic session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
+		return
+	}
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 		return
 	}
 
-	// Update the spec fields
-	spec, ok := GetSpecMap(existing)
+	// Update spec
+	spec, ok := GetSpecMap(item)
 	if !ok {
-		log.Printf("Session %s missing spec", name)
+		log.Printf("Session %s missing spec", sessionName)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid session data"})
 		return
 	}
+	spec["prompt"] = req.Prompt
+	spec["displayName"] = req.DisplayName
 
-	if updateReq.Prompt != nil {
-		spec["prompt"] = *updateReq.Prompt
-	}
-	if updateReq.DisplayName != nil {
-		spec["displayName"] = *updateReq.DisplayName
-	}
-	if updateReq.Timeout != nil {
-		spec["timeout"] = *updateReq.Timeout
-	}
-
-	// Update LLM settings if provided
-	if updateReq.LLMSettings != nil {
-		llmSettings, ok := spec["llmSettings"].(map[string]interface{})
-		if !ok {
-			llmSettings = make(map[string]interface{})
+	if req.LLMSettings != nil {
+		llmSettings := make(map[string]interface{})
+		if req.LLMSettings.Model != "" {
+			llmSettings["model"] = req.LLMSettings.Model
 		}
-		if updateReq.LLMSettings.Model != "" {
-			llmSettings["model"] = updateReq.LLMSettings.Model
+		if req.LLMSettings.Temperature != 0 {
+			llmSettings["temperature"] = req.LLMSettings.Temperature
 		}
-		if updateReq.LLMSettings.Temperature != 0 {
-			llmSettings["temperature"] = updateReq.LLMSettings.Temperature
-		}
-		if updateReq.LLMSettings.MaxTokens != 0 {
-			llmSettings["maxTokens"] = updateReq.LLMSettings.MaxTokens
+		if req.LLMSettings.MaxTokens != 0 {
+			llmSettings["maxTokens"] = req.LLMSettings.MaxTokens
 		}
 		spec["llmSettings"] = llmSettings
 	}
 
+	if req.Timeout != nil {
+		spec["timeout"] = *req.Timeout
+	}
+
 	// Update the resource
-	updated, err := DynamicClient.Resource(gvr).Namespace(project).Update(context.TODO(), existing, v1.UpdateOptions{})
+	updated, err := reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), item, v1.UpdateOptions{})
 	if err != nil {
-		log.Printf("Failed to update agentic session %s in project %s: %v", name, project, err)
+		log.Printf("Failed to update agentic session %s in project %s: %v", sessionName, project, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update agentic session"})
 		return
 	}
 
+	// Parse and return updated session
 	metadata, ok := GetMetadataMap(updated)
 	if !ok {
-		log.Printf("Updated session %s missing metadata", name)
+		log.Printf("Updated session %s missing metadata", sessionName)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid session data"})
 		return
 	}
@@ -779,57 +739,51 @@ func UpdateSession(c *gin.Context) {
 // This is a convenience endpoint for updating just the display name.
 func UpdateSessionDisplayName(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("sessionName")
+	sessionName := c.Param("sessionName")
+	_, reqDyn := GetK8sClientsForRequest(c)
 
-	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
-		return
-	}
-
-	var updateReq struct {
+	var req struct {
 		DisplayName string `json:"displayName" binding:"required"`
 	}
-	if err := c.ShouldBindJSON(&updateReq); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Use backend service account for writes
-	if DynamicClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
 		return
 	}
 
 	gvr := GetAgenticSessionV1Alpha1Resource()
 
-	// Create a merge patch to update just the displayName
-	patch := map[string]interface{}{
-		"spec": map[string]interface{}{
-			"displayName": updateReq.DisplayName,
-		},
-	}
-
-	patchData, err := json.Marshal(patch)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to marshal patch data"})
-		return
-	}
-
-	// Apply the patch
-	updated, err := DynamicClient.Resource(gvr).Namespace(project).Patch(context.TODO(), name, k8stypes.MergePatchType, patchData, v1.PatchOptions{})
+	// Retrieve current resource
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
-		} else {
-			log.Printf("Failed to update display name for agentic session %s in project %s: %v", name, project, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update display name"})
+			return
 		}
+		log.Printf("Failed to get agentic session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get agentic session"})
 		return
 	}
 
+	// Update only displayName in spec
+	spec, ok := GetSpecMap(item)
+	if !ok {
+		spec = make(map[string]interface{})
+		item.Object["spec"] = spec
+	}
+	spec["displayName"] = req.DisplayName
+
+	// Persist the change
+	updated, err := reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), item, v1.UpdateOptions{})
+	if err != nil {
+		log.Printf("Failed to update display name for agentic session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update display name"})
+		return
+	}
+
+	// Respond with updated session summary
 	metadata, ok := GetMetadataMap(updated)
 	if !ok {
-		log.Printf("Updated session %s missing metadata", name)
+		log.Printf("Updated session %s missing metadata", sessionName)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid session data"})
 		return
 	}
@@ -839,13 +793,11 @@ func UpdateSessionDisplayName(c *gin.Context) {
 		Kind:       updated.GetKind(),
 		Metadata:   metadata,
 	}
-
-	if spec, ok := GetSpecMap(updated); ok {
-		session.Spec = parseSpec(spec)
+	if s, ok := GetSpecMap(updated); ok {
+		session.Spec = parseSpec(s)
 	}
-
-	if status, ok := GetStatusMap(updated); ok {
-		session.Status = parseStatus(status)
+	if st, ok := GetStatusMap(updated); ok {
+		session.Status = parseStatus(st)
 	}
 
 	c.JSON(http.StatusOK, session)
@@ -854,193 +806,164 @@ func UpdateSessionDisplayName(c *gin.Context) {
 // DeleteSession deletes an agentic session.
 func DeleteSession(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("sessionName")
-
-	if name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
-		return
-	}
-
-	// Use backend service account for writes
-	if DynamicClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
-		return
-	}
-
+	sessionName := c.Param("sessionName")
+	reqK8s, reqDyn := GetK8sClientsForRequest(c)
+	_ = reqK8s
 	gvr := GetAgenticSessionV1Alpha1Resource()
 
-	if err := DynamicClient.Resource(gvr).Namespace(project).Delete(context.TODO(), name, v1.DeleteOptions{}); err != nil {
+	err := reqDyn.Resource(gvr).Namespace(project).Delete(context.TODO(), sessionName, v1.DeleteOptions{})
+	if err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
-		} else {
-			log.Printf("Failed to delete agentic session %s in project %s: %v", name, project, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete agentic session"})
+			return
 		}
+		log.Printf("Failed to delete agentic session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete agentic session"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Session deleted successfully"})
+	c.Status(http.StatusNoContent)
 }
 
 // CloneSession clones an existing agentic session to another project.
 // It supports cross-project cloning for OpenShift environments.
 func CloneSession(c *gin.Context) {
-	sourceProject := c.GetString("project")
-	sourceName := c.Param("sessionName")
+	project := c.GetString("project")
+	sessionName := c.Param("sessionName")
+	_, reqDyn := GetK8sClientsForRequest(c)
 
-	if sourceName == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
-		return
-	}
-
-	var cloneReq types.CloneAgenticSessionRequest
-	if err := c.ShouldBindJSON(&cloneReq); err != nil {
+	var req types.CloneSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Use backend service account for writes
-	if DynamicClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
 		return
 	}
 
 	gvr := GetAgenticSessionV1Alpha1Resource()
 
-	// Get the source session using request-scoped clients
-	_, reqDyn := GetK8sClientsForRequest(c)
-	sourceObj, err := reqDyn.Resource(gvr).Namespace(sourceProject).Get(context.TODO(), sourceName, v1.GetOptions{})
+	// Get source session
+	sourceItem, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Source session not found"})
-		} else {
-			log.Printf("Failed to get source session %s in project %s: %v", sourceName, sourceProject, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get source session"})
+			return
 		}
+		log.Printf("Failed to get source agentic session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get source agentic session"})
 		return
 	}
 
-	// Determine target project
-	targetProject := sourceProject
-	if cloneReq.TargetProject != "" {
-		targetProject = cloneReq.TargetProject
+	// Validate target project exists and is managed by Ambient via OpenShift Project
+	projGvr := GetOpenShiftProjectResource()
+	projObj, err := reqDyn.Resource(projGvr).Get(context.TODO(), req.TargetProject, v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Target project not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to validate target project"})
+		return
+	}
 
-		// For cross-project cloning, verify user has access to target project
-		if targetProject != sourceProject {
-			// Check if OpenShift project resource exists
-			if GetOpenShiftProjectResource != nil && GetOpenShiftProjectResource() != (schema.GroupVersionResource{}) {
-				projGvr := GetOpenShiftProjectResource()
-				if _, err := reqDyn.Resource(projGvr).Get(context.TODO(), targetProject, v1.GetOptions{}); err != nil {
-					if errors.IsNotFound(err) {
-						c.JSON(http.StatusNotFound, gin.H{"error": "Target project not found"})
-					} else {
-						log.Printf("Failed to verify access to target project %s: %v", targetProject, err)
-						c.JSON(http.StatusForbidden, gin.H{"error": "Access denied to target project"})
-					}
-					return
-				}
+	isAmbient := false
+	if meta, ok := projObj.Object["metadata"].(map[string]interface{}); ok {
+		if raw, ok := meta["labels"].(map[string]interface{}); ok {
+			if v, ok := raw["ambient-code.io/managed"].(string); ok && v == "true" {
+				isAmbient = true
 			}
 		}
 	}
+	if !isAmbient {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Target project is not managed by Ambient"})
+		return
+	}
 
-	// Check for naming conflicts if a specific target name is requested
-	targetName := cloneReq.TargetSessionName
-	if targetName == "" {
-		// Generate unique name if not provided
-		timestamp := time.Now().Unix()
-		targetName = fmt.Sprintf("agentic-session-%d", timestamp)
-	} else {
-		// Check if name already exists in target project
-		if _, err := DynamicClient.Resource(gvr).Namespace(targetProject).Get(context.TODO(), targetName, v1.GetOptions{}); err == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "Session with target name already exists in target project"})
-			return
-		} else if !errors.IsNotFound(err) {
-			log.Printf("Failed to check target session existence: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify target name availability"})
-			return
+	// Ensure unique target session name in target namespace; if exists, append "-duplicate" (and numeric suffix)
+	newName := strings.TrimSpace(req.NewSessionName)
+	if newName == "" {
+		newName = sessionName
+	}
+	finalName := newName
+	conflicted := false
+	for i := 0; i < 50; i++ {
+		_, getErr := reqDyn.Resource(gvr).Namespace(req.TargetProject).Get(context.TODO(), finalName, v1.GetOptions{})
+		if errors.IsNotFound(getErr) {
+			break
+		}
+		if getErr != nil && !errors.IsNotFound(getErr) {
+			// On unexpected error, still attempt to proceed with a duplicate suffix to reduce collision chance
+			log.Printf("cloneSession: name check encountered error for %s/%s: %v", req.TargetProject, finalName, getErr)
+		}
+		conflicted = true
+		if i == 0 {
+			finalName = fmt.Sprintf("%s-duplicate", newName)
+		} else {
+			finalName = fmt.Sprintf("%s-duplicate-%d", newName, i+1)
 		}
 	}
 
-	// Create a deep copy of the source session
-	sourceSpec, ok := GetSpecMap(sourceObj)
+	// Get source spec using helper
+	sourceSpec, ok := GetSpecMap(sourceItem)
 	if !ok {
-		log.Printf("Source session %s missing spec", sourceName)
+		log.Printf("Source session %s missing spec", sessionName)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid source session data"})
 		return
 	}
 
-	clonedMetadata := map[string]interface{}{
-		"name":      targetName,
-		"namespace": targetProject,
-	}
-
-	// Copy labels if present
-	if labels := sourceObj.GetLabels(); len(labels) > 0 {
-		newLabels := make(map[string]interface{})
-		for k, v := range labels {
-			newLabels[k] = v
-		}
-		clonedMetadata["labels"] = newLabels
-	}
-
-	// Copy annotations, excluding system annotations
-	if annotations := sourceObj.GetAnnotations(); len(annotations) > 0 {
-		newAnnotations := make(map[string]interface{})
-		for k, v := range annotations {
-			// Skip system annotations like runner token secrets
-			if !strings.HasPrefix(k, "vteam.ambient-code/runner-token") &&
-				!strings.HasPrefix(k, "kubectl.kubernetes.io/") {
-				newAnnotations[k] = v
-			}
-		}
-		// Add clone metadata
-		newAnnotations["vteam.ambient-code/cloned-from"] = fmt.Sprintf("%s/%s", sourceProject, sourceName)
-		newAnnotations["vteam.ambient-code/cloned-at"] = time.Now().UTC().Format(time.RFC3339)
-		clonedMetadata["annotations"] = newAnnotations
-	}
-
+	// Create cloned session
 	clonedSession := map[string]interface{}{
-		"apiVersion": sourceObj.GetAPIVersion(),
-		"kind":       sourceObj.GetKind(),
-		"metadata":   clonedMetadata,
-		"spec":       sourceSpec,
+		"apiVersion": "vteam.ambient-code/v1alpha1",
+		"kind":       "AgenticSession",
+		"metadata": map[string]interface{}{
+			"name":      finalName,
+			"namespace": req.TargetProject,
+		},
+		"spec": sourceSpec,
+		"status": map[string]interface{}{
+			"phase": "Pending",
+		},
 	}
 
-	// Update spec with clone request overrides
-	spec := sourceSpec
-	if cloneReq.DisplayName != "" {
-		spec["displayName"] = cloneReq.DisplayName
-	}
-	if cloneReq.Prompt != "" {
-		spec["prompt"] = cloneReq.Prompt
-	}
-
-	// Update project field in spec to target project
-	spec["project"] = targetProject
-
-	// Reset status for new session
-	clonedSession["status"] = map[string]interface{}{
-		"phase": "Pending",
+	// Update project in spec
+	clonedSpec := clonedSession["spec"].(map[string]interface{})
+	clonedSpec["project"] = req.TargetProject
+	if conflicted {
+		if dn, ok := clonedSpec["displayName"].(string); ok && strings.TrimSpace(dn) != "" {
+			clonedSpec["displayName"] = fmt.Sprintf("%s (Duplicate)", dn)
+		} else {
+			clonedSpec["displayName"] = fmt.Sprintf("%s (Duplicate)", finalName)
+		}
 	}
 
-	// Create the cloned session
 	obj := &unstructured.Unstructured{Object: clonedSession}
-	created, err := DynamicClient.Resource(gvr).Namespace(targetProject).Create(context.TODO(), obj, v1.CreateOptions{})
+
+	created, err := reqDyn.Resource(gvr).Namespace(req.TargetProject).Create(context.TODO(), obj, v1.CreateOptions{})
 	if err != nil {
-		log.Printf("Failed to create cloned session in project %s: %v", targetProject, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create cloned session"})
+		log.Printf("Failed to create cloned agentic session in project %s: %v", req.TargetProject, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create cloned agentic session"})
 		return
 	}
 
-	// Provision runner token for cloned session
-	if err := provisionRunnerTokenForSession(c, K8sClient, DynamicClient, targetProject, targetName); err != nil {
-		log.Printf("Warning: failed to provision runner token for cloned session %s/%s: %v", targetProject, targetName, err)
+	// Parse and return created session
+	metadata, ok := GetMetadataMap(created)
+	if !ok {
+		log.Printf("Created session %s missing metadata", finalName)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid created session data"})
+		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"message":       "Session cloned successfully",
-		"name":          targetName,
-		"targetProject": targetProject,
-		"uid":           created.GetUID(),
-	})
+	session := types.AgenticSession{
+		APIVersion: created.GetAPIVersion(),
+		Kind:       created.GetKind(),
+		Metadata:   metadata,
+	}
+
+	if spec, ok := GetSpecMap(created); ok {
+		session.Spec = parseSpec(spec)
+	}
+
+	if status, ok := GetStatusMap(created); ok {
+		session.Status = parseStatus(status)
+	}
+
+	c.JSON(http.StatusCreated, session)
 }
