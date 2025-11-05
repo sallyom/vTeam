@@ -547,7 +547,7 @@ func provisionRunnerTokenForSession(c *gin.Context, reqK8s *kubernetes.Clientset
 // GetSession retrieves a single agentic session by name.
 func GetSession(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("name")
+	name := c.Param("sessionName")
 
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
@@ -596,7 +596,7 @@ func GetSession(c *gin.Context) {
 // Only annotations are supported for patching currently.
 func PatchSession(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("name")
+	name := c.Param("sessionName")
 
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
@@ -674,7 +674,7 @@ func PatchSession(c *gin.Context) {
 // UpdateSession updates an agentic session's prompt, displayName, LLMSettings, and timeout.
 func UpdateSession(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("name")
+	name := c.Param("sessionName")
 
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
@@ -779,7 +779,7 @@ func UpdateSession(c *gin.Context) {
 // This is a convenience endpoint for updating just the display name.
 func UpdateSessionDisplayName(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("name")
+	name := c.Param("sessionName")
 
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
@@ -854,7 +854,7 @@ func UpdateSessionDisplayName(c *gin.Context) {
 // DeleteSession deletes an agentic session.
 func DeleteSession(c *gin.Context) {
 	project := c.GetString("project")
-	name := c.Param("name")
+	name := c.Param("sessionName")
 
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
@@ -886,7 +886,7 @@ func DeleteSession(c *gin.Context) {
 // It supports cross-project cloning for OpenShift environments.
 func CloneSession(c *gin.Context) {
 	sourceProject := c.GetString("project")
-	sourceName := c.Param("name")
+	sourceName := c.Param("sessionName")
 
 	if sourceName == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Session name is required"})
