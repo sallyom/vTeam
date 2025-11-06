@@ -646,6 +646,16 @@ func provisionRunnerTokenForSession(c *gin.Context, reqK8s *kubernetes.Clientset
 				Verbs:     []string{"get", "list", "watch", "update", "patch"}, // Added update, patch for annotations
 			},
 			{
+				APIGroups: []string{"vteam.ambient-code"},
+				Resources: []string{"projectsettings"},
+				Verbs:     []string{"get"},
+			},
+			{
+				APIGroups: []string{""},
+				Resources: []string{"secrets"},
+				Verbs:     []string{"get"},
+			},
+			{
 				APIGroups: []string{"authorization.k8s.io"},
 				Resources: []string{"selfsubjectaccessreviews"},
 				Verbs:     []string{"create"},
