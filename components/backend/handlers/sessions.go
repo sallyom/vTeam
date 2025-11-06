@@ -895,8 +895,10 @@ func MintSessionGitHubToken(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create dynamic client"})
 			return
 		}
+		log.Printf("MintSessionGitHubToken: Successfully created K8s clients from runner SA token for project %s", project)
 	} else {
 		// Fallback to backend SA clients if BaseKubeConfig is not available
+		log.Printf("MintSessionGitHubToken: WARNING - BaseKubeConfig is nil, falling back to backend SA clients for project %s", project)
 		runnerK8s = K8sClient
 		runnerDyn = DynamicClient
 	}
