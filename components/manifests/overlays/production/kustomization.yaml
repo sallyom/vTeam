@@ -13,6 +13,7 @@ resources:
 - route.yaml
 - backend-route.yaml
 - github-app-secret.yaml
+- operator-config-openshift.yaml
 
 # Patches for production environment
 patches:
@@ -52,4 +53,3 @@ images:
 #   - oauth-secret.env
 #   options:
 #     disableNameSuffixHash: true
-

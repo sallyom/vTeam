@@ -11,6 +11,7 @@ resources:
 - frontend-auth.yaml
 - backend-route.yaml
 - frontend-route.yaml
+- operator-config-crc.yaml
 
 # Patches for local dev environment
 patchesStrategicMerge:
@@ -38,4 +39,3 @@ images:
 - name: quay.io/ambient_code/vteam_claude_runner
   newName: quay.io/ambient_code/vteam_claude_runner
   newTag: latest
-
