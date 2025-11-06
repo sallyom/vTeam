@@ -1,13 +1,34 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
+
+// Package-level variables shared across handlers (set from main package)
+var (
+	GetAgenticSessionV1Alpha1Resource func() schema.GroupVersionResource
+	DynamicClient                     dynamic.Interface
+	GetGitHubToken                    func(context.Context, *kubernetes.Clientset, dynamic.Interface, string, string) (string, error)
+	DeriveRepoFolderFromURL           func(string) string
+)
+
+// contentListItem represents a file/directory in the workspace
+// Shared type used by both RFE and session handlers
+type contentListItem struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	IsDir      bool   `json:"isDir"`
+	Size       int64  `json:"size"`
+	ModifiedAt string `json:"modifiedAt"`
+}
 
 // GetProjectSettingsResource returns the GroupVersionResource for ProjectSettings
 func GetProjectSettingsResource() schema.GroupVersionResource {

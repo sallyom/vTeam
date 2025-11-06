@@ -9,6 +9,7 @@ import (
 	"ambient-code-backend/git"
 	"ambient-code-backend/github"
 	"ambient-code-backend/handlers"
+	"ambient-code-backend/handlers/sessions"
 	"ambient-code-backend/jira"
 	"ambient-code-backend/k8s"
 	"ambient-code-backend/server"
@@ -88,6 +89,13 @@ func main() {
 	handlers.DynamicClient = server.DynamicClient
 	handlers.GetGitHubToken = git.GetGitHubToken
 	handlers.DeriveRepoFolderFromURL = git.DeriveRepoFolderFromURL
+
+	// Initialize sessions package vars
+	sessions.GetAgenticSessionV1Alpha1Resource = k8s.GetAgenticSessionV1Alpha1Resource
+	sessions.DynamicClient = server.DynamicClient
+	sessions.K8sClient = server.K8sClient
+	sessions.GetGitHubToken = git.GetGitHubToken
+	sessions.DeriveRepoFolderFromURL = git.DeriveRepoFolderFromURL
 
 	// Initialize RFE workflow handlers
 	handlers.GetRFEWorkflowResource = k8s.GetRFEWorkflowResource

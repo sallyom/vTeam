@@ -2,6 +2,7 @@ package main
 
 import (
 	"ambient-code-backend/handlers"
+	"ambient-code-backend/handlers/sessions"
 	"ambient-code-backend/jira"
 	"ambient-code-backend/websocket"
 
@@ -21,7 +22,7 @@ func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
 	// API routes
 	api := r.Group("/api")
 	{
-		api.POST("/projects/:projectName/agentic-sessions/:sessionName/github/token", handlers.MintSessionGitHubToken)
+		api.POST("/projects/:projectName/agentic-sessions/:sessionName/github/token", sessions.MintSessionGitHubToken)
 
 		projectGroup := api.Group("/projects/:projectName", handlers.ValidateProjectContext())
 		{
@@ -33,26 +34,26 @@ func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
 			projectGroup.GET("/repo/blob", handlers.GetRepoBlob)
 			projectGroup.GET("/repo/branches", handlers.ListRepoBranches)
 
-			projectGroup.GET("/agentic-sessions", handlers.ListSessions)
-			projectGroup.POST("/agentic-sessions", handlers.CreateSession)
-			projectGroup.GET("/agentic-sessions/:sessionName", handlers.GetSession)
-			projectGroup.PUT("/agentic-sessions/:sessionName", handlers.UpdateSession)
-			projectGroup.PATCH("/agentic-sessions/:sessionName", handlers.PatchSession)
-			projectGroup.DELETE("/agentic-sessions/:sessionName", handlers.DeleteSession)
-			projectGroup.POST("/agentic-sessions/:sessionName/clone", handlers.CloneSession)
-			projectGroup.POST("/agentic-sessions/:sessionName/start", handlers.StartSession)
-			projectGroup.POST("/agentic-sessions/:sessionName/stop", handlers.StopSession)
-			projectGroup.PUT("/agentic-sessions/:sessionName/status", handlers.UpdateSessionStatus)
-			projectGroup.GET("/agentic-sessions/:sessionName/workspace", handlers.ListSessionWorkspace)
-			projectGroup.GET("/agentic-sessions/:sessionName/workspace/*path", handlers.GetSessionWorkspaceFile)
-			projectGroup.PUT("/agentic-sessions/:sessionName/workspace/*path", handlers.PutSessionWorkspaceFile)
-			projectGroup.POST("/agentic-sessions/:sessionName/github/push", handlers.PushSessionRepo)
-			projectGroup.POST("/agentic-sessions/:sessionName/github/abandon", handlers.AbandonSessionRepo)
-			projectGroup.GET("/agentic-sessions/:sessionName/github/diff", handlers.DiffSessionRepo)
-			projectGroup.GET("/agentic-sessions/:sessionName/k8s-resources", handlers.GetSessionK8sResources)
-			projectGroup.POST("/agentic-sessions/:sessionName/spawn-content-pod", handlers.SpawnContentPod)
-			projectGroup.GET("/agentic-sessions/:sessionName/content-pod-status", handlers.GetContentPodStatus)
-			projectGroup.DELETE("/agentic-sessions/:sessionName/content-pod", handlers.DeleteContentPod)
+			projectGroup.GET("/agentic-sessions", sessions.ListSessions)
+			projectGroup.POST("/agentic-sessions", sessions.CreateSession)
+			projectGroup.GET("/agentic-sessions/:sessionName", sessions.GetSession)
+			projectGroup.PUT("/agentic-sessions/:sessionName", sessions.UpdateSession)
+			projectGroup.PATCH("/agentic-sessions/:sessionName", sessions.PatchSession)
+			projectGroup.DELETE("/agentic-sessions/:sessionName", sessions.DeleteSession)
+			projectGroup.POST("/agentic-sessions/:sessionName/clone", sessions.CloneSession)
+			projectGroup.POST("/agentic-sessions/:sessionName/start", sessions.StartSession)
+			projectGroup.POST("/agentic-sessions/:sessionName/stop", sessions.StopSession)
+			projectGroup.PUT("/agentic-sessions/:sessionName/status", sessions.UpdateSessionStatus)
+			projectGroup.GET("/agentic-sessions/:sessionName/workspace", sessions.ListSessionWorkspace)
+			projectGroup.GET("/agentic-sessions/:sessionName/workspace/*path", sessions.GetSessionWorkspaceFile)
+			projectGroup.PUT("/agentic-sessions/:sessionName/workspace/*path", sessions.PutSessionWorkspaceFile)
+			projectGroup.POST("/agentic-sessions/:sessionName/github/push", sessions.PushSessionRepo)
+			projectGroup.POST("/agentic-sessions/:sessionName/github/abandon", sessions.AbandonSessionRepo)
+			projectGroup.GET("/agentic-sessions/:sessionName/github/diff", sessions.DiffSessionRepo)
+			projectGroup.GET("/agentic-sessions/:sessionName/k8s-resources", sessions.GetSessionK8sResources)
+			projectGroup.POST("/agentic-sessions/:sessionName/spawn-content-pod", sessions.SpawnContentPod)
+			projectGroup.GET("/agentic-sessions/:sessionName/content-pod-status", sessions.GetContentPodStatus)
+			projectGroup.DELETE("/agentic-sessions/:sessionName/content-pod", sessions.DeleteContentPod)
 
 			projectGroup.GET("/rfe-workflows", handlers.ListProjectRFEWorkflows)
 			projectGroup.POST("/rfe-workflows", handlers.CreateProjectRFEWorkflow)
