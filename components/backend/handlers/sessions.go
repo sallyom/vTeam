@@ -869,8 +869,41 @@ func MintSessionGitHubToken(c *gin.Context) {
 		return
 	}
 
+	// Create K8s clients from the validated runner token to access ProjectSettings in its namespace
+	// This allows the runner SA (which has namespace-scoped permissions) to read ProjectSettings
+	var runnerK8s *kubernetes.Clientset
+	var runnerDyn dynamic.Interface
+	if BaseKubeConfig != nil {
+		cfg := *BaseKubeConfig
+		cfg.BearerToken = token
+		// Clear other auth methods to ensure we use only the runner's token
+		cfg.BearerTokenFile = ""
+		cfg.AuthProvider = nil
+		cfg.ExecProvider = nil
+		cfg.Username = ""
+		cfg.Password = ""
+
+		runnerK8s, err = kubernetes.NewForConfig(&cfg)
+		if err != nil {
+			log.Printf("Failed to create K8s client from runner token: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create K8s client"})
+			return
+		}
+		runnerDyn, err = dynamic.NewForConfig(&cfg)
+		if err != nil {
+			log.Printf("Failed to create dynamic client from runner token: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create dynamic client"})
+			return
+		}
+	} else {
+		// Fallback to backend SA clients if BaseKubeConfig is not available
+		runnerK8s = K8sClient
+		runnerDyn = DynamicClient
+	}
+
 	// Get GitHub token (GitHub App or PAT fallback via project runner secret)
-	tokenStr, err := GetGitHubToken(c.Request.Context(), K8sClient, DynamicClient, project, userId)
+	// Use runner-scoped clients so ProjectSettings is read with runner's permissions
+	tokenStr, err := GetGitHubToken(c.Request.Context(), runnerK8s, runnerDyn, project, userId)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
