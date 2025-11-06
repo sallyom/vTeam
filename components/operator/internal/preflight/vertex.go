@@ -1,3 +1,4 @@
+// Package preflight provides environment validation and configuration checks for the operator.
 package preflight
 
 import (

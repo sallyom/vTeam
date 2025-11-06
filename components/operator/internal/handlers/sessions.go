@@ -1,3 +1,4 @@
+// Package handlers implements Kubernetes watch handlers for AgenticSession, ProjectSettings, and Namespace resources.
 package handlers
 
 import (
@@ -207,12 +208,12 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	// Determine PVC name and owner references
 	var pvcName string
 	var ownerRefs []v1.OwnerReference
-	reusing_pvc := false
+	reusingPVC := false
 
 	if parentSessionID != "" {
 		// Continuation: reuse parent's PVC
 		pvcName = fmt.Sprintf("ambient-workspace-%s", parentSessionID)
-		reusing_pvc = true
+		reusingPVC = true
 		log.Printf("Session continuation: reusing PVC %s from parent session %s", pvcName, parentSessionID)
 		// No owner refs - we don't own the parent's PVC
 	} else {
@@ -231,7 +232,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	}
 
 	// Ensure PVC exists (skip for continuation if parent's PVC should exist)
-	if !reusing_pvc {
+	if !reusingPVC {
 		if err := services.EnsureSessionWorkspacePVC(sessionNamespace, pvcName, ownerRefs); err != nil {
 			log.Printf("Failed to ensure session PVC %s in %s: %v", pvcName, sessionNamespace, err)
 			// Continue; job may still run with ephemeral storage

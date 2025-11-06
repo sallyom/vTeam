@@ -1,3 +1,4 @@
+// Package types defines GVR (GroupVersionResource) definitions and resource helpers for custom resources.
 package types
 
 import "k8s.io/apimachinery/pkg/runtime/schema"

@@ -1,3 +1,4 @@
+// Package config provides Kubernetes client initialization and configuration management for the operator.
 package config
 
 import (
