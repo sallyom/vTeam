@@ -1758,7 +1758,12 @@ func SpawnContentPod(c *gin.Context) {
 		},
 	}
 
-	created, err := reqK8s.CoreV1().Pods(project).Create(c.Request.Context(), pod, v1.CreateOptions{})
+	// Create pod using backend SA (pod creation requires elevated permissions)
+	if K8sClient == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
+		return
+	}
+	created, err := K8sClient.CoreV1().Pods(project).Create(c.Request.Context(), pod, v1.CreateOptions{})
 	if err != nil {
 		log.Printf("Failed to create temp content pod: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("failed to create pod: %v", err)})
@@ -1794,7 +1799,8 @@ func SpawnContentPod(c *gin.Context) {
 		},
 	}
 
-	if _, err := reqK8s.CoreV1().Services(project).Create(c.Request.Context(), svc, v1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
+	// Create service using backend SA
+	if _, err := K8sClient.CoreV1().Services(project).Create(c.Request.Context(), svc, v1.CreateOptions{}); err != nil && !errors.IsAlreadyExists(err) {
 		log.Printf("Failed to create temp service: %v", err)
 	}
 
