@@ -215,7 +215,7 @@ jobs:
       - name: Update frontend environment variables
         if: needs.detect-changes.outputs.frontend == 'true'
         run: |
-          oc patch deployment frontend -n ambient-code --type=json -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/env", "value": [{"name":"BACKEND_URL","value":"http://backend-service:8080/api"},{"name":"NODE_ENV","value":"production"},{"name":"GITHUB_APP_SLUG","value":"ambient-code"},{"name":"VTEAM_VERSION","value":"${{ github.sha }}"}]}]'
+          oc patch deployment frontend -n ambient-code --type=json -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/env", "value": [{"name":"BACKEND_URL","value":"http://backend-service:8080/api"},{"name":"NODE_ENV","value":"production"},{"name":"GITHUB_APP_SLUG","value":"ambient-code-stage"},{"name":"VTEAM_VERSION","value":"${{ github.sha }}"}]}]'
 
       - name: Update backend environment variables
         if: needs.detect-changes.outputs.backend == 'true'
@@ -271,7 +271,7 @@ jobs:
 
       - name: Update frontend environment variables
         run: |
-          oc patch deployment frontend -n ambient-code --type=json -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/env", "value": [{"name":"BACKEND_URL","value":"http://backend-service:8080/api"},{"name":"NODE_ENV","value":"production"},{"name":"GITHUB_APP_SLUG","value":"ambient-code"},{"name":"VTEAM_VERSION","value":"${{ github.sha }}"}]}]'
+          oc patch deployment frontend -n ambient-code --type=json -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/env", "value": [{"name":"BACKEND_URL","value":"http://backend-service:8080/api"},{"name":"NODE_ENV","value":"production"},{"name":"GITHUB_APP_SLUG","value":"ambient-code-stage"},{"name":"VTEAM_VERSION","value":"${{ github.sha }}"}]}]'
 
       - name: Update backend environment variables
         run: |
