@@ -280,9 +280,10 @@ func ListSessions(c *gin.Context) {
 
 func CreateSession(c *gin.Context) {
 	project := c.GetString("project")
-	// Use backend service account clients for CR writes
-	if DynamicClient == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
+	// Get user-scoped clients for creating the AgenticSession (enforces user RBAC)
+	_, reqDyn := GetK8sClientsForRequest(c)
+	if reqDyn == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User token required"})
 		return
 	}
 	var req types.CreateAgenticSessionRequest
@@ -550,7 +551,8 @@ func CreateSession(c *gin.Context) {
 	gvr := GetAgenticSessionV1Alpha1Resource()
 	obj := &unstructured.Unstructured{Object: session}
 
-	created, err := DynamicClient.Resource(gvr).Namespace(project).Create(context.TODO(), obj, v1.CreateOptions{})
+	// Create AgenticSession using user token (enforces user RBAC permissions)
+	created, err := reqDyn.Resource(gvr).Namespace(project).Create(context.TODO(), obj, v1.CreateOptions{})
 	if err != nil {
 		log.Printf("Failed to create agentic session in project %s: %v", project, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create agentic session"})
@@ -581,8 +583,10 @@ func CreateSession(c *gin.Context) {
 		}
 	}()
 
-	// Preferred method: provision a per-session ServiceAccount token for the runner (backend SA)
-	if err := provisionRunnerTokenForSession(c, K8sClient, DynamicClient, project, name); err != nil {
+	// Provision runner token using backend SA (requires elevated permissions for SA/Role/Secret creation)
+	if DynamicClient == nil || K8sClient == nil {
+		log.Printf("Warning: backend SA clients not available, skipping runner token provisioning for session %s/%s", project, name)
+	} else if err := provisionRunnerTokenForSession(c, K8sClient, DynamicClient, project, name); err != nil {
 		// Non-fatal: log and continue. Operator may retry later if implemented.
 		log.Printf("Warning: failed to provision runner token for session %s/%s: %v", project, name, err)
 	}
@@ -1403,8 +1407,12 @@ func StartSession(c *gin.Context) {
 	// Update start time for this run
 	status["startTime"] = time.Now().Format(time.RFC3339)
 
-	// Update the status subresource (must use UpdateStatus, not Update)
-	updated, err := reqDyn.Resource(gvr).Namespace(project).UpdateStatus(context.TODO(), item, v1.UpdateOptions{})
+	// Update the status subresource using backend SA (status updates require elevated permissions)
+	if DynamicClient == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
+		return
+	}
+	updated, err := DynamicClient.Resource(gvr).Namespace(project).UpdateStatus(context.TODO(), item, v1.UpdateOptions{})
 	if err != nil {
 		log.Printf("Failed to start agentic session %s in project %s: %v", sessionName, project, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start agentic session"})
@@ -1533,8 +1541,12 @@ func StopSession(c *gin.Context) {
 		}
 	}
 
-	// Update the resource using UpdateStatus for status subresource
-	updated, err := reqDyn.Resource(gvr).Namespace(project).UpdateStatus(context.TODO(), item, v1.UpdateOptions{})
+	// Update the resource using UpdateStatus for status subresource (using backend SA)
+	if DynamicClient == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
+		return
+	}
+	updated, err := DynamicClient.Resource(gvr).Namespace(project).UpdateStatus(context.TODO(), item, v1.UpdateOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
 			// Session was deleted while we were trying to update it
@@ -1616,8 +1628,12 @@ func UpdateSessionStatus(c *gin.Context) {
 		status[k] = v
 	}
 
-	// Update only the status subresource (requires agenticsessions/status perms)
-	if _, err := reqDyn.Resource(gvr).Namespace(project).UpdateStatus(context.TODO(), item, v1.UpdateOptions{}); err != nil {
+	// Update only the status subresource using backend SA (status updates require elevated permissions)
+	if DynamicClient == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "backend not initialized"})
+		return
+	}
+	if _, err := DynamicClient.Resource(gvr).Namespace(project).UpdateStatus(context.TODO(), item, v1.UpdateOptions{}); err != nil {
 		log.Printf("Failed to update agentic session status %s in project %s: %v", sessionName, project, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update agentic session status"})
 		return
@@ -2430,13 +2446,13 @@ func PushSessionRepo(c *gin.Context) {
 		c.Data(resp.StatusCode, "application/json", bodyBytes)
 		return
 	}
-	if _, reqDyn := GetK8sClientsForRequest(c); reqDyn != nil {
+	if DynamicClient != nil {
 		log.Printf("pushSessionRepo: setting repo status to 'pushed' for repoIndex=%d", body.RepoIndex)
-		if err := setRepoStatus(reqDyn, project, session, body.RepoIndex, "pushed"); err != nil {
+		if err := setRepoStatus(DynamicClient, project, session, body.RepoIndex, "pushed"); err != nil {
 			log.Printf("pushSessionRepo: setRepoStatus failed project=%s session=%s repoIndex=%d err=%v", project, session, body.RepoIndex, err)
 		}
 	} else {
-		log.Printf("pushSessionRepo: no dynamic client; cannot set repo status project=%s session=%s", project, session)
+		log.Printf("pushSessionRepo: backend SA not available; cannot set repo status project=%s session=%s", project, session)
 	}
 	log.Printf("pushSessionRepo: content push succeeded status=%d body.len=%d", resp.StatusCode, len(bodyBytes))
 	c.Data(http.StatusOK, "application/json", bodyBytes)
@@ -2500,12 +2516,12 @@ func AbandonSessionRepo(c *gin.Context) {
 		c.Data(resp.StatusCode, "application/json", bodyBytes)
 		return
 	}
-	if _, reqDyn := GetK8sClientsForRequest(c); reqDyn != nil {
-		if err := setRepoStatus(reqDyn, project, session, body.RepoIndex, "abandoned"); err != nil {
+	if DynamicClient != nil {
+		if err := setRepoStatus(DynamicClient, project, session, body.RepoIndex, "abandoned"); err != nil {
 			log.Printf("abandonSessionRepo: setRepoStatus failed project=%s session=%s repoIndex=%d err=%v", project, session, body.RepoIndex, err)
 		}
 	} else {
-		log.Printf("abandonSessionRepo: no dynamic client; cannot set repo status project=%s session=%s", project, session)
+		log.Printf("abandonSessionRepo: backend SA not available; cannot set repo status project=%s session=%s", project, session)
 	}
 	c.Data(http.StatusOK, "application/json", bodyBytes)
 }
