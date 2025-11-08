@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 
 // Custom components
 import MessagesTab from "@/components/session/MessagesTab";
-import ResultsTab from "@/components/session/ResultsTab";
 import { EditRepositoriesDialog } from "../../rfe/[id]/edit-repositories-dialog";
 
 import { Button } from "@/components/ui/button";
