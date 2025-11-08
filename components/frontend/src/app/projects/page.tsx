@@ -26,12 +26,14 @@ import { PageHeader } from '@/components/page-header';
 import { EmptyState } from '@/components/empty-state';
 import { ErrorMessage } from '@/components/error-message';
 import { DestructiveConfirmationDialog } from '@/components/confirmation-dialog';
+import { CreateWorkspaceDialog } from '@/components/create-workspace-dialog';
 import { successToast, errorToast } from '@/hooks/use-toast';
 import type { Project } from '@/types/api';
 
 export default function ProjectsPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   // React Query hooks
   const { data: projects = [], isLoading, error, refetch } = useProjects();
@@ -80,8 +82,8 @@ export default function ProjectsPage() {
   return (
     <div className="container mx-auto p-0">
       {/* Sticky header */}
-      <div className="sticky top-0 z-20 bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
-        <div className="px-6 py-4">
+      <div className="sticky top-0 z-20 bg-white border-b">
+        <div className="container mx-auto px-6 py-6">
           <PageHeader
             title="Projects"
             description="Manage your Ambient AI projects and configurations"
@@ -97,34 +99,12 @@ export default function ProjectsPage() {
                   />
                   Refresh
                 </Button>
-                <Link href="/projects/new">
-                  <Button>
-                    <Plus className="w-4 h-4 mr-2" />
-                    New Project
-                  </Button>
-                </Link>
-              </>
-            }
-          />
-        </div>
-      </div>
-
-      {/* Error state */}
-      {error && (
-        <div className="px-6 pt-4">
-          <ErrorMessage error={error} onRetry={() => refetch()} />
-        </div>
-      )}
-
-      {/* Content */}
-      <div className="px-6 pt-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Ambient Projects</CardTitle>
-            <CardDescription>
-              Configure and manage project settings, resource limits, and access
-              controls
-            </CardDescription>
+                <Button onClick={() => setShowCreateDialog(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  New Workspace
+                </Button>
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
             {projects.length === 0 ? (
@@ -133,8 +113,8 @@ export default function ProjectsPage() {
                 title="No projects found"
                 description="Get started by creating your first project"
                 action={{
-                  label: 'Create Project',
-                  onClick: () => (window.location.href = '/projects/new'),
+                  label: 'Create Workspace',
+                  onClick: () => setShowCreateDialog(true),
                 }}
               />
             ) : (
@@ -205,16 +185,23 @@ export default function ProjectsPage() {
         </Card>
       </div>
 
-      {/* Delete confirmation dialog */}
-      <DestructiveConfirmationDialog
-        open={showDeleteDialog}
-        onOpenChange={setShowDeleteDialog}
-        onConfirm={confirmDelete}
-        title="Delete project"
-        description={`Are you sure you want to delete project "${projectToDelete?.name}"? This will permanently remove the project and all related resources. This action cannot be undone.`}
-        confirmText="Delete"
-        loading={deleteProjectMutation.isPending}
-      />
+        {/* Delete confirmation dialog */}
+        <DestructiveConfirmationDialog
+          open={showDeleteDialog}
+          onOpenChange={setShowDeleteDialog}
+          onConfirm={confirmDelete}
+          title="Delete workspace"
+          description={`Are you sure you want to delete workspace "${projectToDelete?.name}"? This will permanently remove the workspace and all related resources. This action cannot be undone.`}
+          confirmText="Delete"
+          loading={deleteProjectMutation.isPending}
+        />
+
+        {/* Create workspace dialog */}
+        <CreateWorkspaceDialog
+          open={showCreateDialog}
+          onOpenChange={setShowCreateDialog}
+        />
+      </div>
     </div>
   );
 }
