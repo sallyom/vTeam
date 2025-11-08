@@ -4,9 +4,10 @@ import { useState } from 'react';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Square, Trash2, Copy } from 'lucide-react';
+import { RefreshCw, Square, Trash2, Copy, MoreVertical, Info } from 'lucide-react';
 import { CloneSessionDialog } from '@/components/clone-session-dialog';
 import { SessionDetailsModal } from '@/components/session-details-modal';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import type { AgenticSession } from '@/types/agentic-session';
 import { getPhaseColor } from '@/utils/session-helpers';
 
@@ -37,6 +38,7 @@ export function SessionHeader({
   messageCount,
 }: SessionHeaderProps) {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+  const [promptExpanded, setPromptExpanded] = useState(false);
   
   const phase = session.status?.phase || "Pending";
   const canStop = phase === "Running" || phase === "Creating";
@@ -44,7 +46,7 @@ export function SessionHeader({
 
   const mode = session.spec?.interactive ? "Interactive" : "Headless";
   const started = session.status?.startTime 
-    ? `Started ${format(new Date(session.status.startTime), "PPp")}`
+    ? format(new Date(session.status.startTime), "PPp")
     : null;
   const modelName = session.spec.llmSettings.model;
 
@@ -61,10 +63,10 @@ export function SessionHeader({
           {session.spec.displayName && (
             <div className="text-sm text-gray-500">{session.metadata.name}</div>
           )}
-          <div className="text-xs text-gray-500 mt-3">
-            <span>{started || formatDistanceToNow(new Date(session.metadata.creationTimestamp), { addSuffix: true })}</span>
-            <span className="mx-1">•</span>
+          <div className="text-xs text-gray-500 mt-1">
             <span>{mode} session</span>
+            <span className="mx-1">•</span>
+            <span>{started || formatDistanceToNow(new Date(session.metadata.creationTimestamp), { addSuffix: true })}</span>
             <span className="mx-1">•</span>
             <span>{modelName}</span>
             <span className="mx-1">•</span>
@@ -97,27 +99,45 @@ export function SessionHeader({
               Stop
             </Button>
           )}
-          <CloneSessionDialog
-            session={session}
-            trigger={
+          
+          {/* Actions dropdown menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm">
-                <Copy className="w-4 h-4 mr-2" />
-                Clone
+                <MoreVertical className="w-4 h-4" />
               </Button>
-            }
-            projectName={projectName}
-          />
-          {canDelete && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={onDelete}
-              disabled={actionLoading === "deleting"}
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete
-            </Button>
-          )}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setDetailsModalOpen(true)}>
+                <Info className="w-4 h-4 mr-2" />
+                View details
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <CloneSessionDialog
+                session={session}
+                trigger={
+                  <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
+                    <Copy className="w-4 h-4 mr-2" />
+                    Clone
+                  </DropdownMenuItem>
+                }
+                projectName={projectName}
+              />
+              {canDelete && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={onDelete}
+                    disabled={actionLoading === "deleting"}
+                    className="text-red-600"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    {actionLoading === "deleting" ? "Deleting..." : "Delete"}
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -128,6 +148,8 @@ export function SessionHeader({
         durationMs={durationMs}
         k8sResources={k8sResources}
         messageCount={messageCount}
+        promptExpanded={promptExpanded}
+        onPromptToggle={() => setPromptExpanded(!promptExpanded)}
       />
     </>
   );

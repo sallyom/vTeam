@@ -2,6 +2,7 @@
 
 import { format } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Badge } from '@/components/ui/badge';
 import type { AgenticSession } from '@/types/agentic-session';
 import { getPhaseColor } from '@/utils/session-helpers';
 
@@ -53,9 +54,9 @@ export function SessionDetailsModal({
           <div className="space-y-3">
             <div className="flex items-start gap-3">
               <span className="font-semibold text-gray-700 min-w-[100px]">Status:</span>
-              <span className={`text-gray-900 font-semibold ${getPhaseColor(session.status?.phase || "Pending")}`}>
+              <Badge className={getPhaseColor(session.status?.phase || "Pending")}>
                 {session.status?.phase || "Pending"}
-              </span>
+              </Badge>
             </div>
             
             <div className="flex items-start gap-3">
