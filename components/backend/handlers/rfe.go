@@ -359,10 +359,11 @@ func SeedProjectRFEWorkflow(c *gin.Context) {
 	var req SeedRequest
 	_ = c.ShouldBindJSON(&req)
 
-	// Defaults
+	// Defaults - Use Gkrumbach07/spec-kit-template as the source for both agents and spec-kit
+	// This template contains both .claude/agents and .claude/commands directories
 	agentURL := req.AgentSourceURL
 	if agentURL == "" {
-		agentURL = "https://github.com/ambient-code/vTeam.git"
+		agentURL = "https://github.com/Gkrumbach07/spec-kit-template.git"
 	}
 	agentBranch := req.AgentSourceBranch
 	if agentBranch == "" {
@@ -370,15 +371,17 @@ func SeedProjectRFEWorkflow(c *gin.Context) {
 	}
 	agentPath := req.AgentSourcePath
 	if agentPath == "" {
-		agentPath = "agents"
+		// spec-kit-template has agents in workflows/spec-kit/.claude/agents
+		agentPath = "workflows/spec-kit/.claude/agents"
 	}
-	// Spec-kit configuration: request body > environment variables > hardcoded defaults
+	// Spec-kit configuration: Use Gkrumbach07/spec-kit-template as default
+	// request body > environment variables > hardcoded defaults
 	specKitRepo := req.SpecKitRepo
 	if specKitRepo == "" {
 		if envRepo := strings.TrimSpace(os.Getenv("SPEC_KIT_REPO")); envRepo != "" {
 			specKitRepo = envRepo
 		} else {
-			specKitRepo = "github/spec-kit"
+			specKitRepo = "Gkrumbach07/spec-kit-template"
 		}
 	}
 	specKitVersion := req.SpecKitVersion
@@ -394,7 +397,8 @@ func SeedProjectRFEWorkflow(c *gin.Context) {
 		if envTemplate := strings.TrimSpace(os.Getenv("SPEC_KIT_TEMPLATE")); envTemplate != "" {
 			specKitTemplate = envTemplate
 		} else {
-			specKitTemplate = "spec-kit-template-claude-sh"
+			// The template name in spec-kit-template repo
+			specKitTemplate = "spec-kit"
 		}
 	}
 

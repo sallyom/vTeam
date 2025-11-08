@@ -455,32 +455,41 @@ func PerformRepoSeeding(ctx context.Context, wf Workflow, branchName, githubToke
 			}
 		}
 
-		// Only extract files needed for umbrella repos (matching official spec-kit release template):
-		// - templates/commands/ → .claude/commands/
-		// - scripts/bash/ → .specify/scripts/bash/
-		// - templates/*.md → .specify/templates/
-		// - memory/ → .specify/memory/
-		// Skip everything else (docs/, media/, root files, .github/, scripts/powershell/, etc.)
+		// Extract files from spec-kit template structure
+		// Support both old structure (github/spec-kit) and new structure (Gkrumbach07/spec-kit-template)
+		// Old: templates/commands/, scripts/bash/, templates/*.md, memory/
+		// New: workflows/spec-kit/.claude/commands/, workflows/spec-kit/.specify/
 
 		var targetRel string
-		if strings.HasPrefix(rel, "templates/commands/") {
-			// Map templates/commands/*.md to .claude/commands/speckit.*.md
+
+		// Handle new structure: workflows/spec-kit/...
+		if strings.HasPrefix(rel, "workflows/spec-kit/.claude/commands/") {
+			// Direct mapping from workflows/spec-kit/.claude/commands/ → .claude/commands/
+			targetRel = strings.TrimPrefix(rel, "workflows/spec-kit/")
+		} else if strings.HasPrefix(rel, "workflows/spec-kit/.specify/") {
+			// Direct mapping from workflows/spec-kit/.specify/ → .specify/
+			targetRel = strings.TrimPrefix(rel, "workflows/spec-kit/")
+		} else if strings.HasPrefix(rel, "workflows/") && strings.HasPrefix(rel, "workflows/spec-kit/") {
+			// Copy other spec-kit workflow files if needed
+			targetRel = strings.TrimPrefix(rel, "workflows/spec-kit/")
+		} else if strings.HasPrefix(rel, "templates/commands/") {
+			// Handle old structure: templates/commands/ → .claude/commands/
 			cmdFile := strings.TrimPrefix(rel, "templates/commands/")
 			if !strings.HasPrefix(cmdFile, "speckit.") {
 				cmdFile = "speckit." + cmdFile
 			}
 			targetRel = ".claude/commands/" + cmdFile
 		} else if strings.HasPrefix(rel, "scripts/bash/") {
-			// Map scripts/bash/ to .specify/scripts/bash/
+			// Handle old structure: scripts/bash/ → .specify/scripts/bash/
 			targetRel = strings.Replace(rel, "scripts/bash/", ".specify/scripts/bash/", 1)
 		} else if strings.HasPrefix(rel, "templates/") && strings.HasSuffix(rel, ".md") {
-			// Map templates/*.md to .specify/templates/
+			// Handle old structure: templates/*.md → .specify/templates/
 			targetRel = strings.Replace(rel, "templates/", ".specify/templates/", 1)
 		} else if strings.HasPrefix(rel, "memory/") {
-			// Map memory/ to .specify/memory/
+			// Handle old structure: memory/ → .specify/memory/
 			targetRel = ".specify/" + rel
 		} else {
-			// Skip all other files (docs/, media/, root files, .github/, scripts/powershell/, etc.)
+			// Skip all other files (docs/, media/, root files, .github/, etc.)
 			continue
 		}
 

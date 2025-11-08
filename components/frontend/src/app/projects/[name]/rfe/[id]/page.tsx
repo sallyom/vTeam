@@ -35,7 +35,11 @@ export default function ProjectRFEDetailPage() {
   const seedWorkflowMutation = useSeedRfeWorkflow();
   const updateWorkflowMutation = useUpdateRfeWorkflow();
   const { openJiraForPath } = useOpenJiraIssue(project, id);
-  const { data: repoAgents = AVAILABLE_AGENTS, isLoading: loadingAgents } = useRfeWorkflowAgents(project, id);
+  const { data: repoAgents, isLoading: loadingAgents, error: agentsError } = useRfeWorkflowAgents(project, id);
+
+  // Use repo agents if available, otherwise fallback to default agents
+  // This helps distinguish between "no agents in repo" vs "failed to load"
+  const displayAgents = repoAgents || AVAILABLE_AGENTS;
 
   // Extract repo info from workflow
   const repo = workflow?.umbrellaRepo?.url.replace(/^https?:\/\/(?:www\.)?github.com\//i, '').replace(/\.git$/i, '') || '';
@@ -342,16 +346,29 @@ export default function ProjectRFEDetailPage() {
                         <div className="flex items-center justify-center py-8">
                           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                         </div>
-                      ) : repoAgents.length === 0 ? (
+                      ) : agentsError ? (
+                        <div className="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
+                          <p className="text-sm text-yellow-800 font-medium mb-2">Failed to load agents from repository</p>
+                          <p className="text-xs text-yellow-700 mb-3">{agentsError.message}</p>
+                          <p className="text-xs text-yellow-700">Using default agent list as fallback</p>
+                        </div>
+                      ) : null}
+
+                      {!loadingAgents && displayAgents.length === 0 ? (
                         <div className="text-center py-8 text-muted-foreground">
                           <Bot className="h-12 w-12 mx-auto mb-2 opacity-50" />
                           <p>No agents found in repository .claude/agents directory</p>
                           <p className="text-xs mt-1">Seed the repository to add agent definitions</p>
                         </div>
-                      ) : (
+                      ) : !loadingAgents && displayAgents.length > 0 ? (
                         <>
+                          {!repoAgents && !agentsError && (
+                            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 mb-4">
+                              <p className="text-xs text-blue-700">Using default agent list. Agents will load from repository after seeding.</p>
+                            </div>
+                          )}
                           <div className="grid grid-cols-1 gap-3">
-                            {repoAgents.map((agent) => {
+                            {displayAgents.map((agent) => {
                               const isSelected = selectedAgents.includes(agent.persona);
                               return (
                                 <div
@@ -386,7 +403,7 @@ export default function ProjectRFEDetailPage() {
                               <div className="text-sm font-medium mb-2">Selected Agents ({selectedAgents.length})</div>
                               <div className="flex flex-wrap gap-2">
                                 {selectedAgents.map(persona => {
-                                  const agent = repoAgents.find(a => a.persona === persona);
+                                  const agent = displayAgents.find(a => a.persona === persona);
                                   return agent ? (
                                     <Badge key={persona} variant="secondary">
                                       {agent.name}
