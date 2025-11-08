@@ -277,25 +277,25 @@ func (h *Handler) PublishWorkflowFileToJira(c *gin.Context) {
 		return
 	}
 
-	// Determine configured secret name
+	// Determine configured jira-connection secret name
 	secretName := ""
 	if reqDyn != nil {
 		gvr := h.GetProjectSettingsResource()
 		if obj, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), "projectsettings", v1.GetOptions{}); err == nil {
 			if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
-				if v, ok := spec["runnerSecretsName"].(string); ok {
+				if v, ok := spec["jiraConnectionSecretName"].(string); ok {
 					secretName = strings.TrimSpace(v)
 				}
 			}
 		}
 	}
 	if secretName == "" {
-		secretName = "ambient-runner-secrets"
+		secretName = "jira-connection"
 	}
 
 	sec, err := reqK8s.CoreV1().Secrets(project).Get(c.Request.Context(), secretName, v1.GetOptions{})
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read runner secret", "details": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read jira-connection secret", "details": err.Error()})
 		return
 	}
 	get := func(k string) string {
@@ -308,7 +308,7 @@ func (h *Handler) PublishWorkflowFileToJira(c *gin.Context) {
 	jiraProject := strings.TrimSpace(get("JIRA_PROJECT"))
 	jiraToken := strings.TrimSpace(get("JIRA_API_TOKEN"))
 	if jiraURL == "" || jiraProject == "" || jiraToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing Jira configuration in runner secret (JIRA_URL, JIRA_PROJECT, JIRA_API_TOKEN required)"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing Jira configuration in jira-connection secret (JIRA_URL, JIRA_PROJECT, JIRA_API_TOKEN required)"})
 		return
 	}
 

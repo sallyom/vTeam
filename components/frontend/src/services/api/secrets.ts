@@ -15,7 +15,10 @@ export type SecretList = {
 };
 
 export type SecretsConfig = {
-  secretName: string;
+  secretName: string; // Legacy field
+  runnerSecretName: string;
+  githubAuthSecretName: string;
+  jiraConnectionSecretName: string;
 };
 
 /**
@@ -52,11 +55,15 @@ export async function getSecretsValues(projectName: string): Promise<Secret[]> {
  */
 export async function updateSecretsConfig(
   projectName: string,
-  secretName: string
+  config: {
+    runnerSecretName?: string;
+    githubAuthSecretName?: string;
+    jiraConnectionSecretName?: string;
+  }
 ): Promise<void> {
-  await apiClient.put<void, { secretName: string }>(
+  await apiClient.put<void, typeof config>(
     `/projects/${projectName}/runner-secrets/config`,
-    { secretName }
+    config
   );
 }
 

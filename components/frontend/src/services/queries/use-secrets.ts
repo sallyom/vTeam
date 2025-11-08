@@ -31,11 +31,15 @@ export function useUpdateSecretsConfig() {
   return useMutation({
     mutationFn: ({
       projectName,
-      secretName,
+      config,
     }: {
       projectName: string;
-      secretName: string;
-    }) => secretsApi.updateSecretsConfig(projectName, secretName),
+      config: {
+        runnerSecretName?: string;
+        githubAuthSecretName?: string;
+        jiraConnectionSecretName?: string;
+      };
+    }) => secretsApi.updateSecretsConfig(projectName, config),
     onSuccess: (_, { projectName }) => {
       queryClient.invalidateQueries({ queryKey: ['secrets', 'config', projectName] });
       // Also invalidate values since they come from the configured secret

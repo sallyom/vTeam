@@ -34,7 +34,9 @@ var (
 
 // ProjectSettings represents the project configuration
 type ProjectSettings struct {
-	RunnerSecret string
+	RunnerSecret             string
+	GithubAuthSecret         string
+	JiraConnectionSecret     string
 }
 
 // DiffSummary holds summary counts from git diff --numstat
@@ -69,6 +71,12 @@ func getProjectSettings(ctx context.Context, dynClient dynamic.Interface, projec
 		if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
 			if v, ok := spec["runnerSecretsName"].(string); ok {
 				settings.RunnerSecret = strings.TrimSpace(v)
+			}
+			if v, ok := spec["githubAuthSecretName"].(string); ok {
+				settings.GithubAuthSecret = strings.TrimSpace(v)
+			}
+			if v, ok := spec["jiraConnectionSecretName"].(string); ok {
+				settings.JiraConnectionSecret = strings.TrimSpace(v)
 			}
 		}
 	}
@@ -105,47 +113,47 @@ func GetGitHubToken(ctx context.Context, k8sClient *kubernetes.Clientset, dynCli
 		}
 	}
 
-	// Fall back to project runner secret GIT_TOKEN
+	// Fall back to github-auth secret GIT_TOKEN
 	if k8sClient == nil {
-		log.Printf("Cannot read runner secret: k8s client is nil")
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		log.Printf("Cannot read github-auth secret: k8s client is nil")
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project github-auth secret")
 	}
 
 	settings, err := getProjectSettings(ctx, dynClient, project)
 
-	// Default to "ambient-runner-secrets" if not configured
-	secretName := "ambient-runner-secrets"
+	// Default to "github-auth" if not configured
+	secretName := "github-auth"
 	if err != nil {
 		log.Printf("Failed to get ProjectSettings for %s (using default secret name): %v", project, err)
-	} else if settings != nil && settings.RunnerSecret != "" {
-		secretName = settings.RunnerSecret
+	} else if settings != nil && settings.GithubAuthSecret != "" {
+		secretName = settings.GithubAuthSecret
 	}
 
-	log.Printf("Attempting to read GIT_TOKEN from secret %s/%s", project, secretName)
+	log.Printf("Attempting to read GIT_TOKEN from github-auth secret %s/%s", project, secretName)
 
 	secret, err := k8sClient.CoreV1().Secrets(project).Get(ctx, secretName, v1.GetOptions{})
 	if err != nil {
-		log.Printf("Failed to get runner secret %s/%s: %v", project, secretName, err)
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		log.Printf("Failed to get github-auth secret %s/%s: %v", project, secretName, err)
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project github-auth secret")
 	}
 
 	if secret.Data == nil {
 		log.Printf("Secret %s/%s exists but Data is nil", project, secretName)
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project github-auth secret")
 	}
 
 	token, ok := secret.Data["GIT_TOKEN"]
 	if !ok {
 		log.Printf("Secret %s/%s exists but has no GIT_TOKEN key (available keys: %v)", project, secretName, getSecretKeys(secret.Data))
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project github-auth secret")
 	}
 
 	if len(token) == 0 {
 		log.Printf("Secret %s/%s has GIT_TOKEN key but value is empty", project, secretName)
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project github-auth secret")
 	}
 
-	log.Printf("Using GIT_TOKEN from project runner secret %s/%s", project, secretName)
+	log.Printf("Using GIT_TOKEN from project github-auth secret %s/%s", project, secretName)
 	return string(token), nil
 }
 

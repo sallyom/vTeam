@@ -65,32 +65,49 @@ func GetRunnerSecretsConfig(c *gin.Context) {
 		return
 	}
 
-	secretName := ""
+	runnerSecretName := ""
+	githubAuthSecretName := ""
+	jiraConnectionSecretName := ""
 	if obj != nil {
 		if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
 			if v, ok := spec["runnerSecretsName"].(string); ok {
-				secretName = v
+				runnerSecretName = v
+			}
+			if v, ok := spec["githubAuthSecretName"].(string); ok {
+				githubAuthSecretName = v
+			}
+			if v, ok := spec["jiraConnectionSecretName"].(string); ok {
+				jiraConnectionSecretName = v
 			}
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"secretName": secretName})
+	c.JSON(http.StatusOK, gin.H{
+		"secretName":               runnerSecretName, // Legacy field
+		"runnerSecretName":         runnerSecretName,
+		"githubAuthSecretName":     githubAuthSecretName,
+		"jiraConnectionSecretName": jiraConnectionSecretName,
+	})
 }
 
-// UpdateRunnerSecretsConfig handles PUT /api/projects/:projectName/runner-secrets/config { secretName }
+// UpdateRunnerSecretsConfig handles PUT /api/projects/:projectName/runner-secrets/config
 func UpdateRunnerSecretsConfig(c *gin.Context) {
 	projectName := c.Param("projectName")
 	_, reqDyn := GetK8sClientsForRequest(c)
 
 	var req struct {
-		SecretName string `json:"secretName" binding:"required"`
+		SecretName               string `json:"secretName"`               // Legacy field, maps to RunnerSecretName
+		RunnerSecretName         string `json:"runnerSecretName"`         // ANTHROPIC_API_KEY only
+		GithubAuthSecretName     string `json:"githubAuthSecretName"`     // GIT_TOKEN, GIT_USER_NAME, GIT_USER_EMAIL
+		JiraConnectionSecretName string `json:"jiraConnectionSecretName"` // JIRA_* keys
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if strings.TrimSpace(req.SecretName) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "secretName is required"})
-		return
+
+	// Handle legacy secretName field
+	if req.SecretName != "" && req.RunnerSecretName == "" {
+		req.RunnerSecretName = req.SecretName
 	}
 
 	// Operator owns ProjectSettings. If it exists, update; otherwise, return not found.
@@ -106,13 +123,21 @@ func UpdateRunnerSecretsConfig(c *gin.Context) {
 		return
 	}
 
-	// Update spec.runnerSecretsName
+	// Update spec with all three secret names
 	spec, _ := obj.Object["spec"].(map[string]interface{})
 	if spec == nil {
 		spec = map[string]interface{}{}
 		obj.Object["spec"] = spec
 	}
-	spec["runnerSecretsName"] = req.SecretName
+	if req.RunnerSecretName != "" {
+		spec["runnerSecretsName"] = req.RunnerSecretName
+	}
+	if req.GithubAuthSecretName != "" {
+		spec["githubAuthSecretName"] = req.GithubAuthSecretName
+	}
+	if req.JiraConnectionSecretName != "" {
+		spec["jiraConnectionSecretName"] = req.JiraConnectionSecretName
+	}
 
 	if _, err := reqDyn.Resource(gvr).Namespace(projectName).Update(c.Request.Context(), obj, v1.UpdateOptions{}); err != nil {
 		log.Printf("Failed to update ProjectSettings for %s: %v", projectName, err)
@@ -120,15 +145,21 @@ func UpdateRunnerSecretsConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"secretName": req.SecretName})
+	c.JSON(http.StatusOK, gin.H{
+		"secretName":               req.RunnerSecretName, // Legacy
+		"runnerSecretName":         req.RunnerSecretName,
+		"githubAuthSecretName":     req.GithubAuthSecretName,
+		"jiraConnectionSecretName": req.JiraConnectionSecretName,
+	})
 }
 
 // ListRunnerSecrets handles GET /api/projects/:projectName/runner-secrets -> { data: { key: value } }
+// Merges secrets from all three sources: runner-secret, github-auth, jira-connection
 func ListRunnerSecrets(c *gin.Context) {
 	projectName := c.Param("projectName")
 	reqK8s, reqDyn := GetK8sClientsForRequest(c)
 
-	// Read config
+	// Read config to get all secret names
 	gvr := GetProjectSettingsResource()
 	obj, err := reqDyn.Resource(gvr).Namespace(projectName).Get(c.Request.Context(), "projectsettings", v1.GetOptions{})
 	if err != nil && !errors.IsNotFound(err) {
@@ -136,38 +167,53 @@ func ListRunnerSecrets(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read runner secrets config"})
 		return
 	}
-	secretName := ""
+
+	runnerSecretName := ""
+	githubAuthSecretName := ""
+	jiraConnectionSecretName := ""
 	if obj != nil {
 		if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
 			if v, ok := spec["runnerSecretsName"].(string); ok {
-				secretName = v
+				runnerSecretName = v
+			}
+			if v, ok := spec["githubAuthSecretName"].(string); ok {
+				githubAuthSecretName = v
+			}
+			if v, ok := spec["jiraConnectionSecretName"].(string); ok {
+				jiraConnectionSecretName = v
 			}
 		}
 	}
-	if secretName == "" {
-		c.JSON(http.StatusOK, gin.H{"data": map[string]string{}})
-		return
-	}
 
-	sec, err := reqK8s.CoreV1().Secrets(projectName).Get(c.Request.Context(), secretName, v1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			c.JSON(http.StatusOK, gin.H{"data": map[string]string{}})
+	// Merge secrets from all three sources
+	out := map[string]string{}
+
+	// Helper to fetch and merge a secret
+	fetchSecret := func(secretName string) {
+		if secretName == "" {
 			return
 		}
-		log.Printf("Failed to get Secret %s/%s: %v", projectName, secretName, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read runner secrets"})
-		return
+		sec, err := reqK8s.CoreV1().Secrets(projectName).Get(c.Request.Context(), secretName, v1.GetOptions{})
+		if err != nil {
+			if !errors.IsNotFound(err) {
+				log.Printf("Failed to get Secret %s/%s: %v", projectName, secretName, err)
+			}
+			return
+		}
+		for k, v := range sec.Data {
+			out[k] = string(v)
+		}
 	}
 
-	out := map[string]string{}
-	for k, v := range sec.Data {
-		out[k] = string(v)
-	}
+	fetchSecret(runnerSecretName)
+	fetchSecret(githubAuthSecretName)
+	fetchSecret(jiraConnectionSecretName)
+
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 // UpdateRunnerSecrets handles PUT /api/projects/:projectName/runner-secrets { data: { key: value } }
+// Splits data into appropriate secrets: runner-secret, github-auth, jira-connection
 func UpdateRunnerSecrets(c *gin.Context) {
 	projectName := c.Param("projectName")
 	reqK8s, reqDyn := GetK8sClientsForRequest(c)
@@ -180,7 +226,7 @@ func UpdateRunnerSecrets(c *gin.Context) {
 		return
 	}
 
-	// Read config for secret name
+	// Read config for secret names
 	gvr := GetProjectSettingsResource()
 	obj, err := reqDyn.Resource(gvr).Namespace(projectName).Get(c.Request.Context(), "projectsettings", v1.GetOptions{})
 	if err != nil && !errors.IsNotFound(err) {
@@ -188,57 +234,95 @@ func UpdateRunnerSecrets(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read runner secrets config"})
 		return
 	}
-	secretName := ""
+
+	runnerSecretName := "ambient-runner-secrets"
+	githubAuthSecretName := "github-auth"
+	jiraConnectionSecretName := "jira-connection"
 	if obj != nil {
 		if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
-			if v, ok := spec["runnerSecretsName"].(string); ok {
-				secretName = strings.TrimSpace(v)
+			if v, ok := spec["runnerSecretsName"].(string); ok && strings.TrimSpace(v) != "" {
+				runnerSecretName = strings.TrimSpace(v)
+			}
+			if v, ok := spec["githubAuthSecretName"].(string); ok && strings.TrimSpace(v) != "" {
+				githubAuthSecretName = strings.TrimSpace(v)
+			}
+			if v, ok := spec["jiraConnectionSecretName"].(string); ok && strings.TrimSpace(v) != "" {
+				jiraConnectionSecretName = strings.TrimSpace(v)
 			}
 		}
 	}
-	if secretName == "" {
-		secretName = "ambient-runner-secrets"
+
+	// Split data by key prefix
+	runnerData := make(map[string]string)
+	githubData := make(map[string]string)
+	jiraData := make(map[string]string)
+
+	for k, v := range req.Data {
+		switch {
+		case k == "ANTHROPIC_API_KEY":
+			runnerData[k] = v
+		case k == "GIT_TOKEN" || k == "GIT_USER_NAME" || k == "GIT_USER_EMAIL":
+			githubData[k] = v
+		case strings.HasPrefix(k, "JIRA_"):
+			jiraData[k] = v
+		default:
+			// Unknown keys go to runner-secret for backwards compat
+			runnerData[k] = v
+		}
 	}
 
-	// Do not create/update ProjectSettings here. The operator owns it.
+	// Helper function to create or update a secret
+	upsertSecret := func(secretName string, data map[string]string) error {
+		if len(data) == 0 {
+			return nil // Nothing to update
+		}
 
-	// Try to get existing Secret
-	sec, err := reqK8s.CoreV1().Secrets(projectName).Get(c.Request.Context(), secretName, v1.GetOptions{})
-	if errors.IsNotFound(err) {
-		// Create new Secret
-		newSec := &corev1.Secret{
-			ObjectMeta: v1.ObjectMeta{
-				Name:      secretName,
-				Namespace: projectName,
-				Labels:    map[string]string{"app": "ambient-runner-secrets"},
-				Annotations: map[string]string{
-					"ambient-code.io/runner-secret": "true",
+		sec, err := reqK8s.CoreV1().Secrets(projectName).Get(c.Request.Context(), secretName, v1.GetOptions{})
+		if errors.IsNotFound(err) {
+			// Create new Secret
+			newSec := &corev1.Secret{
+				ObjectMeta: v1.ObjectMeta{
+					Name:      secretName,
+					Namespace: projectName,
+					Labels:    map[string]string{"app": "ambient-runner-secrets"},
+					Annotations: map[string]string{
+						"ambient-code.io/runner-secret": "true",
+					},
 				},
-			},
-			Type:       corev1.SecretTypeOpaque,
-			StringData: req.Data,
+				Type:       corev1.SecretTypeOpaque,
+				StringData: data,
+			}
+			_, err := reqK8s.CoreV1().Secrets(projectName).Create(c.Request.Context(), newSec, v1.CreateOptions{})
+			return err
+		} else if err != nil {
+			return err
+		} else {
+			// Update existing - replace Data
+			sec.Type = corev1.SecretTypeOpaque
+			sec.Data = map[string][]byte{}
+			for k, v := range data {
+				sec.Data[k] = []byte(v)
+			}
+			_, err := reqK8s.CoreV1().Secrets(projectName).Update(c.Request.Context(), sec, v1.UpdateOptions{})
+			return err
 		}
-		if _, err := reqK8s.CoreV1().Secrets(projectName).Create(c.Request.Context(), newSec, v1.CreateOptions{}); err != nil {
-			log.Printf("Failed to create Secret %s/%s: %v", projectName, secretName, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create runner secrets"})
-			return
-		}
-	} else if err != nil {
-		log.Printf("Failed to get Secret %s/%s: %v", projectName, secretName, err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read runner secrets"})
+	}
+
+	// Update all three secrets
+	if err := upsertSecret(runnerSecretName, runnerData); err != nil {
+		log.Printf("Failed to upsert runner secret %s/%s: %v", projectName, runnerSecretName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update runner secrets"})
 		return
-	} else {
-		// Update existing - replace Data
-		sec.Type = corev1.SecretTypeOpaque
-		sec.Data = map[string][]byte{}
-		for k, v := range req.Data {
-			sec.Data[k] = []byte(v)
-		}
-		if _, err := reqK8s.CoreV1().Secrets(projectName).Update(c.Request.Context(), sec, v1.UpdateOptions{}); err != nil {
-			log.Printf("Failed to update Secret %s/%s: %v", projectName, secretName, err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update runner secrets"})
-			return
-		}
+	}
+	if err := upsertSecret(githubAuthSecretName, githubData); err != nil {
+		log.Printf("Failed to upsert github auth secret %s/%s: %v", projectName, githubAuthSecretName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update github auth secrets"})
+		return
+	}
+	if err := upsertSecret(jiraConnectionSecretName, jiraData); err != nil {
+		log.Printf("Failed to upsert jira connection secret %s/%s: %v", projectName, jiraConnectionSecretName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update jira connection secrets"})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "runner secrets updated"})
