@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 // Custom components
 import MessagesTab from "@/components/session/MessagesTab";
 import { EditRepositoriesDialog } from "../../rfe/[id]/edit-repositories-dialog";
+import { FileTree, type FileTreeNode } from "@/components/file-tree";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -50,10 +51,12 @@ import {
   useWorkflowArtifacts,
   rfeKeys,
 } from "@/services/queries";
+import { useWorkspaceList } from "@/services/queries/use-workspace";
 import { useSecretsValues } from "@/services/queries/use-secrets";
 import { successToast, errorToast } from "@/hooks/use-toast";
-import { useOOTBWorkflows } from "@/services/queries/use-workflows";
+import { useOOTBWorkflows, useWorkflowMetadata } from "@/services/queries/use-workflows";
 import { useQueryClient } from "@tanstack/react-query";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export default function ProjectSessionDetailPage({
   params,
@@ -87,6 +90,7 @@ export default function ProjectSessionDetailPage({
   const [pendingWorkflow, setPendingWorkflow] = useState<{ id: string; name: string; description: string; gitUrl: string; branch: string; path?: string; enabled: boolean } | null>(null);
   const [activeWorkflow, setActiveWorkflow] = useState<string | null>(null);
   const [workflowActivating, setWorkflowActivating] = useState(false);
+  const [autoSelectAgents, setAutoSelectAgents] = useState(false);
   
   // Artifacts git management state
   const [artifactsRemote, setArtifactsRemote] = useState<{url: string; branch: string} | null>(null);
@@ -163,6 +167,21 @@ export default function ProjectSessionDetailPage({
   
   // Fetch OOTB workflows from backend
   const { data: ootbWorkflows = [] } = useOOTBWorkflows();
+  
+  // Fetch workflow metadata (commands and agents) when workflow is active
+  const { data: workflowMetadata } = useWorkflowMetadata(
+    projectName,
+    sessionName,
+    !!activeWorkflow && !workflowActivating
+  );
+  
+  // Fetch artifacts directory listing
+  const { data: artifactsFiles = [], refetch: refetchArtifactsFiles } = useWorkspaceList(
+    projectName,
+    sessionName,
+    "artifacts",
+    { enabled: openAccordionItems.includes("artifacts") }
+  );
   
   // Load active workflow from session spec if present
   useEffect(() => {
@@ -708,15 +727,46 @@ export default function ProjectSessionDetailPage({
   };
 
   const sendChat = () => {
-    if (!chatInput.trim()) return;
+    if (!chatInput.trim() && !selectedAgents.length && !autoSelectAgents) return;
+
+    // Build message with agent prepend if needed
+    let finalMessage = chatInput.trim();
+
+    if (autoSelectAgents) {
+      finalMessage = "You MUST use relevant sub-agents when needed based on the task at hand. " + finalMessage;
+    } else if (selectedAgents.length > 0) {
+      const agentNames = selectedAgents
+        .map(id => workflowMetadata?.agents?.find(a => a.id === id))
+        .filter(Boolean)
+        .map(agent => agent!.name)
+        .join(', ');
+
+      finalMessage = `You MUST collaborate with these agents: ${agentNames}. ` + finalMessage;
+    }
 
     sendChatMutation.mutate(
-      { projectName, sessionName, content: chatInput.trim() },
+      { projectName, sessionName, content: finalMessage },
       {
         onSuccess: () => {
           setChatInput("");
+          // Clear agent selection after sending
+          setSelectedAgents([]);
+          setAutoSelectAgents(false);
         },
         onError: (err) => errorToast(err instanceof Error ? err.message : "Failed to send message"),
+      }
+    );
+  };
+
+  const handleCommandClick = (slashCommand: string) => {
+    // Auto-send the command
+    sendChatMutation.mutate(
+      { projectName, sessionName, content: slashCommand },
+      {
+        onSuccess: () => {
+          successToast(`Command ${slashCommand} sent`);
+        },
+        onError: (err) => errorToast(err instanceof Error ? err.message : "Failed to send command"),
       }
     );
   };
@@ -1052,18 +1102,124 @@ export default function ProjectSessionDetailPage({
                     
                     {/* Show active workflow info */}
                     {activeWorkflow && !workflowActivating && (
-                      <Alert className="bg-green-50 border-green-200">
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                        <AlertTitle className="text-green-900">Workflow Active</AlertTitle>
-                        <AlertDescription className="text-green-800">
-                          <p className="font-medium">
-                            {ootbWorkflows.find(w => w.id === activeWorkflow)?.name || "Custom Workflow"}
+                      <>
+                        <Alert className="bg-green-50 border-green-200">
+                          <CheckCircle2 className="h-4 w-4 text-green-600" />
+                          <AlertTitle className="text-green-900">Workflow Active</AlertTitle>
+                          <AlertDescription className="text-green-800">
+                            <p className="font-medium">
+                              {ootbWorkflows.find(w => w.id === activeWorkflow)?.name || "Custom Workflow"}
+                            </p>
+                            <p className="text-sm mt-1">
+                              Claude is working with this workflow. Slash commands and templates are available.
+                            </p>
+                          </AlertDescription>
+                        </Alert>
+
+                        {/* Commands Section */}
+                        {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Slash Commands</div>
+                            <div className="grid grid-cols-2 gap-2">
+                              {workflowMetadata.commands.map((cmd) => (
+                                <Button
+                                  key={cmd.id}
+                                  variant="outline"
+                                  size="sm"
+                                  className="justify-between h-auto py-2 px-3"
+                                  onClick={() => handleCommandClick(cmd.slashCommand)}
+                                >
+                                  <div className="text-left flex-1">
+                                    <div className="font-medium text-xs">{cmd.name}</div>
+                                    <div className="text-xs text-muted-foreground truncate">
+                                      {cmd.description}
+                                    </div>
+                                  </div>
+                                  <Badge variant="secondary" className="ml-2 text-xs">
+                                    {cmd.slashCommand}
+                                  </Badge>
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {workflowMetadata?.commands?.length === 0 && (
+                          <p className="text-xs text-muted-foreground text-center py-2">
+                            No commands found in this workflow
                           </p>
-                          <p className="text-sm mt-1">
-                            Claude is working with this workflow. Slash commands and templates are available.
+                        )}
+
+                        {/* Agents Section */}
+                        {workflowMetadata?.agents && workflowMetadata.agents.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium">Agents</div>
+
+                            <div className="flex items-center space-x-2 pb-2 border-b">
+                              <Checkbox
+                                id="auto-select-agents"
+                                checked={autoSelectAgents}
+                                onCheckedChange={(checked) => {
+                                  setAutoSelectAgents(!!checked);
+                                  if (checked) setSelectedAgents([]);
+                                }}
+                              />
+                              <Label htmlFor="auto-select-agents" className="text-sm font-normal cursor-pointer">
+                                Let Claude auto-select agents
+                              </Label>
+                            </div>
+
+                            <div className="space-y-1 max-h-48 overflow-y-auto">
+                              {workflowMetadata.agents.map((agent) => (
+                                <TooltipProvider key={agent.id}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="flex items-center space-x-2">
+                                        <Checkbox
+                                          id={`agent-${agent.id}`}
+                                          checked={selectedAgents.includes(agent.id)}
+                                          disabled={autoSelectAgents}
+                                          onCheckedChange={(checked) => {
+                                            if (checked) {
+                                              setSelectedAgents([...selectedAgents, agent.id]);
+                                            } else {
+                                              setSelectedAgents(selectedAgents.filter(id => id !== agent.id));
+                                            }
+                                          }}
+                                        />
+                                        <Label
+                                          htmlFor={`agent-${agent.id}`}
+                                          className="text-sm font-normal cursor-pointer flex-1"
+                                        >
+                                          {agent.name}
+                                        </Label>
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p className="max-w-xs">{agent.description}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ))}
+                            </div>
+
+                            {(selectedAgents.length > 0 || autoSelectAgents) && (
+                              <Alert className="bg-blue-50 border-blue-200">
+                                <Info className="h-3 w-3 text-blue-600" />
+                                <AlertDescription className="text-xs text-blue-800">
+                                  Next message will include agent instructions
+                                </AlertDescription>
+                              </Alert>
+                            )}
+                          </div>
+                        )}
+
+                        {workflowMetadata?.agents?.length === 0 && (
+                          <p className="text-xs text-muted-foreground text-center py-2">
+                            No agents found in this workflow
                           </p>
-                        </AlertDescription>
-                      </Alert>
+                        )}
+                      </>
                     )}
                     
                     {/* Show selector only if no active workflow and not activating */}
@@ -1166,19 +1322,37 @@ export default function ProjectSessionDetailPage({
                   <div className="space-y-3">
                     
                     {/* File Browser for Artifacts */}
-                    <div className="border rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium">Files & Directories</span>
-                        <Button variant="ghost" size="sm" onClick={() => window.location.reload()}>
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="p-2 border-b flex items-center justify-between bg-muted/30">
+                        <div className="text-xs text-muted-foreground">
+                          <Folder className="inline h-3 w-3 mr-1" />
+                          <code className="bg-muted px-1 py-0.5 rounded">artifacts/</code>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => refetchArtifactsFiles()} className="h-6 px-2">
                           <RefreshCw className="h-3 w-3" />
                         </Button>
                       </div>
-                      <div className="text-xs text-muted-foreground mb-2">
-                        Path: <code className="bg-muted px-1 py-0.5 rounded">artifacts/</code>
+                      <div className="p-2 max-h-64 overflow-y-auto">
+                        {artifactsFiles.length === 0 ? (
+                          <div className="text-center py-4 text-sm text-muted-foreground">
+                            <FolderTree className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                            <p>No files yet</p>
+                            <p className="text-xs mt-1">Workflow outputs will appear here</p>
+                          </div>
+                        ) : (
+                          <FileTree 
+                            nodes={artifactsFiles.map((item): FileTreeNode => ({
+                              name: item.name,
+                              path: item.path,
+                              type: item.isDir ? 'folder' : 'file',
+                              sizeKb: item.size ? item.size / 1024 : undefined,
+                            }))}
+                            selectedPath={undefined}
+                            onSelect={() => {}}
+                            onToggle={() => {}}
+                          />
+                        )}
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        All workflow outputs are stored here. Configure a Git remote below to save and sync your work.
-                      </p>
                     </div>
                     
                     {/* Remote Configuration Status */}
@@ -1695,6 +1869,12 @@ export default function ProjectSessionDetailPage({
                   onEndSession={() => Promise.resolve(handleEndSession())}
                   onGoToResults={() => {}}
                   onContinue={handleContinue}
+                  selectedAgents={selectedAgents}
+                  autoSelectAgents={autoSelectAgents}
+                  agentNames={selectedAgents
+                    .map(id => workflowMetadata?.agents?.find(a => a.id === id))
+                    .filter(Boolean)
+                    .map(agent => agent!.name)}
                 />
               </CardContent>
             </Card>

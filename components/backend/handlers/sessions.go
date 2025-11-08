@@ -1159,6 +1159,18 @@ func SelectWorkflow(c *gin.Context) {
 	})
 }
 
+// GetWorkflowMetadata retrieves commands and agents metadata from the active workflow
+// GET /api/projects/:projectName/agentic-sessions/:sessionName/workflow/metadata
+func GetWorkflowMetadata(c *gin.Context) {
+	sessionName := c.Param("sessionName")
+	
+	// Use the internal ContentWorkflowMetadata function
+	// Pass session name as query parameter
+	c.Request.URL.RawQuery = "session=" + sessionName
+	
+	ContentWorkflowMetadata(c)
+}
+
 // GET /api/workflows/ootb
 // ListOOTBWorkflows returns the list of out-of-the-box workflows
 func ListOOTBWorkflows(c *gin.Context) {

@@ -428,3 +428,144 @@ func ContentList(c *gin.Context) {
 	log.Printf("ContentList: returning %d items for path=%q", len(items), path)
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
+
+// ContentWorkflowMetadata handles GET /content/workflow-metadata?session=
+// Parses .claude/commands/*.md and .claude/agents/*.md files from active workflow
+func ContentWorkflowMetadata(c *gin.Context) {
+	sessionName := c.Query("session")
+	if sessionName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing session parameter"})
+		return
+	}
+
+	log.Printf("ContentWorkflowMetadata: session=%q", sessionName)
+
+	// Find active workflow directory
+	workflowDir := findActiveWorkflowDir(sessionName)
+	if workflowDir == "" {
+		log.Printf("ContentWorkflowMetadata: no active workflow found for session=%q", sessionName)
+		c.JSON(http.StatusOK, gin.H{"commands": []interface{}{}, "agents": []interface{}{}})
+		return
+	}
+
+	log.Printf("ContentWorkflowMetadata: found workflow at %q", workflowDir)
+
+	// Parse commands from .claude/commands/*.md
+	commandsDir := filepath.Join(workflowDir, ".claude", "commands")
+	commands := []map[string]interface{}{}
+
+	if files, err := os.ReadDir(commandsDir); err == nil {
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ".md") {
+				filePath := filepath.Join(commandsDir, file.Name())
+				metadata := parseFrontmatter(filePath)
+				commandName := strings.TrimSuffix(file.Name(), ".md")
+
+				displayName := metadata["displayName"]
+				if displayName == "" {
+					displayName = commandName
+				}
+
+				commands = append(commands, map[string]interface{}{
+					"id":           commandName,
+					"name":         displayName,
+					"description":  metadata["description"],
+					"slashCommand": "/" + commandName,
+				})
+			}
+		}
+		log.Printf("ContentWorkflowMetadata: found %d commands", len(commands))
+	} else {
+		log.Printf("ContentWorkflowMetadata: commands directory not found or unreadable: %v", err)
+	}
+
+	// Parse agents from .claude/agents/*.md
+	agentsDir := filepath.Join(workflowDir, ".claude", "agents")
+	agents := []map[string]interface{}{}
+
+	if files, err := os.ReadDir(agentsDir); err == nil {
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ".md") {
+				filePath := filepath.Join(agentsDir, file.Name())
+				metadata := parseFrontmatter(filePath)
+				agentID := strings.TrimSuffix(file.Name(), ".md")
+
+				agents = append(agents, map[string]interface{}{
+					"id":          agentID,
+					"name":        metadata["name"],
+					"description": metadata["description"],
+					"tools":       metadata["tools"],
+				})
+			}
+		}
+		log.Printf("ContentWorkflowMetadata: found %d agents", len(agents))
+	} else {
+		log.Printf("ContentWorkflowMetadata: agents directory not found or unreadable: %v", err)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"commands": commands,
+		"agents":   agents,
+	})
+}
+
+// parseFrontmatter extracts YAML frontmatter from a markdown file
+func parseFrontmatter(filePath string) map[string]string {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		log.Printf("parseFrontmatter: failed to read %q: %v", filePath, err)
+		return map[string]string{}
+	}
+
+	str := string(content)
+	if !strings.HasPrefix(str, "---\n") {
+		return map[string]string{}
+	}
+
+	// Find end of frontmatter
+	endIdx := strings.Index(str[4:], "\n---")
+	if endIdx == -1 {
+		return map[string]string{}
+	}
+
+	frontmatter := str[4 : 4+endIdx]
+	result := map[string]string{}
+
+	// Simple key: value parsing
+	for _, line := range strings.Split(frontmatter, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		parts := strings.SplitN(line, ":", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+			result[key] = value
+		}
+	}
+
+	return result
+}
+
+// findActiveWorkflowDir finds the active workflow directory for a session
+func findActiveWorkflowDir(sessionName string) string {
+	workflowsBase := filepath.Join(StateBaseDir, "sessions", sessionName, "workspace", "workflows")
+
+	entries, err := os.ReadDir(workflowsBase)
+	if err != nil {
+		log.Printf("findActiveWorkflowDir: failed to read workflows directory %q: %v", workflowsBase, err)
+		return ""
+	}
+
+	// Find first directory that has .claude subdirectory
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != "default" {
+			claudeDir := filepath.Join(workflowsBase, entry.Name(), ".claude")
+			if stat, err := os.Stat(claudeDir); err == nil && stat.IsDir() {
+				return filepath.Join(workflowsBase, entry.Name())
+			}
+		}
+	}
+
+	return ""
+}

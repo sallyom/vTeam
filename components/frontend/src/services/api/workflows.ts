@@ -19,3 +19,32 @@ export async function listOOTBWorkflows(): Promise<OOTBWorkflow[]> {
   return response.workflows;
 }
 
+export type WorkflowCommand = {
+  id: string;
+  name: string;
+  description: string;
+  slashCommand: string;
+};
+
+export type WorkflowAgent = {
+  id: string;
+  name: string;
+  description: string;
+  tools?: string[];
+};
+
+export type WorkflowMetadataResponse = {
+  commands: WorkflowCommand[];
+  agents: WorkflowAgent[];
+};
+
+export async function getWorkflowMetadata(
+  projectName: string,
+  sessionName: string
+): Promise<WorkflowMetadataResponse> {
+  const response = await apiClient.get<WorkflowMetadataResponse>(
+    `/projects/${projectName}/agentic-sessions/${sessionName}/workflow/metadata`
+  );
+  return response;
+}
+

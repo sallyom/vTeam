@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Brain, Loader2, Settings } from "lucide-react";
 import { StreamMessage } from "@/components/ui/stream-message";
 import {
@@ -22,10 +23,13 @@ export type MessagesTabProps = {
   onEndSession: () => Promise<void>;
   onGoToResults?: () => void;
   onContinue: () => void;
+  selectedAgents?: string[];
+  autoSelectAgents?: boolean;
+  agentNames?: string[];
 };
 
 
-const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chatInput, setChatInput, onSendChat, onInterrupt, onEndSession, onGoToResults, onContinue}) => {
+const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chatInput, setChatInput, onSendChat, onInterrupt, onEndSession, onGoToResults, onContinue, selectedAgents = [], autoSelectAgents = false, agentNames = [] }) => {
   const [sendingChat, setSendingChat] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
   const [ending, setEnding] = useState(false);
@@ -135,6 +139,26 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chat
         <div className="sticky bottom-0 border-t bg-white">
           <div className="p-3">
             <div className="border rounded-md p-3 space-y-2 bg-white">
+              {/* Agent prepend chips - show when agents selected */}
+              {(selectedAgents.length > 0 || autoSelectAgents) && (
+                <div className="bg-muted/30 border border-muted rounded-md p-2 mb-2">
+                  <div className="text-xs text-muted-foreground mb-1">Next message will include:</div>
+                  <div className="flex flex-wrap gap-1">
+                    {autoSelectAgents ? (
+                      <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                        Auto-select relevant agents
+                      </Badge>
+                    ) : (
+                      agentNames.map((name, idx) => (
+                        <Badge key={idx} variant="outline" className="bg-green-50 text-green-700">
+                          {name.split(' - ')[0]} {/* Just first part of name */}
+                        </Badge>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
               <textarea
                 className="w-full border rounded p-2 text-sm"
                 placeholder="Type a message to the agent... (Press Enter to send, Shift+Enter for new line)"
