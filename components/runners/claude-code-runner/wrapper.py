@@ -30,6 +30,7 @@ class ClaudeCodeAdapter:
         self.shell = None
         self.claude_process = None
         self._incoming_queue: "asyncio.Queue[dict]" = asyncio.Queue()
+        self._restart_requested = False
 
     async def initialize(self, context: RunnerContext):
         """Initialize the adapter with context."""
@@ -77,8 +78,21 @@ class ClaudeCodeAdapter:
             except Exception:
                 pass
 
-            # Execute Claude Code CLI (interactive or one-shot based on env)
-            result = await self._run_claude_agent_sdk(prompt)
+            # Execute Claude Code CLI with restart support for workflow switching
+            result = None
+            while True:
+                result = await self._run_claude_agent_sdk(prompt)
+                
+                # Check if restart was requested (workflow changed)
+                if self._restart_requested:
+                    self._restart_requested = False
+                    await self._send_log("🔄 Restarting Claude with new workflow...")
+                    logging.info("Restarting Claude SDK due to workflow change")
+                    # Loop will call _run_claude_agent_sdk again with updated env vars
+                    continue
+                
+                # Normal exit - no restart requested
+                break
 
             # Send completion
             await self._send_log("Claude Code session completed")
@@ -263,8 +277,8 @@ class ClaudeCodeAdapter:
                     if p != cwd_path:
                         add_dirs.append(p)
             else:
-                # No workflow and no repos: use workflows/default
-                cwd_path = str(Path(self.context.workspace_path) / "workflows" / "default")
+                # No workflow and no repos: start in artifacts directory for ad-hoc work
+                cwd_path = str(Path(self.context.workspace_path) / "artifacts")
 
             # Always add artifacts directory for workflow outputs
             artifacts_path = str(Path(self.context.workspace_path) / "artifacts")
@@ -720,15 +734,13 @@ class ClaudeCodeAdapter:
             logging.error(f"Failed to prepare workspace: {e}")
             await self._send_log(f"Workspace preparation failed: {e}")
 
-        # Create workflow and artifacts directories
+        # Create artifacts directory (initial working directory)
         try:
-            workflows_dir = workspace / "workflows" / "default"
             artifacts_dir = workspace / "artifacts"
-            workflows_dir.mkdir(parents=True, exist_ok=True)
             artifacts_dir.mkdir(parents=True, exist_ok=True)
-            logging.info("Created workflows/default and artifacts directories")
+            logging.info("Created artifacts directory")
         except Exception as e:
-            logging.warning(f"Failed to create workflow directories: {e}")
+            logging.warning(f"Failed to create artifacts directory: {e}")
 
     async def _validate_prerequisites(self):
         """Validate prerequisite files exist for phase-based slash commands."""
@@ -784,6 +796,7 @@ class ClaudeCodeAdapter:
     async def _handle_workflow_selection(self, git_url: str, branch: str = "main", path: str = ""):
         """Clone and setup a workflow repository."""
         try:
+            import shutil
             workspace = Path(self.context.workspace_path)
             token = os.getenv("GITHUB_TOKEN") or await self._fetch_github_token()
             
@@ -807,34 +820,73 @@ class ClaudeCodeAdapter:
                 return
             
             workflow_dir = workspace / "workflows" / derived_name
+            temp_clone_dir = workspace / "workflows" / f"{derived_name}-clone-temp"
             
             # Check if workflow already exists
-            if workflow_dir.exists() and (workflow_dir / ".git").exists():
-                await self._send_log(f"✓ Workflow {derived_name} already exists, updating...")
-                # Pull latest changes
-                clone_url = self._url_with_token(git_url, token) if token else git_url
-                await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workflow_dir), ignore_errors=True)
-                await self._run_cmd(["git", "fetch", "origin", branch], cwd=str(workflow_dir))
-                await self._run_cmd(["git", "checkout", branch], cwd=str(workflow_dir))
-                await self._run_cmd(["git", "pull", "origin", branch], cwd=str(workflow_dir))
+            if workflow_dir.exists():
+                await self._send_log(f"✓ Workflow {derived_name} already loaded")
+                logging.info(f"Workflow {derived_name} already exists at {workflow_dir}")
             else:
-                # Clone fresh copy
+                # Clone to temporary directory first
                 await self._send_log(f"📥 Cloning workflow {derived_name}...")
                 logging.info(f"Cloning workflow from {git_url} (branch: {branch})")
                 clone_url = self._url_with_token(git_url, token) if token else git_url
-                await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(workflow_dir)], cwd=str(workspace))
-                logging.info(f"Successfully cloned workflow {derived_name}")
-            
-            # If path is specified, we only want that subdirectory
-            if path and path.strip():
-                subdir = workflow_dir / path.strip()
-                if subdir.exists() and subdir.is_dir():
-                    await self._send_log(f"✓ Workflow path: {path}")
+                await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(temp_clone_dir)], cwd=str(workspace))
+                logging.info(f"Successfully cloned workflow to temp directory")
+                
+                # Extract subdirectory if path is specified
+                if path and path.strip():
+                    subdir_path = temp_clone_dir / path.strip()
+                    if subdir_path.exists() and subdir_path.is_dir():
+                        # Copy only the subdirectory contents
+                        shutil.copytree(subdir_path, workflow_dir)
+                        shutil.rmtree(temp_clone_dir)
+                        await self._send_log(f"✓ Extracted workflow from: {path}")
+                        logging.info(f"Extracted subdirectory {path} to {workflow_dir}")
+                    else:
+                        # Path not found, use full repo
+                        temp_clone_dir.rename(workflow_dir)
+                        await self._send_log(f"⚠️ Path '{path}' not found, using full repository")
+                        logging.warning(f"Subdirectory {path} not found, using full repo")
                 else:
-                    await self._send_log(f"⚠️ Warning: Workflow path '{path}' not found in repository")
+                    # No path specified, use entire repo
+                    temp_clone_dir.rename(workflow_dir)
+                    logging.info(f"Using entire repository as workflow")
+            
+            # Create _artifacts symlink pointing to shared artifacts directory
+            artifacts_symlink = workflow_dir / "_artifacts"
+            artifacts_target = workspace / "artifacts"
+            
+            if not artifacts_symlink.exists():
+                # Create relative symlink
+                artifacts_symlink.symlink_to("../../artifacts", target_is_directory=True)
+                logging.info(f"Created symlink: {artifacts_symlink} → ../../artifacts")
+                
+                # Add _artifacts to .gitignore to prevent it from being committed
+                gitignore_path = workflow_dir / ".gitignore"
+                gitignore_content = ""
+                if gitignore_path.exists():
+                    gitignore_content = gitignore_path.read_text()
+                
+                if "_artifacts" not in gitignore_content:
+                    with open(gitignore_path, 'a') as f:
+                        if gitignore_content and not gitignore_content.endswith('\n'):
+                            f.write('\n')
+                        f.write('# Symlink to session artifacts directory\n')
+                        f.write('_artifacts\n')
+                    logging.info("Added _artifacts to .gitignore")
             
             await self._send_log(f"✅ Workflow {derived_name} ready")
             logging.info(f"Workflow {derived_name} setup complete at {workflow_dir}")
+            
+            # Set environment variables for the restart
+            os.environ['ACTIVE_WORKFLOW_GIT_URL'] = git_url
+            os.environ['ACTIVE_WORKFLOW_BRANCH'] = branch
+            if path and path.strip():
+                os.environ['ACTIVE_WORKFLOW_PATH'] = path
+            
+            # Request restart to switch Claude's working directory
+            self._restart_requested = True
             
         except Exception as e:
             logging.error(f"Failed to setup workflow: {e}")

@@ -85,7 +85,9 @@ export default function ProjectSessionDetailPage({
   const [customWorkflowUrl, setCustomWorkflowUrl] = useState("");
   const [customWorkflowBranch, setCustomWorkflowBranch] = useState("main");
   const [customWorkflowPath, setCustomWorkflowPath] = useState("");
-  const [workflowLoading, setWorkflowLoading] = useState(false);
+  const [pendingWorkflow, setPendingWorkflow] = useState<{ id: string; name: string; description: string; gitUrl: string; branch: string; path?: string; enabled: boolean } | null>(null);
+  const [activeWorkflow, setActiveWorkflow] = useState<string | null>(null);
+  const [workflowActivating, setWorkflowActivating] = useState(false);
 
   // Extract params
   useEffect(() => {
@@ -146,6 +148,20 @@ export default function ProjectSessionDetailPage({
   
   // Fetch OOTB workflows from backend
   const { data: ootbWorkflows = [] } = useOOTBWorkflows();
+  
+  // Load active workflow from session spec if present
+  useEffect(() => {
+    if (session?.spec?.activeWorkflow) {
+      // Derive workflow ID from gitUrl if possible
+      const gitUrl = session.spec.activeWorkflow.gitUrl;
+      const matchingWorkflow = ootbWorkflows.find(w => w.gitUrl === gitUrl);
+      if (matchingWorkflow) {
+        setActiveWorkflow(matchingWorkflow.id);
+      } else {
+        setActiveWorkflow("custom");
+      }
+    }
+  }, [session, ootbWorkflows]);
 
   // Workspace state - removed unused tree/file management code
 
@@ -159,18 +175,17 @@ export default function ProjectSessionDetailPage({
     await refetchArtifacts();
   }, [queryClient, projectName, rfeWorkflowId, refetchArtifacts]);
 
-  // Handler for workflow selection
-  const handleWorkflowChange = async (value: string) => {
+  // Handler for workflow selection (just sets pending, doesn't activate)
+  const handleWorkflowChange = (value: string) => {
     setSelectedWorkflow(value);
     
-    if (value === "custom") {
-      // Open custom workflow dialog
-      setCustomWorkflowDialogOpen(true);
+    if (value === "none") {
+      setPendingWorkflow(null);
       return;
     }
     
-    if (value === "none") {
-      // No workflow selected, nothing to do
+    if (value === "custom") {
+      setCustomWorkflowDialogOpen(true);
       return;
     }
     
@@ -186,22 +201,25 @@ export default function ProjectSessionDetailPage({
       return;
     }
     
-    const workflowConfig = {
-      gitUrl: workflow.gitUrl,
-      branch: workflow.branch,
-      path: workflow.path || "",
-    };
+    // Set as pending (user must click Activate)
+    setPendingWorkflow(workflow);
+  };
+  
+  // Handler to activate the pending workflow
+  const handleActivateWorkflow = async () => {
+    if (!pendingWorkflow) return;
     
-    // Call API to set workflow
-    setWorkflowLoading(true);
+    setWorkflowActivating(true);
+    
     try {
+      // 1. Update CR with workflow configuration
       const response = await fetch(`/api/projects/${projectName}/agentic-sessions/${sessionName}/workflow`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          gitUrl: workflowConfig.gitUrl,
-          branch: workflowConfig.branch,
-          path: workflowConfig.path || "",
+          gitUrl: pendingWorkflow.gitUrl,
+          branch: pendingWorkflow.branch,
+          path: pendingWorkflow.path || "",
         }),
       });
       
@@ -210,89 +228,56 @@ export default function ProjectSessionDetailPage({
         throw new Error(errorData.error || "Failed to update workflow");
       }
       
-      successToast(`Workflow "${value}" activated`);
+      // 2. Send WebSocket message to trigger workflow clone and restart
+      await fetch(`/api/projects/${projectName}/agentic-sessions/${sessionName}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "workflow_change",
+          gitUrl: pendingWorkflow.gitUrl,
+          branch: pendingWorkflow.branch,
+          path: pendingWorkflow.path || "",
+        }),
+      });
       
-      // Send WebSocket message to notify runner immediately
-      try {
-        await fetch(`/api/projects/${projectName}/agentic-sessions/${sessionName}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: "workflow_change",
-            gitUrl: workflowConfig.gitUrl,
-            branch: workflowConfig.branch,
-            path: workflowConfig.path || "",
-          }),
-        });
-      } catch (err) {
-        console.warn("Failed to notify runner via WebSocket:", err);
-      }
+      successToast(`Activating workflow: ${pendingWorkflow.name}`);
+      setActiveWorkflow(pendingWorkflow.id);
+      setPendingWorkflow(null);
       
-      // Refresh session to see updated workflow
+      // Wait for restart to complete (give runner time to clone and restart)
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
       await refetchSession();
+      successToast("Workflow activated successfully");
+      
     } catch (error) {
-      console.error("Failed to update workflow:", error);
-      errorToast(error instanceof Error ? error.message : "Failed to update workflow");
+      console.error("Failed to activate workflow:", error);
+      errorToast(error instanceof Error ? error.message : "Failed to activate workflow");
     } finally {
-      setWorkflowLoading(false);
+      setWorkflowActivating(false);
     }
   };
 
   // Handler for custom workflow submission
-  const handleCustomWorkflowSubmit = async () => {
+  const handleCustomWorkflowSubmit = () => {
     if (!customWorkflowUrl.trim()) {
       errorToast("Git URL is required");
       return;
     }
     
-    setWorkflowLoading(true);
-    try {
-      const response = await fetch(`/api/projects/${projectName}/agentic-sessions/${sessionName}/workflow`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          gitUrl: customWorkflowUrl.trim(),
-          branch: customWorkflowBranch.trim() || "main",
-          path: customWorkflowPath.trim() || "",
-        }),
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to update workflow");
-      }
-      
-      successToast("Custom workflow activated");
-      
-      // Send WebSocket message to notify runner immediately
-      try {
-        await fetch(`/api/projects/${projectName}/agentic-sessions/${sessionName}/messages`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            type: "workflow_change",
-            gitUrl: customWorkflowUrl.trim(),
-            branch: customWorkflowBranch.trim() || "main",
-            path: customWorkflowPath.trim() || "",
-          }),
-        });
-      } catch (err) {
-        console.warn("Failed to notify runner via WebSocket:", err);
-      }
-      
-      setCustomWorkflowDialogOpen(false);
-      // Reset form
-      setCustomWorkflowUrl("");
-      setCustomWorkflowBranch("main");
-      setCustomWorkflowPath("");
-      // Refresh session
-      await refetchSession();
-    } catch (error) {
-      console.error("Failed to update workflow:", error);
-      errorToast(error instanceof Error ? error.message : "Failed to update workflow");
-    } finally {
-      setWorkflowLoading(false);
-    }
+    // Set as pending custom workflow
+    setPendingWorkflow({
+      id: "custom",
+      name: "Custom Workflow",
+      description: `Custom workflow from ${customWorkflowUrl.trim()}`,
+      gitUrl: customWorkflowUrl.trim(),
+      branch: customWorkflowBranch.trim() || "main",
+      path: customWorkflowPath.trim() || "",
+      enabled: true,
+    });
+    
+    setCustomWorkflowDialogOpen(false);
+    setSelectedWorkflow("custom");
   };
 
   // Helper to derive repo folder from URL
@@ -914,34 +899,113 @@ export default function ProjectSessionDetailPage({
             <Accordion type="multiple" value={openAccordionItems} onValueChange={setOpenAccordionItems} className="w-full space-y-3">
               <AccordionItem value="workflows" className="border rounded-lg px-3 bg-white">
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
-                  Workflows
+                  <div className="flex items-center gap-2">
+                    Workflows
+                    {activeWorkflow && (
+                      <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                        Active
+                      </Badge>
+                    )}
+                  </div>
                 </AccordionTrigger>
                 <AccordionContent className="pt-2 pb-3">
                   <div className="space-y-3">
-                    <div>
-                      <label className="text-sm font-medium mb-1.5 block">Select a Workflow</label>
-                      <Select value={selectedWorkflow} onValueChange={handleWorkflowChange}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="None selected" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None selected</SelectItem>
-                          {ootbWorkflows.map((workflow) => (
-                            <SelectItem 
-                              key={workflow.id} 
-                              value={workflow.id}
-                              disabled={!workflow.enabled}
-                            >
-                              {workflow.name}
-                            </SelectItem>
-                          ))}
-                          <SelectItem value="custom">Custom Workflow...</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      Workflows provide Ambient agents with structured steps to follow toward more complex goals.
-                    </p>
+                    
+                    {/* Show active workflow info */}
+                    {activeWorkflow && !workflowActivating && (
+                      <Alert className="bg-green-50 border-green-200">
+                        <CheckCircle2 className="h-4 w-4 text-green-600" />
+                        <AlertTitle className="text-green-900">Workflow Active</AlertTitle>
+                        <AlertDescription className="text-green-800">
+                          <p className="font-medium">
+                            {ootbWorkflows.find(w => w.id === activeWorkflow)?.name || "Custom Workflow"}
+                          </p>
+                          <p className="text-sm mt-1">
+                            Claude is working with this workflow. Slash commands and templates are available.
+                          </p>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    
+                    {/* Show selector only if no active workflow and not activating */}
+                    {!activeWorkflow && !workflowActivating && (
+                      <>
+                        <div>
+                          <label className="text-sm font-medium mb-1.5 block">Select a Workflow</label>
+                          <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="None selected" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None selected</SelectItem>
+                              {ootbWorkflows.map((workflow) => (
+                                <SelectItem 
+                                  key={workflow.id} 
+                                  value={workflow.id}
+                                  disabled={!workflow.enabled}
+                                >
+                                  {workflow.name}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="custom">Custom Workflow...</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        {!pendingWorkflow && (
+                          <p className="text-sm text-muted-foreground">
+                            Workflows provide Ambient agents with structured steps to follow toward more complex goals.
+                          </p>
+                        )}
+                        
+                        {/* Show workflow preview and activate button */}
+                        {pendingWorkflow && (
+                          <Alert className="bg-blue-50 border-blue-200">
+                            <AlertCircle className="h-4 w-4 text-blue-600" />
+                            <AlertTitle className="text-blue-900">Ready to Activate</AlertTitle>
+                            <AlertDescription className="text-blue-800">
+                              <div className="space-y-2 mt-2">
+                                <p className="font-medium">{pendingWorkflow.name}</p>
+                                <p className="text-sm">{pendingWorkflow.description}</p>
+                                <p className="text-xs text-blue-600 mt-2">
+                                  Claude will pause briefly to load the workflow. Your chat history will be preserved.
+                                </p>
+                                <Button 
+                                  onClick={handleActivateWorkflow}
+                                  className="w-full mt-3"
+                                  size="sm"
+                                >
+                                  <Play className="mr-2 h-4 w-4" />
+                                  Activate Workflow
+                                </Button>
+                              </div>
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                      </>
+                    )}
+                    
+                    {/* Show activating state */}
+                    {workflowActivating && (
+                      <Alert>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <AlertTitle>Activating Workflow...</AlertTitle>
+                        <AlertDescription>
+                          <div className="space-y-2">
+                            <p>Claude is restarting with the new workflow.</p>
+                            <ul className="text-sm space-y-1 mt-2 list-disc list-inside">
+                              <li>Cloning workflow repository</li>
+                              <li>Setting up workspace structure</li>
+                              <li>Restarting Claude Code</li>
+                            </ul>
+                            <p className="text-xs text-muted-foreground mt-2">
+                              This may take 10-30 seconds...
+                            </p>
+                          </div>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    
                   </div>
                 </AccordionContent>
               </AccordionItem>
@@ -1365,8 +1429,21 @@ export default function ProjectSessionDetailPage({
 
           {/* Right Column - Messages (Always Visible) */}
           <div>
-            <Card>
+            <Card className="relative">
               <CardContent className="p-3">
+                {/* Workflow activation overlay */}
+                {workflowActivating && (
+                  <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
+                    <Alert className="max-w-md mx-4">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <AlertTitle>Activating Workflow...</AlertTitle>
+                      <AlertDescription>
+                        <p>Claude is restarting with the new workflow. Please wait...</p>
+                      </AlertDescription>
+                    </Alert>
+                  </div>
+                )}
+                
                 <MessagesTab
                   session={session}
                   streamMessages={streamMessages}
@@ -1621,7 +1698,7 @@ export default function ProjectSessionDetailPage({
               placeholder="https://github.com/org/workflow-repo.git"
               value={customWorkflowUrl}
               onChange={(e) => setCustomWorkflowUrl(e.target.value)}
-              disabled={workflowLoading}
+              disabled={workflowActivating}
             />
           </div>
 
@@ -1632,7 +1709,7 @@ export default function ProjectSessionDetailPage({
               placeholder="main"
               value={customWorkflowBranch}
               onChange={(e) => setCustomWorkflowBranch(e.target.value)}
-              disabled={workflowLoading}
+              disabled={workflowActivating}
             />
           </div>
 
@@ -1643,7 +1720,7 @@ export default function ProjectSessionDetailPage({
               placeholder="workflows/my-workflow"
               value={customWorkflowPath}
               onChange={(e) => setCustomWorkflowPath(e.target.value)}
-              disabled={workflowLoading}
+              disabled={workflowActivating}
             />
             <p className="text-xs text-muted-foreground">
               Optional subdirectory within the repository containing the workflow
@@ -1655,15 +1732,15 @@ export default function ProjectSessionDetailPage({
           <Button
             variant="outline"
             onClick={() => setCustomWorkflowDialogOpen(false)}
-            disabled={workflowLoading}
+            disabled={workflowActivating}
           >
             Cancel
           </Button>
           <Button
             onClick={handleCustomWorkflowSubmit}
-            disabled={!customWorkflowUrl.trim() || workflowLoading}
+            disabled={!customWorkflowUrl.trim() || workflowActivating}
           >
-            {workflowLoading ? (
+            {workflowActivating ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Loading...

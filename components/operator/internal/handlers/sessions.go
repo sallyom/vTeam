@@ -462,6 +462,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									// Provide session id and workspace path for the runner wrapper
 									{Name: "SESSION_ID", Value: name},
 									{Name: "WORKSPACE_PATH", Value: fmt.Sprintf("/workspace/sessions/%s/workspace", name)},
+									{Name: "ARTIFACTS_DIR", Value: "_artifacts"},
 									// Provide git input/output parameters to the runner
 									{Name: "INPUT_REPO_URL", Value: inputRepo},
 									{Name: "INPUT_BRANCH", Value: inputBranch},
