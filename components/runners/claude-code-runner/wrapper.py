@@ -271,6 +271,19 @@ class ClaudeCodeAdapter:
             if artifacts_path not in add_dirs and artifacts_path != cwd_path:
                 add_dirs.append(artifacts_path)
 
+            # Ensure the working directory exists before passing to SDK
+            cwd_path_obj = Path(cwd_path)
+            if not cwd_path_obj.exists():
+                logging.warning(f"Working directory does not exist, creating: {cwd_path}")
+                try:
+                    cwd_path_obj.mkdir(parents=True, exist_ok=True)
+                    logging.info(f"Created working directory: {cwd_path}")
+                except Exception as e:
+                    logging.error(f"Failed to create working directory: {e}")
+                    # Fall back to workspace root
+                    cwd_path = self.context.workspace_path
+                    logging.info(f"Falling back to workspace root: {cwd_path}")
+
             # Log working directory and additional directories for debugging
             logging.info(f"Claude SDK CWD: {cwd_path}")
             logging.info(f"Claude SDK additional directories: {add_dirs}")
