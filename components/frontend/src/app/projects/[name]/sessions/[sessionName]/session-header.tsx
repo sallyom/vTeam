@@ -38,7 +38,6 @@ export function SessionHeader({
   messageCount,
 }: SessionHeaderProps) {
   const [detailsModalOpen, setDetailsModalOpen] = useState(false);
-  const [promptExpanded, setPromptExpanded] = useState(false);
   
   const phase = session.status?.phase || "Pending";
   const canStop = phase === "Running" || phase === "Creating";
@@ -148,8 +147,6 @@ export function SessionHeader({
         durationMs={durationMs}
         k8sResources={k8sResources}
         messageCount={messageCount}
-        promptExpanded={promptExpanded}
-        onPromptToggle={() => setPromptExpanded(!promptExpanded)}
       />
     </>
   );

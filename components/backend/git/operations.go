@@ -1116,7 +1116,8 @@ func createBranchInRepo(ctx context.Context, repo GitRepo, branchName, githubTok
 		return fmt.Errorf("failed to set remote URL: %w (output: %s)", err, string(out))
 	}
 
-	cmd = exec.CommandContext(ctx, "git", "-C", repoDir, "push", "-u", "origin", branchName)
+	// Push using HEAD:branchName refspec to ensure the newly created local branch is pushed
+	cmd = exec.CommandContext(ctx, "git", "-C", repoDir, "push", "-u", "origin", fmt.Sprintf("HEAD:%s", branchName))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// Check if it's a permission error
 		errMsg := string(out)
@@ -1134,20 +1135,20 @@ func createBranchInRepo(ctx context.Context, repo GitRepo, branchName, githubTok
 func InitRepo(ctx context.Context, repoDir string) error {
 	cmd := exec.CommandContext(ctx, "git", "init")
 	cmd.Dir = repoDir
-	
+
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to init git repo: %w (output: %s)", err, string(out))
 	}
-	
+
 	// Configure default user if not set
 	cmd = exec.CommandContext(ctx, "git", "config", "user.name", "Ambient Code Bot")
 	cmd.Dir = repoDir
-	_ = cmd.Run()  // Best effort
-	
+	_ = cmd.Run() // Best effort
+
 	cmd = exec.CommandContext(ctx, "git", "config", "user.email", "bot@ambient-code.local")
 	cmd.Dir = repoDir
-	_ = cmd.Run()  // Best effort
-	
+	_ = cmd.Run() // Best effort
+
 	return nil
 }
 
@@ -1156,17 +1157,223 @@ func ConfigureRemote(ctx context.Context, repoDir, remoteName, remoteUrl string)
 	// Try to remove existing remote first
 	cmd := exec.CommandContext(ctx, "git", "remote", "remove", remoteName)
 	cmd.Dir = repoDir
-	_ = cmd.Run()  // Ignore error if remote doesn't exist
-	
+	_ = cmd.Run() // Ignore error if remote doesn't exist
+
 	// Add the remote
 	cmd = exec.CommandContext(ctx, "git", "remote", "add", remoteName, remoteUrl)
 	cmd.Dir = repoDir
-	
+
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to add remote: %w (output: %s)", err, string(out))
 	}
-	
+
 	return nil
+}
+
+// MergeStatus contains information about merge conflict status
+type MergeStatus struct {
+	CanMergeClean      bool     `json:"canMergeClean"`
+	LocalChanges       int      `json:"localChanges"`
+	RemoteCommitsAhead int      `json:"remoteCommitsAhead"`
+	ConflictingFiles   []string `json:"conflictingFiles"`
+	RemoteBranchExists bool     `json:"remoteBranchExists"`
+}
+
+// CheckMergeStatus checks if local and remote can merge cleanly
+func CheckMergeStatus(ctx context.Context, repoDir, branch string) (*MergeStatus, error) {
+	if branch == "" {
+		branch = "main"
+	}
+
+	status := &MergeStatus{
+		ConflictingFiles: []string{},
+	}
+
+	run := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		cmd.Dir = repoDir
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		if err := cmd.Run(); err != nil {
+			return stdout.String(), err
+		}
+		return stdout.String(), nil
+	}
+
+	// Fetch remote branch
+	_, err := run("git", "fetch", "origin", branch)
+	if err != nil {
+		// Remote branch doesn't exist yet
+		status.RemoteBranchExists = false
+		status.CanMergeClean = true
+		return status, nil
+	}
+	status.RemoteBranchExists = true
+
+	// Count local uncommitted changes
+	statusOut, _ := run("git", "status", "--porcelain")
+	status.LocalChanges = len(strings.Split(strings.TrimSpace(statusOut), "\n"))
+	if strings.TrimSpace(statusOut) == "" {
+		status.LocalChanges = 0
+	}
+
+	// Count commits on remote but not local
+	countOut, _ := run("git", "rev-list", "--count", "HEAD..origin/"+branch)
+	fmt.Sscanf(strings.TrimSpace(countOut), "%d", &status.RemoteCommitsAhead)
+
+	// Test merge to detect conflicts (dry run)
+	mergeBase, err := run("git", "merge-base", "HEAD", "origin/"+branch)
+	if err != nil {
+		// No common ancestor - unrelated histories
+		// This is NOT a conflict - we can merge with --allow-unrelated-histories
+		// which is already used in PullRepo and SyncRepo
+		status.CanMergeClean = true
+		status.ConflictingFiles = []string{}
+		return status, nil
+	}
+
+	// Use git merge-tree to simulate merge without touching working directory
+	mergeTreeOut, err := run("git", "merge-tree", strings.TrimSpace(mergeBase), "HEAD", "origin/"+branch)
+	if err == nil && strings.TrimSpace(mergeTreeOut) != "" {
+		// Check for conflict markers in output
+		if strings.Contains(mergeTreeOut, "<<<<<<<") {
+			status.CanMergeClean = false
+			// Parse conflicting files from merge-tree output
+			for _, line := range strings.Split(mergeTreeOut, "\n") {
+				if strings.HasPrefix(line, "--- a/") || strings.HasPrefix(line, "+++ b/") {
+					file := strings.TrimPrefix(strings.TrimPrefix(line, "--- a/"), "+++ b/")
+					if file != "" && !contains(status.ConflictingFiles, file) {
+						status.ConflictingFiles = append(status.ConflictingFiles, file)
+					}
+				}
+			}
+		} else {
+			status.CanMergeClean = true
+		}
+	} else {
+		status.CanMergeClean = true
+	}
+
+	return status, nil
+}
+
+// PullRepo pulls changes from remote branch
+func PullRepo(ctx context.Context, repoDir, branch string) error {
+	if branch == "" {
+		branch = "main"
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "pull", "--allow-unrelated-histories", "origin", branch)
+	cmd.Dir = repoDir
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		outStr := string(out)
+		if strings.Contains(outStr, "CONFLICT") {
+			return fmt.Errorf("merge conflicts detected: %s", outStr)
+		}
+		return fmt.Errorf("failed to pull: %w (output: %s)", err, outStr)
+	}
+
+	log.Printf("Successfully pulled from origin/%s", branch)
+	return nil
+}
+
+// PushToRepo pushes local commits to specified branch
+func PushToRepo(ctx context.Context, repoDir, branch, commitMessage string) error {
+	if branch == "" {
+		branch = "main"
+	}
+
+	run := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		cmd.Dir = repoDir
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stdout
+		err := cmd.Run()
+		return stdout.String(), err
+	}
+
+	// Ensure we're on the correct branch (create if needed)
+	// This handles fresh git init repos that don't have a branch yet
+	if _, err := run("git", "checkout", "-B", branch); err != nil {
+		return fmt.Errorf("failed to checkout branch: %w", err)
+	}
+
+	// Stage all changes
+	if _, err := run("git", "add", "."); err != nil {
+		return fmt.Errorf("failed to stage changes: %w", err)
+	}
+
+	// Commit if there are changes
+	if out, err := run("git", "commit", "-m", commitMessage); err != nil {
+		if !strings.Contains(out, "nothing to commit") {
+			return fmt.Errorf("failed to commit: %w", err)
+		}
+	}
+
+	// Push to branch
+	if out, err := run("git", "push", "-u", "origin", branch); err != nil {
+		return fmt.Errorf("failed to push: %w (output: %s)", err, out)
+	}
+
+	log.Printf("Successfully pushed to origin/%s", branch)
+	return nil
+}
+
+// CreateBranch creates a new branch and pushes it to remote
+func CreateBranch(ctx context.Context, repoDir, branchName string) error {
+	run := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		cmd.Dir = repoDir
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stdout
+		err := cmd.Run()
+		return stdout.String(), err
+	}
+
+	// Create and checkout new branch
+	if _, err := run("git", "checkout", "-b", branchName); err != nil {
+		return fmt.Errorf("failed to create branch: %w", err)
+	}
+
+	// Push to remote using HEAD:branchName refspec
+	if out, err := run("git", "push", "-u", "origin", fmt.Sprintf("HEAD:%s", branchName)); err != nil {
+		return fmt.Errorf("failed to push new branch: %w (output: %s)", err, out)
+	}
+
+	log.Printf("Successfully created and pushed branch %s", branchName)
+	return nil
+}
+
+// ListRemoteBranches lists all branches in the remote repository
+func ListRemoteBranches(ctx context.Context, repoDir string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", "origin")
+	cmd.Dir = repoDir
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("failed to list remote branches: %w", err)
+	}
+
+	branches := []string{}
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		// Format: "commit-hash refs/heads/branch-name"
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			ref := parts[1]
+			branchName := strings.TrimPrefix(ref, "refs/heads/")
+			branches = append(branches, branchName)
+		}
+	}
+
+	return branches, nil
 }
 
 // SyncRepo commits, pulls, and pushes changes
@@ -1174,14 +1381,14 @@ func SyncRepo(ctx context.Context, repoDir, commitMessage, branch string) error 
 	if branch == "" {
 		branch = "main"
 	}
-	
+
 	// Stage all changes
 	cmd := exec.CommandContext(ctx, "git", "add", ".")
 	cmd.Dir = repoDir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to stage changes: %w (output: %s)", err, string(out))
 	}
-	
+
 	// Commit changes (only if there are changes)
 	cmd = exec.CommandContext(ctx, "git", "commit", "-m", commitMessage)
 	cmd.Dir = repoDir
@@ -1194,7 +1401,7 @@ func SyncRepo(ctx context.Context, repoDir, commitMessage, branch string) error 
 		// Nothing to commit is not an error
 		log.Printf("SyncRepo: nothing to commit in %s", repoDir)
 	}
-	
+
 	// Pull with rebase to sync with remote
 	cmd = exec.CommandContext(ctx, "git", "pull", "--rebase", "origin", branch)
 	cmd.Dir = repoDir
@@ -1206,7 +1413,7 @@ func SyncRepo(ctx context.Context, repoDir, commitMessage, branch string) error 
 		}
 		log.Printf("SyncRepo: pull skipped (no remote tracking): %s", outStr)
 	}
-	
+
 	// Push to remote
 	cmd = exec.CommandContext(ctx, "git", "push", "-u", "origin", branch)
 	cmd.Dir = repoDir
@@ -1217,7 +1424,17 @@ func SyncRepo(ctx context.Context, repoDir, commitMessage, branch string) error 
 		}
 		return fmt.Errorf("failed to push: %w (output: %s)", err, outStr)
 	}
-	
+
 	log.Printf("Successfully synchronized %s to %s", repoDir, branch)
 	return nil
+}
+
+// Helper function to check if string slice contains a value
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }

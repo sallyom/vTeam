@@ -14,8 +14,11 @@ export type ListOOTBWorkflowsResponse = {
   workflows: OOTBWorkflow[];
 };
 
-export async function listOOTBWorkflows(): Promise<OOTBWorkflow[]> {
-  const response = await apiClient.get<ListOOTBWorkflowsResponse>("/workflows/ootb");
+export async function listOOTBWorkflows(projectName?: string): Promise<OOTBWorkflow[]> {
+  const response = await apiClient.get<ListOOTBWorkflowsResponse>(
+    "/workflows/ootb",
+    projectName ? { params: { project: projectName } } : undefined
+  );
   return response.workflows;
 }
 
@@ -33,9 +36,17 @@ export type WorkflowAgent = {
   tools?: string[];
 };
 
+export type WorkflowConfig = {
+  name?: string;
+  description?: string;
+  systemPrompt?: string;
+  artifactsDir?: string;
+};
+
 export type WorkflowMetadataResponse = {
   commands: WorkflowCommand[];
   agents: WorkflowAgent[];
+  config?: WorkflowConfig;
 };
 
 export async function getWorkflowMetadata(

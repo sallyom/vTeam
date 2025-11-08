@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"ambient-code-backend/git"
 	"ambient-code-backend/types"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +37,7 @@ var (
 	DynamicClient                     dynamic.Interface
 	GetGitHubToken                    func(context.Context, *kubernetes.Clientset, dynamic.Interface, string, string) (string, error)
 	DeriveRepoFolderFromURL           func(string) string
+	SendMessageToSession              func(string, string, map[string]interface{})
 )
 
 // contentListItem represents a file/directory in the workspace
@@ -181,6 +183,21 @@ func parseSpec(spec map[string]interface{}) types.AgenticSessionSpec {
 	if idx, ok := spec["mainRepoIndex"].(float64); ok {
 		idxInt := int(idx)
 		result.MainRepoIndex = &idxInt
+	}
+
+	// Parse activeWorkflow
+	if workflow, ok := spec["activeWorkflow"].(map[string]interface{}); ok {
+		ws := &types.WorkflowSelection{}
+		if gitUrl, ok := workflow["gitUrl"].(string); ok {
+			ws.GitUrl = gitUrl
+		}
+		if branch, ok := workflow["branch"].(string); ok {
+			ws.Branch = branch
+		}
+		if path, ok := workflow["path"].(string); ok {
+			ws.Path = path
+		}
+		result.ActiveWorkflow = ws
 	}
 
 	return result
@@ -437,54 +454,6 @@ func CreateSession(c *gin.Context) {
 		}
 		if req.MainRepoIndex != nil {
 			spec["mainRepoIndex"] = *req.MainRepoIndex
-		}
-	}
-
-	// Handle RFE workflow branch management
-	{
-		rfeWorkflowID := ""
-		// Check if RFE workflow ID is in labels
-		if len(req.Labels) > 0 {
-			if id, ok := req.Labels["rfe-workflow"]; ok {
-				rfeWorkflowID = id
-			}
-		}
-
-		// If linked to an RFE workflow, fetch it and set the branch
-		if rfeWorkflowID != "" {
-			// Get request-scoped dynamic client for fetching RFE workflow
-			_, reqDyn := GetK8sClientsForRequest(c)
-			if reqDyn != nil {
-				rfeGvr := GetRFEWorkflowResource()
-				if rfeGvr != (schema.GroupVersionResource{}) {
-					rfeObj, err := reqDyn.Resource(rfeGvr).Namespace(project).Get(c.Request.Context(), rfeWorkflowID, v1.GetOptions{})
-					if err == nil {
-						rfeWf := RfeFromUnstructured(rfeObj)
-						if rfeWf != nil && rfeWf.BranchName != "" {
-							// Access spec from session object
-							spec := session["spec"].(map[string]interface{})
-
-							// Override branch for all repos to use feature branch
-							if repos, ok := spec["repos"].([]map[string]interface{}); ok {
-								for i := range repos {
-									// Always override input branch with feature branch
-									if input, ok := repos[i]["input"].(map[string]interface{}); ok {
-										input["branch"] = rfeWf.BranchName
-									}
-									// Always override output branch with feature branch
-									if output, ok := repos[i]["output"].(map[string]interface{}); ok {
-										output["branch"] = rfeWf.BranchName
-									}
-								}
-							}
-
-							log.Printf("Set RFE branch %s for session %s", rfeWf.BranchName, name)
-						}
-					} else {
-						log.Printf("Warning: Failed to fetch RFE workflow %s: %v", rfeWorkflowID, err)
-					}
-				}
-			}
 		}
 	}
 
@@ -1159,6 +1128,158 @@ func SelectWorkflow(c *gin.Context) {
 	})
 }
 
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/repos
+// AddRepo adds a new repository to a running session
+func AddRepo(c *gin.Context) {
+	project := c.GetString("project")
+	sessionName := c.Param("sessionName")
+	_, reqDyn := GetK8sClientsForRequest(c)
+
+	var req struct {
+		URL    string `json:"url" binding:"required"`
+		Branch string `json:"branch"`
+		Output *struct {
+			URL    string `json:"url"`
+			Branch string `json:"branch"`
+		} `json:"output,omitempty"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Branch == "" {
+		req.Branch = "main"
+	}
+
+	gvr := GetAgenticSessionV1Alpha1Resource()
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		log.Printf("Failed to get session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get session"})
+		return
+	}
+
+	// Update spec.repos
+	spec, ok := item.Object["spec"].(map[string]interface{})
+	if !ok {
+		spec = make(map[string]interface{})
+		item.Object["spec"] = spec
+	}
+	repos, _ := spec["repos"].([]interface{})
+	if repos == nil {
+		repos = []interface{}{}
+	}
+
+	newRepo := map[string]interface{}{
+		"input": map[string]interface{}{
+			"url":    req.URL,
+			"branch": req.Branch,
+		},
+	}
+	if req.Output != nil {
+		newRepo["output"] = map[string]interface{}{
+			"url":    req.Output.URL,
+			"branch": req.Output.Branch,
+		}
+	}
+	repos = append(repos, newRepo)
+	spec["repos"] = repos
+
+	// Persist change
+	_, err = reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), item, v1.UpdateOptions{})
+	if err != nil {
+		log.Printf("Failed to update session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update session"})
+		return
+	}
+
+	// Notify runner via WebSocket
+	repoName := DeriveRepoFolderFromURL(req.URL)
+	if SendMessageToSession != nil {
+		SendMessageToSession(sessionName, "repo_added", map[string]interface{}{
+			"name":   repoName,
+			"url":    req.URL,
+			"branch": req.Branch,
+		})
+	}
+
+	log.Printf("Added repository %s to session %s in project %s", repoName, sessionName, project)
+	c.JSON(http.StatusOK, gin.H{"message": "Repository added", "name": repoName})
+}
+
+// DELETE /api/projects/:projectName/agentic-sessions/:sessionName/repos/:repoName
+// RemoveRepo removes a repository from a running session
+func RemoveRepo(c *gin.Context) {
+	project := c.GetString("project")
+	sessionName := c.Param("sessionName")
+	repoName := c.Param("repoName")
+	_, reqDyn := GetK8sClientsForRequest(c)
+
+	gvr := GetAgenticSessionV1Alpha1Resource()
+	item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		log.Printf("Failed to get session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get session"})
+		return
+	}
+
+	// Update spec.repos
+	spec, ok := item.Object["spec"].(map[string]interface{})
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Session has no spec"})
+		return
+	}
+	repos, _ := spec["repos"].([]interface{})
+
+	filteredRepos := []interface{}{}
+	found := false
+	for _, r := range repos {
+		rm, _ := r.(map[string]interface{})
+		input, _ := rm["input"].(map[string]interface{})
+		url, _ := input["url"].(string)
+		if DeriveRepoFolderFromURL(url) != repoName {
+			filteredRepos = append(filteredRepos, r)
+		} else {
+			found = true
+		}
+	}
+
+	if !found {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Repository not found in session"})
+		return
+	}
+
+	spec["repos"] = filteredRepos
+
+	// Persist change
+	_, err = reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), item, v1.UpdateOptions{})
+	if err != nil {
+		log.Printf("Failed to update session %s in project %s: %v", sessionName, project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update session"})
+		return
+	}
+
+	// Notify runner via WebSocket
+	if SendMessageToSession != nil {
+		SendMessageToSession(sessionName, "repo_removed", map[string]interface{}{
+			"name": repoName,
+		})
+	}
+
+	log.Printf("Removed repository %s from session %s in project %s", repoName, sessionName, project)
+	c.JSON(http.StatusOK, gin.H{"message": "Repository removed"})
+}
+
 // GetWorkflowMetadata retrieves commands and agents metadata from the active workflow
 // GET /api/projects/:projectName/agentic-sessions/:sessionName/workflow/metadata
 func GetWorkflowMetadata(c *gin.Context) {
@@ -1212,66 +1333,199 @@ func GetWorkflowMetadata(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	b, _ := io.ReadAll(resp.Body)
 	c.Data(resp.StatusCode, "application/json", b)
 }
 
-// GET /api/workflows/ootb
-// ListOOTBWorkflows returns the list of out-of-the-box workflows
+// fetchGitHubFileContent fetches a file from GitHub via API
+// token is optional - works for public repos without authentication (but has rate limits)
+func fetchGitHubFileContent(ctx context.Context, owner, repo, ref, path, token string) ([]byte, error) {
+	api := "https://api.github.com"
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", api, owner, repo, path, ref)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Only set Authorization header if token is provided
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Accept", "application/vnd.github.raw")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("file not found")
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+// fetchGitHubDirectoryListing lists files/folders in a GitHub directory
+// token is optional - works for public repos without authentication (but has rate limits)
+func fetchGitHubDirectoryListing(ctx context.Context, owner, repo, ref, path, token string) ([]map[string]interface{}, error) {
+	api := "https://api.github.com"
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s?ref=%s", api, owner, repo, path, ref)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Only set Authorization header if token is provided
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var entries []map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, err
+	}
+
+	return entries, nil
+}
+
+// OOTBWorkflow represents an out-of-the-box workflow
+type OOTBWorkflow struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	GitURL      string `json:"gitUrl"`
+	Branch      string `json:"branch"`
+	Path        string `json:"path,omitempty"`
+	Enabled     bool   `json:"enabled"`
+}
+
+// GET /api/workflows/ootb?project=<projectName>
+// ListOOTBWorkflows returns the list of out-of-the-box workflows dynamically discovered from GitHub
+// Attempts to use user's GitHub token for better rate limits, falls back to unauthenticated for public repos
 func ListOOTBWorkflows(c *gin.Context) {
-	type OOTBWorkflow struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		GitURL      string `json:"gitUrl"`
-		Branch      string `json:"branch"`
-		Path        string `json:"path,omitempty"`
-		Enabled     bool   `json:"enabled"`
+	// Try to get user's GitHub token (best effort - not required)
+	// This gives better rate limits (5000/hr vs 60/hr) and supports private repos
+	// Project is optional - if provided, we'll try to get the user's token
+	token := ""
+	project := c.Query("project") // Optional query parameter
+	if project != "" {
+		userID, _ := c.Get("userID")
+		if reqK8s, reqDyn := GetK8sClientsForRequest(c); reqK8s != nil {
+			if userIDStr, ok := userID.(string); ok && userIDStr != "" {
+				if githubToken, err := GetGitHubToken(c.Request.Context(), reqK8s, reqDyn, project, userIDStr); err == nil {
+					token = githubToken
+					log.Printf("ListOOTBWorkflows: using user's GitHub token for project %s (better rate limits)", project)
+				} else {
+					log.Printf("ListOOTBWorkflows: failed to get GitHub token for project %s: %v", project, err)
+				}
+			}
+		}
+	}
+	if token == "" {
+		log.Printf("ListOOTBWorkflows: proceeding without GitHub token (public repo, lower rate limits)")
 	}
 
-	// Read OOTB workflow configuration from environment with defaults
-	specKitRepo := strings.TrimSpace(os.Getenv("OOTB_SPEC_KIT_REPO"))
-	if specKitRepo == "" {
-		specKitRepo = "https://github.com/Gkrumbach07/spec-kit-template.git"
-	}
-	specKitBranch := strings.TrimSpace(os.Getenv("OOTB_SPEC_KIT_BRANCH"))
-	if specKitBranch == "" {
-		specKitBranch = "main"
-	}
-	specKitPath := strings.TrimSpace(os.Getenv("OOTB_SPEC_KIT_PATH"))
-	if specKitPath == "" {
-		specKitPath = "workflows/spec-kit"
+	// Read OOTB repo configuration from environment
+	ootbRepo := strings.TrimSpace(os.Getenv("OOTB_WORKFLOWS_REPO"))
+	if ootbRepo == "" {
+		ootbRepo = "https://github.com/Gkrumbach07/spec-kit-template.git"
 	}
 
-	bugFixRepo := strings.TrimSpace(os.Getenv("OOTB_BUG_FIX_REPO"))
-	bugFixBranch := strings.TrimSpace(os.Getenv("OOTB_BUG_FIX_BRANCH"))
-	if bugFixBranch == "" {
-		bugFixBranch = "main"
+	ootbBranch := strings.TrimSpace(os.Getenv("OOTB_WORKFLOWS_BRANCH"))
+	if ootbBranch == "" {
+		ootbBranch = "main"
 	}
-	bugFixPath := strings.TrimSpace(os.Getenv("OOTB_BUG_FIX_PATH"))
 
-	workflows := []OOTBWorkflow{
-		{
-			ID:          "spec-kit",
-			Name:        "Spec Kit Workflow",
-			Description: "Comprehensive workflow for planning and implementing features using a specification-first approach",
-			GitURL:      specKitRepo,
-			Branch:      specKitBranch,
-			Path:        specKitPath,
+	ootbWorkflowsPath := strings.TrimSpace(os.Getenv("OOTB_WORKFLOWS_PATH"))
+	if ootbWorkflowsPath == "" {
+		ootbWorkflowsPath = "workflows"
+	}
+
+	// Parse GitHub URL
+	owner, repoName, err := git.ParseGitHubURL(ootbRepo)
+	if err != nil {
+		log.Printf("ListOOTBWorkflows: invalid repo URL: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid OOTB repo URL"})
+		return
+	}
+
+	// List workflow directories
+	entries, err := fetchGitHubDirectoryListing(c.Request.Context(), owner, repoName, ootbBranch, ootbWorkflowsPath, token)
+	if err != nil {
+		log.Printf("ListOOTBWorkflows: failed to list workflows directory: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to discover OOTB workflows"})
+		return
+	}
+
+	// Scan each subdirectory for ambient.json
+	workflows := []OOTBWorkflow{}
+	for _, entry := range entries {
+		entryType, _ := entry["type"].(string)
+		entryName, _ := entry["name"].(string)
+
+		if entryType != "dir" {
+			continue
+		}
+
+		// Try to fetch ambient.json from this workflow directory
+		ambientPath := fmt.Sprintf("%s/%s/.ambient/ambient.json", ootbWorkflowsPath, entryName)
+		ambientData, err := fetchGitHubFileContent(c.Request.Context(), owner, repoName, ootbBranch, ambientPath, token)
+
+		var ambientConfig struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		}
+		if err == nil {
+			// Parse ambient.json if found
+			if parseErr := json.Unmarshal(ambientData, &ambientConfig); parseErr != nil {
+				log.Printf("ListOOTBWorkflows: failed to parse ambient.json for %s: %v", entryName, parseErr)
+			}
+		}
+
+		// Use ambient.json values or fallback to directory name
+		workflowName := ambientConfig.Name
+		if workflowName == "" {
+			workflowName = strings.ReplaceAll(entryName, "-", " ")
+			workflowName = strings.Title(workflowName)
+		}
+
+		workflows = append(workflows, OOTBWorkflow{
+			ID:          entryName,
+			Name:        workflowName,
+			Description: ambientConfig.Description,
+			GitURL:      ootbRepo,
+			Branch:      ootbBranch,
+			Path:        fmt.Sprintf("%s/%s", ootbWorkflowsPath, entryName),
 			Enabled:     true,
-		},
-		{
-			ID:          "bug-fix",
-			Name:        "Bug Fix Workflow",
-			Description: "Streamlined workflow for bug triage, reproduction, and fixes (Coming Soon)",
-			GitURL:      bugFixRepo,
-			Branch:      bugFixBranch,
-			Path:        bugFixPath,
-			Enabled:     bugFixRepo != "", // Only enabled if configured
-		},
+		})
 	}
 
+	log.Printf("ListOOTBWorkflows: discovered %d workflows from %s", len(workflows), ootbRepo)
 	c.JSON(http.StatusOK, gin.H{"workflows": workflows})
 }
 
@@ -2831,25 +3085,25 @@ func ConfigureGitRemote(c *gin.Context) {
 	project := c.Param("projectName")
 	sessionName := c.Param("sessionName")
 	_, reqDyn := GetK8sClientsForRequest(c)
-	
+
 	var body struct {
 		Path      string `json:"path" binding:"required"`
 		RemoteUrl string `json:"remoteUrl" binding:"required"`
 		Branch    string `json:"branch"`
 	}
-	
+
 	if err := c.BindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-	
+
 	if body.Branch == "" {
 		body.Branch = "main"
 	}
-	
+
 	// Build absolute path
 	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", sessionName, body.Path)
-	
+
 	// Get content service endpoint
 	serviceName := fmt.Sprintf("temp-content-%s", sessionName)
 	reqK8s, _ := GetK8sClientsForRequest(c)
@@ -2860,31 +3114,31 @@ func ConfigureGitRemote(c *gin.Context) {
 	} else {
 		serviceName = fmt.Sprintf("ambient-content-%s", sessionName)
 	}
-	
+
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-configure-remote", serviceName, project)
-	
+
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"path":      absPath,
 		"remoteUrl": body.RemoteUrl,
 		"branch":    body.Branch,
 	})
-	
+
 	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
 	req.Header.Set("Content-Type", "application/json")
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
 	}
-	
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	// If successful, persist remote config to session annotations for persistence
-	if resp.StatusCode == http.StatusOK && body.Path == "artifacts" {
-		// Persist artifacts remote config in annotations
+	if resp.StatusCode == http.StatusOK {
+		// Persist remote config in annotations (supports multiple directories)
 		gvr := GetAgenticSessionV1Alpha1Resource()
 		item, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), sessionName, v1.GetOptions{})
 		if err == nil {
@@ -2893,18 +3147,21 @@ func ConfigureGitRemote(c *gin.Context) {
 				metadata["annotations"] = make(map[string]interface{})
 			}
 			anns := metadata["annotations"].(map[string]interface{})
-			anns["ambient-code.io/artifacts-remote-url"] = body.RemoteUrl
-			anns["ambient-code.io/artifacts-remote-branch"] = body.Branch
-			
+
+			// Derive safe annotation key from path (use :: as separator to avoid conflicts with hyphens in path)
+			annotationKey := strings.ReplaceAll(body.Path, "/", "::")
+			anns[fmt.Sprintf("ambient-code.io/remote-%s-url", annotationKey)] = body.RemoteUrl
+			anns[fmt.Sprintf("ambient-code.io/remote-%s-branch", annotationKey)] = body.Branch
+
 			_, err = reqDyn.Resource(gvr).Namespace(project).Update(c.Request.Context(), item, v1.UpdateOptions{})
 			if err != nil {
-				log.Printf("Warning: Failed to persist artifacts remote to annotations: %v", err)
+				log.Printf("Warning: Failed to persist remote config to annotations: %v", err)
 			} else {
-				log.Printf("Persisted artifacts remote to session annotations: %s@%s", body.RemoteUrl, body.Branch)
+				log.Printf("Persisted remote config for %s to session annotations: %s@%s", body.Path, body.RemoteUrl, body.Branch)
 			}
 		}
 	}
-	
+
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
@@ -2956,6 +3213,273 @@ func SynchronizeGit(c *gin.Context) {
 
 	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
 	req.Header.Set("Content-Type", "application/json")
+	if v := c.GetHeader("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+// GetGitMergeStatus checks if local and remote can merge cleanly
+// GET /api/projects/:projectName/agentic-sessions/:sessionName/git/merge-status?path=&branch=
+func GetGitMergeStatus(c *gin.Context) {
+	project := c.Param("projectName")
+	session := c.Param("sessionName")
+	relativePath := strings.TrimSpace(c.Query("path"))
+	branch := strings.TrimSpace(c.Query("branch"))
+
+	if relativePath == "" {
+		relativePath = "artifacts"
+	}
+	if branch == "" {
+		branch = "main"
+	}
+
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, relativePath)
+
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-merge-status?path=%s&branch=%s",
+		serviceName, project, url.QueryEscape(absPath), url.QueryEscape(branch))
+
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, endpoint, nil)
+	if v := c.GetHeader("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+// GitPullSession pulls changes from remote
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/pull
+func GitPullSession(c *gin.Context) {
+	project := c.Param("projectName")
+	session := c.Param("sessionName")
+
+	var body struct {
+		Path   string `json:"path"`
+		Branch string `json:"branch"`
+	}
+
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if body.Path == "" {
+		body.Path = "artifacts"
+	}
+	if body.Branch == "" {
+		body.Branch = "main"
+	}
+
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, body.Path)
+
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-pull", serviceName, project)
+
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"path":   absPath,
+		"branch": body.Branch,
+	})
+
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	if v := c.GetHeader("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+// GitPushSession pushes changes to remote branch
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/push
+func GitPushSession(c *gin.Context) {
+	project := c.Param("projectName")
+	session := c.Param("sessionName")
+
+	var body struct {
+		Path    string `json:"path"`
+		Branch  string `json:"branch"`
+		Message string `json:"message"`
+	}
+
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if body.Path == "" {
+		body.Path = "artifacts"
+	}
+	if body.Branch == "" {
+		body.Branch = "main"
+	}
+	if body.Message == "" {
+		body.Message = fmt.Sprintf("Session %s artifacts", session)
+	}
+
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, body.Path)
+
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-push", serviceName, project)
+
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"path":    absPath,
+		"branch":  body.Branch,
+		"message": body.Message,
+	})
+
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	if v := c.GetHeader("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+// GitCreateBranchSession creates a new git branch
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/create-branch
+func GitCreateBranchSession(c *gin.Context) {
+	project := c.Param("projectName")
+	session := c.Param("sessionName")
+
+	var body struct {
+		Path       string `json:"path"`
+		BranchName string `json:"branchName" binding:"required"`
+	}
+
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if body.Path == "" {
+		body.Path = "artifacts"
+	}
+
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, body.Path)
+
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-create-branch", serviceName, project)
+
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"path":       absPath,
+		"branchName": body.BranchName,
+	})
+
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	if v := c.GetHeader("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+// GitListBranchesSession lists all remote branches
+// GET /api/projects/:projectName/agentic-sessions/:sessionName/git/list-branches?path=
+func GitListBranchesSession(c *gin.Context) {
+	project := c.Param("projectName")
+	session := c.Param("sessionName")
+	relativePath := strings.TrimSpace(c.Query("path"))
+
+	if relativePath == "" {
+		relativePath = "artifacts"
+	}
+
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, relativePath)
+
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-list-branches?path=%s",
+		serviceName, project, url.QueryEscape(absPath))
+
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, endpoint, nil)
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
 	}

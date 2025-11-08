@@ -1,13 +1,11 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { formatDistanceToNow, format } from "date-fns";
-import { Square, Trash2, Copy, Play, MoreVertical, Bot, Loader2, FolderTree, AlertCircle, Sprout, CheckCircle2, GitBranch, Edit, RefreshCw, Folder, FileText, Info } from "lucide-react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, FileText } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // Custom components
 import MessagesTab from "@/components/session/MessagesTab";
-import { EditRepositoriesDialog } from "../../rfe/[id]/edit-repositories-dialog";
 import { FileTree, type FileTreeNode } from "@/components/file-tree";
 
 import { Button } from "@/components/ui/button";
@@ -20,16 +18,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CloneSessionDialog } from "@/components/clone-session-dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { PageHeader } from "@/components/page-header";
 import { SessionHeader } from "./session-header";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
-import { GitHubConnectionCard } from "@/components/github-connection-card";
 
 import type { SessionMessage } from "@/types";
 import type { MessageObject, ToolUseMessages, ToolUseBlock, ToolResultBlock } from "@/types/agentic-session";
-import { getPhaseColor } from "@/utils/session-helpers";
 
 // React Query hooks
 import {
@@ -42,21 +37,11 @@ import {
   useAllSessionGitHubDiffs,
   useSessionK8sResources,
   useContinueSession,
-  useRfeWorkflow,
-  useRfeWorkflowAgents,
-  useRfeWorkflowSeeding,
-  useSeedRfeWorkflow,
-  useUpdateRfeWorkflow,
-  useCreateRfeWorkflow,
-  useGitHubStatus,
-  useWorkflowArtifacts,
-  rfeKeys,
 } from "@/services/queries";
-import { useWorkspaceList } from "@/services/queries/use-workspace";
-import { useSecretsValues } from "@/services/queries/use-secrets";
+import { useWorkspaceList, useGitMergeStatus, useGitPull, useGitPush, useGitListBranches } from "@/services/queries/use-workspace";
 import { successToast, errorToast } from "@/hooks/use-toast";
 import { useOOTBWorkflows, useWorkflowMetadata } from "@/services/queries/use-workflows";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export default function ProjectSessionDetailPage({
@@ -65,21 +50,15 @@ export default function ProjectSessionDetailPage({
   params: Promise<{ name: string; sessionName: string }>;
 }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const [projectName, setProjectName] = useState<string>("");
   const [sessionName, setSessionName] = useState<string>("");
-  const [promptExpanded, setPromptExpanded] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [backHref, setBackHref] = useState<string | null>(null);
   const [contentPodSpawning, setContentPodSpawning] = useState(false);
   const [contentPodReady, setContentPodReady] = useState(false);
   const [contentPodError, setContentPodError] = useState<string | null>(null);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
-  const [editRepoDialogOpen, setEditRepoDialogOpen] = useState(false);
   const [selectedWorkflow, setSelectedWorkflow] = useState<string>("none");
-  const [githubModalOpen, setGithubModalOpen] = useState(false);
-  const [specRepoUrl, setSpecRepoUrl] = useState("https://github.com/org/repo.git");
-  const [baseBranch, setBaseBranch] = useState("main");
   const [openAccordionItems, setOpenAccordionItems] = useState<string[]>(["workflows"]);
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const [contextUrl, setContextUrl] = useState("");
@@ -91,14 +70,29 @@ export default function ProjectSessionDetailPage({
   const [pendingWorkflow, setPendingWorkflow] = useState<{ id: string; name: string; description: string; gitUrl: string; branch: string; path?: string; enabled: boolean } | null>(null);
   const [activeWorkflow, setActiveWorkflow] = useState<string | null>(null);
   const [workflowActivating, setWorkflowActivating] = useState(false);
+  const [repoChanging, setRepoChanging] = useState(false);
   const [autoSelectAgents, setAutoSelectAgents] = useState(false);
   
-  // Artifacts git management state
-  const [artifactsRemote, setArtifactsRemote] = useState<{url: string; branch: string} | null>(null);
-  const [artifactsRemoteDialogOpen, setArtifactsRemoteDialogOpen] = useState(false);
-  const [artifactsRepoUrl, setArtifactsRepoUrl] = useState("");
-  const [artifactsBranch, setArtifactsBranch] = useState("main");
+  // Directory browser state (unified for artifacts, repos, and workflow)
+  const [selectedDirectory, setSelectedDirectory] = useState<{
+    type: 'artifacts' | 'repo' | 'workflow';
+    name: string;
+    path: string;
+  }>({
+    type: 'artifacts',
+    name: 'Shared Artifacts',
+    path: 'artifacts'
+  });
+  const [directoryRemotes, setDirectoryRemotes] = useState<Record<string, {url: string; branch: string}>>({});
+  const [remoteDialogOpen, setRemoteDialogOpen] = useState(false);
+  const [remoteUrl, setRemoteUrl] = useState("");
+  const [remoteBranch, setRemoteBranch] = useState("main");
   const [synchronizing, setSynchronizing] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [showCreateBranch, setShowCreateBranch] = useState(false);
+  const [fileViewerOpen, setFileViewerOpen] = useState(false);
+  const [viewingFile, setViewingFile] = useState<{path: string; content: string} | null>(null);
+  const [loadingFileContent, setLoadingFileContent] = useState(false);
   const [gitStatus, setGitStatus] = useState<{
     initialized: boolean;
     hasChanges: boolean;
@@ -137,37 +131,99 @@ export default function ProjectSessionDetailPage({
   const { data: session, isLoading, error, refetch: refetchSession } = useSession(projectName, sessionName);
   const { data: messages = [] } = useSessionMessages(projectName, sessionName, session?.status?.phase);
   const { data: k8sResources } = useSessionK8sResources(projectName, sessionName);
-  const { data: githubStatus } = useGitHubStatus();
-  const { data: secretsValues } = useSecretsValues(projectName);
   const stopMutation = useStopSession();
   const deleteMutation = useDeleteSession();
   const continueMutation = useContinueSession();
   const sendChatMutation = useSendChatMessage();
   const sendControlMutation = useSendControlMessage();
   
-  // Get RFE workflow ID from session if this is an RFE session
-  const rfeWorkflowId = session?.metadata?.labels?.['rfe-workflow'];
-  const { data: rfeWorkflow, refetch: refetchWorkflow } = useRfeWorkflow(projectName, rfeWorkflowId || '');
-  const { data: repoAgents = [], isLoading: loadingAgents } = useRfeWorkflowAgents(
-    projectName,
-    rfeWorkflowId || ''
-  );
-  const { data: seedingData, isLoading: checkingSeeding, error: seedingQueryError, refetch: refetchSeeding } = useRfeWorkflowSeeding(
-    projectName,
-    rfeWorkflowId || ''
-  );
-  const seedWorkflowMutation = useSeedRfeWorkflow();
-  const updateWorkflowMutation = useUpdateRfeWorkflow();
-  const createWorkflowMutation = useCreateRfeWorkflow();
+  // Repo management mutations
+  const addRepoMutation = useMutation({
+    mutationFn: async (repo: { url: string; branch: string; output?: { url: string; branch: string } }) => {
+      setRepoChanging(true);
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/repos`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(repo),
+        }
+      );
+      if (!response.ok) throw new Error('Failed to add repository');
+      const result = await response.json();
+      return { ...result, inputRepo: repo }; // Include original repo for remote setup
+    },
+    onSuccess: async (data) => {
+      successToast('Repository cloning...');
+      // Wait for clone and restart to complete
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      await refetchSession();
+      
+      // Auto-configure and persist remote for the new repo
+      if (data.name && data.inputRepo) {
+        try {
+          // Call backend to persist the remote to annotations
+          await fetch(
+            `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/configure-remote`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                path: data.name,
+                remoteUrl: data.inputRepo.url,
+                branch: data.inputRepo.branch || 'main',
+              }),
+            }
+          );
+          
+          // Update local state
+          const newRemotes = {...directoryRemotes};
+          newRemotes[data.name] = {
+            url: data.inputRepo.url,
+            branch: data.inputRepo.branch || 'main'
+          };
+          setDirectoryRemotes(newRemotes);
+        } catch (err) {
+          console.error('Failed to configure remote:', err);
+          // Non-fatal - repo still works, just no remote configured
+        }
+      }
+      
+      setRepoChanging(false);
+      successToast('Repository added successfully');
+    },
+    onError: (error: Error) => {
+      setRepoChanging(false);
+      errorToast(error.message || 'Failed to add repository');
+    },
+  });
+
+  const removeRepoMutation = useMutation({
+    mutationFn: async (repoName: string) => {
+      setRepoChanging(true);
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/repos/${repoName}`,
+        { method: 'DELETE' }
+      );
+      if (!response.ok) throw new Error('Failed to remove repository');
+      return response.json();
+    },
+    onSuccess: async () => {
+      successToast('Repository removing...');
+      // Wait for removal and restart to complete
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await refetchSession();
+      setRepoChanging(false);
+      successToast('Repository removed successfully');
+    },
+    onError: (error: Error) => {
+      setRepoChanging(false);
+      errorToast(error.message || 'Failed to remove repository');
+    },
+  });
   
-  // Fetch artifacts for the spec repository
-  const { data: workflowArtifacts = [], isLoading: artifactsLoading, refetch: refetchArtifacts } = useWorkflowArtifacts(
-    projectName,
-    rfeWorkflowId || ''
-  );
-  
-  // Fetch OOTB workflows from backend
-  const { data: ootbWorkflows = [] } = useOOTBWorkflows();
+  // Fetch OOTB workflows from backend (pass project for user's GitHub token)
+  const { data: ootbWorkflows = [] } = useOOTBWorkflows(projectName);
   
   // Fetch workflow metadata (commands and agents) when workflow is active
   const { data: workflowMetadata } = useWorkflowMetadata(
@@ -176,17 +232,41 @@ export default function ProjectSessionDetailPage({
     !!activeWorkflow && !workflowActivating
   );
   
-  // Fetch artifacts directory listing
-  const { data: artifactsFiles = [], refetch: refetchArtifactsFiles } = useWorkspaceList(
+  // Git operations for selected directory
+  const currentRemote = directoryRemotes[selectedDirectory.path];
+  const { data: mergeStatus, refetch: refetchMergeStatus } = useGitMergeStatus(
     projectName,
     sessionName,
-    "artifacts",
-    { enabled: openAccordionItems.includes("artifacts") }
+    selectedDirectory.path,
+    currentRemote?.branch || 'main',
+    !!currentRemote
   );
+  const { data: remoteBranches = [] } = useGitListBranches(
+    projectName,
+    sessionName,
+    selectedDirectory.path,
+    !!currentRemote
+  );
+  const gitPullMutation = useGitPull();
+  const gitPushMutation = useGitPush();
+  
+  // Fetch directory file listing
+  const { data: directoryFiles = [], refetch: refetchDirectoryFiles } = useWorkspaceList(
+    projectName,
+    sessionName,
+    selectedDirectory.path,
+    { enabled: openAccordionItems.includes("directories") }
+  );
+  
+  // Track if we've already initialized from session to prevent infinite loops
+  const initializedFromSessionRef = useRef(false);
   
   // Load active workflow from session spec if present
   useEffect(() => {
-    if (session?.spec?.activeWorkflow) {
+    // Only initialize once from session data
+    if (initializedFromSessionRef.current || !session) return;
+    
+    if (session.spec?.activeWorkflow) {
       // Derive workflow ID from gitUrl if possible
       const gitUrl = session.spec.activeWorkflow.gitUrl;
       const matchingWorkflow = ootbWorkflows.find(w => w.gitUrl === gitUrl);
@@ -197,28 +277,90 @@ export default function ProjectSessionDetailPage({
       }
     }
     
-    // Load artifacts remote from session annotations if present
-    const artifactsUrl = session?.metadata?.annotations?.['ambient-code.io/artifacts-remote-url'];
-    const artifactsBranch = session?.metadata?.annotations?.['ambient-code.io/artifacts-remote-branch'];
-    if (artifactsUrl) {
-      setArtifactsRemote({
-        url: artifactsUrl,
-        branch: artifactsBranch || "main",
+    // Load remotes for all directories from annotations
+    const annotations = session.metadata?.annotations || {};
+    const remotes: Record<string, {url: string; branch: string}> = {};
+    
+    Object.keys(annotations).forEach(key => {
+      if (key.startsWith('ambient-code.io/remote-') && key.endsWith('-url')) {
+        // Decode path: backend uses :: as separator (e.g., "workflows::spec-kit" -> "workflows/spec-kit")
+        const path = key.replace('ambient-code.io/remote-', '').replace('-url', '').replace(/::/g, '/');
+        const branchKey = key.replace('-url', '-branch');
+        remotes[path] = {
+          url: annotations[key],
+          branch: annotations[branchKey] || 'main'
+        };
+      }
+    });
+    
+    setDirectoryRemotes(remotes);
+    
+    initializedFromSessionRef.current = true;
+  }, [session, ootbWorkflows]);
+  
+  // Handler to view file contents
+  const handleFileSelect = useCallback(async (node: FileTreeNode) => {
+    if (node.type !== 'file') return;
+    
+    setLoadingFileContent(true);
+    try {
+      const fullPath = `${selectedDirectory.path}/${node.path}`;
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/workspace/${encodeURIComponent(fullPath)}`
+      );
+      
+      if (response.ok) {
+        const content = await response.text();
+        setViewingFile({ path: node.path, content });
+        setFileViewerOpen(true);
+      } else {
+        errorToast('Failed to load file');
+      }
+    } catch {
+      errorToast('Failed to load file');
+    } finally {
+      setLoadingFileContent(false);
+    }
+  }, [projectName, sessionName, selectedDirectory.path]);
+
+  // Compute directory options from session data
+  const directoryOptions = useMemo(() => {
+    type DirectoryOption = {
+      type: 'artifacts' | 'repo' | 'workflow';
+      name: string;
+      path: string;
+    };
+    
+    const options: DirectoryOption[] = [
+      { type: 'artifacts', name: 'Shared Artifacts', path: 'artifacts' }
+    ];
+    
+    // Add repos from spec
+    if (session?.spec?.repos) {
+      session.spec.repos.forEach((repo, idx) => {
+        const repoName = repo.input.url.split('/').pop()?.replace('.git', '') || `repo-${idx}`;
+        options.push({
+          type: 'repo',
+          name: repoName,
+          path: repoName
+        });
       });
     }
-  }, [session, ootbWorkflows]);
+    
+    // Add active workflow
+    if (activeWorkflow && session?.spec?.activeWorkflow) {
+      const workflowName = session.spec.activeWorkflow.gitUrl.split('/').pop()?.replace('.git', '') || 'workflow';
+      options.push({
+        type: 'workflow',
+        name: `Workflow: ${workflowName}`,
+        path: `workflows/${workflowName}`
+      });
+    }
+    
+    return options;
+  }, [session, activeWorkflow]);
 
   // Workspace state - removed unused tree/file management code
-
-  // Handler to refresh spec repository artifacts
-  const handleRefreshArtifacts = useCallback(async () => {
-    if (!rfeWorkflowId) return;
-    // Invalidate artifacts query to force fresh fetch
-    await queryClient.invalidateQueries({
-      queryKey: rfeKeys.artifacts(projectName, rfeWorkflowId),
-    });
-    await refetchArtifacts();
-  }, [queryClient, projectName, rfeWorkflowId, refetchArtifacts]);
 
   // Handler for workflow selection (just sets pending, doesn't activate)
   const handleWorkflowChange = (value: string) => {
@@ -325,42 +467,36 @@ export default function ProjectSessionDetailPage({
     setSelectedWorkflow("custom");
   };
   
-  // Fetch artifacts git status
+  // Fetch git status for selected directory
   const fetchGitStatus = useCallback(async () => {
     if (!projectName || !sessionName) return;
     
     try {
       const response = await fetch(
-        `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/status?path=artifacts`
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/status?path=${encodeURIComponent(selectedDirectory.path)}`
       );
       
       if (response.ok) {
         const data = await response.json();
         setGitStatus(data);
-        
-        // Try to infer remote from git config (would need another endpoint)
-        // For now, check if initialized and assume remote if it is
-        if (data.initialized && !artifactsRemote) {
-          // Could fetch from session annotations or git remote -v
-        }
       }
     } catch (error) {
       console.error("Failed to fetch git status:", error);
     }
-  }, [projectName, sessionName, artifactsRemote]);
+  }, [projectName, sessionName, selectedDirectory.path]);
   
-  // Poll git status when artifacts section is open
+  // Poll git status when directories section is open
   useEffect(() => {
-    if (openAccordionItems.includes("artifacts")) {
+    if (openAccordionItems.includes("directories")) {
       fetchGitStatus();
       const interval = setInterval(fetchGitStatus, 30000); // Every 30s
       return () => clearInterval(interval);
     }
   }, [openAccordionItems, fetchGitStatus]);
   
-  // Handler to configure artifacts remote
-  const handleConfigureArtifactsRemote = async () => {
-    if (!artifactsRepoUrl.trim()) {
+  // Handler to configure directory remote
+  const handleConfigureRemote = async () => {
+    if (!remoteUrl.trim()) {
       errorToast("Repository URL is required");
       return;
     }
@@ -372,9 +508,9 @@ export default function ProjectSessionDetailPage({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            path: "artifacts",
-            remoteUrl: artifactsRepoUrl.trim(),
-            branch: artifactsBranch.trim() || "main",
+            path: selectedDirectory.path,
+            remoteUrl: remoteUrl.trim(),
+            branch: remoteBranch.trim() || "main",
           }),
         }
       );
@@ -384,60 +520,111 @@ export default function ProjectSessionDetailPage({
         throw new Error(error.error || "Failed to configure remote");
       }
       
-      setArtifactsRemote({
-        url: artifactsRepoUrl.trim(),
-        branch: artifactsBranch.trim() || "main",
-      });
+      const newRemotes = {...directoryRemotes};
+      newRemotes[selectedDirectory.path] = {
+        url: remoteUrl.trim(),
+        branch: remoteBranch.trim() || "main",
+      };
+      setDirectoryRemotes(newRemotes);
       
-      setArtifactsRemoteDialogOpen(false);
+      setRemoteDialogOpen(false);
       successToast("Remote configured successfully");
       await fetchGitStatus();
+      refetchMergeStatus();
       
     } catch (error) {
       errorToast(error instanceof Error ? error.message : "Failed to configure remote");
     }
   };
   
-  // Handler to synchronize artifacts
-  const handleSynchronizeArtifacts = async () => {
-    if (!artifactsRemote) {
-      errorToast("No remote configured");
-      return;
-    }
-    
-    setSynchronizing(true);
-    
-    try {
+  // Old synchronize handler - replaced by handleGitSynchronize below
+  // Kept for backwards compatibility during transition
+
+  // Handler to pull changes
+  const handleGitPull = () => {
+    if (!currentRemote) return;
+
+    gitPullMutation.mutate(
+      {
+        projectName,
+        sessionName,
+        path: selectedDirectory.path,
+        branch: currentRemote.branch,
+      },
+      {
+        onSuccess: () => {
+          successToast("Changes pulled successfully");
+          fetchGitStatus();
+          refetchMergeStatus();
+        },
+        onError: (err) => errorToast(err instanceof Error ? err.message : "Failed to pull changes"),
+      }
+    );
+  };
+
+  // Handler to push changes
+  const handleGitPush = () => {
+    if (!currentRemote) return;
+
       const timestamp = new Date().toISOString();
       const message = `Workflow progress - ${timestamp}`;
       
-      const response = await fetch(
-        `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/synchronize`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            path: "artifacts",
-            message,
-            branch: artifactsRemote.branch,
-          }),
-        }
-      );
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || "Synchronization failed");
+    gitPushMutation.mutate(
+      {
+        projectName,
+        sessionName,
+        path: selectedDirectory.path,
+            branch: currentRemote.branch,
+        message,
+      },
+      {
+        onSuccess: () => {
+          successToast("Changes pushed successfully");
+          fetchGitStatus();
+          refetchMergeStatus();
+        },
+        onError: (err) => errorToast(err instanceof Error ? err.message : "Failed to push changes"),
       }
+    );
+  };
+
+  // Handler to synchronize (pull then push)
+  const handleGitSynchronize = async () => {
+    if (!currentRemote) return;
+
+    try {
+      setSynchronizing(true);
+      
+      // Pull first
+      await gitPullMutation.mutateAsync({
+        projectName,
+        sessionName,
+        path: selectedDirectory.path,
+        branch: currentRemote.branch,
+      });
+      
+      // Then push
+      const timestamp = new Date().toISOString();
+      const message = `Workflow progress - ${timestamp}`;
+      
+      await gitPushMutation.mutateAsync({
+        projectName,
+        sessionName,
+        path: selectedDirectory.path,
+        branch: currentRemote.branch,
+        message,
+      });
       
       successToast("Changes synchronized successfully");
-      await fetchGitStatus();
-      
+      fetchGitStatus();
+      refetchMergeStatus();
     } catch (error) {
       errorToast(error instanceof Error ? error.message : "Failed to synchronize");
     } finally {
       setSynchronizing(false);
     }
   };
+
 
   // Helper to derive repo folder from URL
   const deriveRepoFolderFromUrl = useCallback((url: string): string => {
@@ -760,12 +947,29 @@ export default function ProjectSessionDetailPage({
   };
 
   const handleCommandClick = (slashCommand: string) => {
-    // Auto-send the command
+    // Build message with agent prepend if needed (same logic as sendChat)
+    let finalMessage = slashCommand;
+
+    if (autoSelectAgents) {
+      finalMessage = "You MUST use relevant sub-agents when needed based on the task at hand. " + finalMessage;
+    } else if (selectedAgents.length > 0) {
+      const agentNamesStr = selectedAgents
+        .map(id => workflowMetadata?.agents?.find(a => a.id === id))
+        .filter(Boolean)
+        .map(agent => agent!.name)
+        .join(', ');
+
+      finalMessage = `You MUST collaborate with these agents: ${agentNamesStr}. ` + finalMessage;
+    }
+
     sendChatMutation.mutate(
-      { projectName, sessionName, content: slashCommand },
+      { projectName, sessionName, content: finalMessage },
       {
         onSuccess: () => {
           successToast(`Command ${slashCommand} sent`);
+          // Clear agent selection after sending
+          setSelectedAgents([]);
+          setAutoSelectAgents(false);
         },
         onError: (err) => errorToast(err instanceof Error ? err.message : "Failed to send command"),
       }
@@ -791,67 +995,6 @@ export default function ProjectSessionDetailPage({
       }
     );
   };
-
-  const handleSeedWorkflow = useCallback(async () => {
-    if (!rfeWorkflowId) return;
-    return new Promise<void>((resolve, reject) => {
-      seedWorkflowMutation.mutate(
-        { projectName, workflowId: rfeWorkflowId },
-        {
-          onSuccess: () => {
-            successToast("Repository seeded successfully");
-            refetchSeeding();
-            resolve();
-          },
-          onError: (err) => {
-            errorToast(err instanceof Error ? err.message : "Failed to seed repository");
-            reject(err);
-          },
-        }
-      );
-    });
-  }, [projectName, rfeWorkflowId, seedWorkflowMutation, refetchSeeding]);
-
-  const handleUpdateRepositories = useCallback(async (data: { umbrellaRepo: { url: string; branch?: string }; supportingRepos: { url: string; branch?: string }[] }) => {
-    if (!rfeWorkflowId) return;
-    return new Promise<void>((resolve, reject) => {
-      updateWorkflowMutation.mutate(
-        {
-          projectName,
-          workflowId: rfeWorkflowId,
-          data: {
-            umbrellaRepo: data.umbrellaRepo,
-            supportingRepos: data.supportingRepos,
-          },
-        },
-        {
-          onSuccess: () => {
-            successToast("Repositories updated successfully");
-            refetchWorkflow();
-            refetchSeeding();
-            seedWorkflowMutation.reset();
-            resolve();
-          },
-          onError: (err) => {
-            errorToast(err instanceof Error ? err.message : "Failed to update repositories");
-            reject(err);
-          },
-        }
-      );
-    });
-  }, [projectName, rfeWorkflowId, updateWorkflowMutation, refetchWorkflow, refetchSeeding, seedWorkflowMutation]);
-
-  // Seeding status from React Query
-  const isSeeded = seedingData?.isSeeded || false;
-  const seedingError = seedWorkflowMutation.error?.message || seedingQueryError?.message;
-  const hasCheckedSeeding = seedingData !== undefined || !!seedingQueryError;
-  const seedingStatus = {
-    checking: checkingSeeding,
-    isSeeded,
-    error: seedingError,
-    hasChecked: hasCheckedSeeding,
-  };
-  const workflowWorkspace = rfeWorkflow?.workspacePath || (rfeWorkflowId ? `/rfe-workflows/${rfeWorkflowId}/workspace` : '');
 
   // Check if session is completed
   const sessionCompleted = (
@@ -992,18 +1135,6 @@ export default function ProjectSessionDetailPage({
 
   return (
     <>
-      {rfeWorkflow && (
-        <EditRepositoriesDialog
-          open={editRepoDialogOpen}
-          onOpenChange={setEditRepoDialogOpen}
-          workflow={rfeWorkflow}
-          onSave={async (data) => {
-            await handleUpdateRepositories(data);
-            setEditRepoDialogOpen(false);
-          }}
-          isSaving={updateWorkflowMutation.isPending}
-        />
-      )}
       <div className="min-h-screen bg-[#f8fafc]">
         {/* Sticky header */}
       <div className="sticky top-0 z-20 bg-white border-b">
@@ -1018,7 +1149,7 @@ export default function ProjectSessionDetailPage({
             className="mb-4"
           />
           <SessionHeader
-            session={session}
+                      session={session}
             projectName={projectName}
             actionLoading={
               stopMutation.isPending ? "stopping" :
@@ -1048,7 +1179,7 @@ export default function ProjectSessionDetailPage({
                   Workflows
                     {activeWorkflow && (
                       <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-                        Active
+                        {ootbWorkflows.find(w => w.id === activeWorkflow)?.name || "Custom Workflow"}
                       </Badge>
                     )}
                   </div>
@@ -1059,44 +1190,38 @@ export default function ProjectSessionDetailPage({
                     {/* Show active workflow info */}
                     {activeWorkflow && !workflowActivating && (
                       <>
-                        <Alert className="bg-green-50 border-green-200">
-                          <CheckCircle2 className="h-4 w-4 text-green-600" />
-                          <AlertTitle className="text-green-900">Workflow Active</AlertTitle>
-                          <AlertDescription className="text-green-800">
-                            <p className="font-medium">
-                              {ootbWorkflows.find(w => w.id === activeWorkflow)?.name || "Custom Workflow"}
-                            </p>
-                            <p className="text-sm mt-1">
-                              Claude is working with this workflow. Slash commands and templates are available.
-                            </p>
-                          </AlertDescription>
-                        </Alert>
-
+                       
                         {/* Commands Section */}
                         {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
                           <div className="space-y-2">
                             <div className="text-sm font-medium">Slash Commands</div>
-                            <div className="grid grid-cols-2 gap-2">
-                              {workflowMetadata.commands.map((cmd) => (
-                                <Button
-                                  key={cmd.id}
-                                  variant="outline"
-                                  size="sm"
-                                  className="justify-between h-auto py-2 px-3"
-                                  onClick={() => handleCommandClick(cmd.slashCommand)}
-                                >
-                                  <div className="text-left flex-1">
-                                    <div className="font-medium text-xs">{cmd.name}</div>
-                                    <div className="text-xs text-muted-foreground truncate">
-                                      {cmd.description}
-                                    </div>
-                                  </div>
-                                  <Badge variant="secondary" className="ml-2 text-xs">
-                                    {cmd.slashCommand}
-                                  </Badge>
-                                </Button>
-                              ))}
-                            </div>
+                            <TooltipProvider>
+                              <div className="grid grid-cols-2 gap-2">
+                                {workflowMetadata.commands.map((cmd) => (
+                                  <Tooltip key={cmd.id}>
+                                    <TooltipTrigger asChild>
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="justify-start h-auto py-2 px-3 text-left"
+                                        onClick={() => handleCommandClick(cmd.slashCommand)}
+                                      >
+                                        <div className="flex items-center gap-2 w-full min-w-0">
+                                          <Badge variant="secondary" className="text-xs flex-shrink-0">
+                                            {cmd.slashCommand}
+                                          </Badge>
+                                          <span className="font-medium text-xs truncate">{cmd.name}</span>
+                                        </div>
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top" className="max-w-xs">
+                                      <p className="font-medium text-xs mb-1">{cmd.name}</p>
+                                      <p className="text-xs">{cmd.description}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ))}
+                              </div>
+                            </TooltipProvider>
                           </div>
                         )}
 
@@ -1120,15 +1245,16 @@ export default function ProjectSessionDetailPage({
                                   if (checked) setSelectedAgents([]);
                                 }}
                               />
+                              <Sparkles className="h-3 w-3 text-purple-500" />
                               <Label htmlFor="auto-select-agents" className="text-sm font-normal cursor-pointer">
-                                Let Claude auto-select agents
+                                Claude picks best agents for each task
                               </Label>
                             </div>
 
-                            <div className="space-y-1 max-h-48 overflow-y-auto">
-                              {workflowMetadata.agents.map((agent) => (
-                                <TooltipProvider key={agent.id}>
-                                  <Tooltip>
+                            <TooltipProvider>
+                              <div className="space-y-1 max-h-48 overflow-y-auto">
+                                {workflowMetadata.agents.map((agent) => (
+                                  <Tooltip key={agent.id}>
                                     <TooltipTrigger asChild>
                                       <div className="flex items-center space-x-2">
                                         <Checkbox
@@ -1155,17 +1281,17 @@ export default function ProjectSessionDetailPage({
                                       <p className="max-w-xs">{agent.description}</p>
                                     </TooltipContent>
                                   </Tooltip>
-                                </TooltipProvider>
-                              ))}
-                            </div>
+                                ))}
+                              </div>
+                            </TooltipProvider>
 
                             {(selectedAgents.length > 0 || autoSelectAgents) && (
-                              <Alert className="bg-blue-50 border-blue-200">
-                                <Info className="h-3 w-3 text-blue-600" />
-                                <AlertDescription className="text-xs text-blue-800">
+                              <div className="bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 flex items-center gap-2">
+                                <Info className="h-3 w-3 text-blue-600 flex-shrink-0" />
+                                <span className="text-xs text-blue-800">
                                   Next message will include agent instructions
-                                </AlertDescription>
-                              </Alert>
+                                </span>
+                              </div>
                             )}
                           </div>
                         )}
@@ -1175,14 +1301,19 @@ export default function ProjectSessionDetailPage({
                             No agents found in this workflow
                           </p>
                         )}
+
+                        {/* Divider when workflow is active */}
+                        <div className="border-t pt-3" />
                       </>
                     )}
                     
-                    {/* Show selector only if no active workflow and not activating */}
-                    {!activeWorkflow && !workflowActivating && (
+                    {/* Workflow selector - always visible except when activating */}
+                    {!workflowActivating && (
                       <>
                     <div>
-                      <label className="text-sm font-medium mb-1.5 block">Select a Workflow</label>
+                      <label className="text-sm font-medium mb-1.5 block">
+                        {activeWorkflow ? "Switch Workflow" : "Select a Workflow"}
+                      </label>
                           <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
                         <SelectTrigger className="w-full">
                           <SelectValue placeholder="None selected" />
@@ -1209,17 +1340,19 @@ export default function ProjectSessionDetailPage({
                           </p>
                         )}
                         
-                        {/* Show workflow preview and activate button */}
+                        {/* Show workflow preview and activate/switch button */}
                         {pendingWorkflow && (
                           <Alert className="bg-blue-50 border-blue-200">
                             <AlertCircle className="h-4 w-4 text-blue-600" />
-                            <AlertTitle className="text-blue-900">Ready to Activate</AlertTitle>
+                            <AlertTitle className="text-blue-900">
+                              {activeWorkflow ? 'Ready to Switch' : 'Ready to Activate'}
+                            </AlertTitle>
                             <AlertDescription className="text-blue-800">
                               <div className="space-y-2 mt-2">
                                 <p className="font-medium">{pendingWorkflow.name}</p>
                                 <p className="text-sm">{pendingWorkflow.description}</p>
                                 <p className="text-xs text-blue-600 mt-2">
-                                  Claude will pause briefly to load the workflow. Your chat history will be preserved.
+                                  Claude will {activeWorkflow ? 'restart and switch to' : 'pause briefly to load'} the workflow. Your chat history will be preserved.
                                 </p>
                                 <Button 
                                   onClick={handleActivateWorkflow}
@@ -1227,7 +1360,7 @@ export default function ProjectSessionDetailPage({
                                   size="sm"
                                 >
                                   <Play className="mr-2 h-4 w-4" />
-                                  Activate Workflow
+                                  {activeWorkflow ? 'Switch Workflow' : 'Activate Workflow'}
                                 </Button>
                               </div>
                             </AlertDescription>
@@ -1236,11 +1369,11 @@ export default function ProjectSessionDetailPage({
                       </>
                     )}
                     
-                    {/* Show activating state */}
+                    {/* Show activating/switching state */}
                     {workflowActivating && (
                       <Alert>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <AlertTitle>Activating Workflow...</AlertTitle>
+                        <AlertTitle>{activeWorkflow ? 'Switching Workflow...' : 'Activating Workflow...'}</AlertTitle>
                         <AlertDescription>
                           <div className="space-y-2">
                             <p>Claude is restarting with the new workflow.</p>
@@ -1261,462 +1394,291 @@ export default function ProjectSessionDetailPage({
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Artifacts Management */}
-              <AccordionItem value="artifacts" className="border rounded-lg px-3 bg-white">
+              {/* Directory Browser (unified for artifacts, repos, and workflow) */}
+              <AccordionItem value="directories" className="border rounded-lg px-3 bg-white">
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
                   <div className="flex items-center gap-2 w-full">
                     <Folder className="h-4 w-4" />
-                    <span>Artifacts</span>
+                    <span>Directory Browser</span>
                     {gitStatus?.hasChanges && (
-                      <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 ml-auto mr-2">
-                        {gitStatus.uncommittedFiles} changes
-                      </Badge>
+                      <div className="flex gap-1 ml-auto mr-2">
+                        {gitStatus.totalAdded > 0 && (
+                          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                            +{gitStatus.totalAdded}
+                          </Badge>
+                        )}
+                        {gitStatus.totalRemoved > 0 && (
+                          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                            -{gitStatus.totalRemoved}
+                          </Badge>
+                        )}
+                      </div>
                     )}
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="pt-2 pb-3">
                   <div className="space-y-3">
                     
-                    {/* File Browser for Artifacts */}
+                    {/* Directory Selector */}
+                    <div className="flex items-center justify-between gap-2">
+                      <Label className="text-xs text-muted-foreground">Directory:</Label>
+                      <Select
+                        value={`${selectedDirectory.type}:${selectedDirectory.path}`}
+                        onValueChange={(value) => {
+                          const [type, ...pathParts] = value.split(':');
+                          const path = pathParts.join(':');
+                          const option = directoryOptions.find(
+                            opt => opt.type === type && opt.path === path
+                          );
+                          if (option) setSelectedDirectory(option);
+                        }}
+                      >
+                        <SelectTrigger className="w-[250px] h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {directoryOptions.map(opt => (
+                            <SelectItem key={`${opt.type}:${opt.path}`} value={`${opt.type}:${opt.path}`}>
+                              <div className="flex items-center gap-2">
+                                {opt.type === 'artifacts' && <Folder className="h-3 w-3" />}
+                                {opt.type === 'repo' && <GitBranch className="h-3 w-3" />}
+                                {opt.type === 'workflow' && <Sparkles className="h-3 w-3" />}
+                                <span className="text-xs">{opt.name}</span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    
+                    {/* File Browser for Selected Directory */}
                     <div className="border rounded-lg overflow-hidden">
-                      <div className="p-2 border-b flex items-center justify-between bg-muted/30">
+                      <div className="px-2 py-1.5 border-b flex items-center justify-between bg-muted/30">
                         <div className="text-xs text-muted-foreground">
                           <Folder className="inline h-3 w-3 mr-1" />
-                          <code className="bg-muted px-1 py-0.5 rounded">artifacts/</code>
+                          <code className="bg-muted px-1 py-0.5 rounded text-xs">
+                            {selectedDirectory.path}/
+                          </code>
                         </div>
-                        <Button variant="ghost" size="sm" onClick={() => refetchArtifactsFiles()} className="h-6 px-2">
-                          <RefreshCw className="h-3 w-3" />
+                        <Button variant="ghost" size="sm" onClick={() => refetchDirectoryFiles()} className="h-6 px-2">
+                          <FolderSync className="h-3 w-3" />
                         </Button>
                       </div>
                       <div className="p-2 max-h-64 overflow-y-auto">
-                        {artifactsFiles.length === 0 ? (
+                        {directoryFiles.length === 0 ? (
                           <div className="text-center py-4 text-sm text-muted-foreground">
                             <FolderTree className="h-8 w-8 mx-auto mb-2 opacity-30" />
                             <p>No files yet</p>
-                            <p className="text-xs mt-1">Workflow outputs will appear here</p>
+                            <p className="text-xs mt-1">Files will appear here</p>
                           </div>
                         ) : (
                           <FileTree 
-                            nodes={artifactsFiles.map((item): FileTreeNode => ({
+                            nodes={directoryFiles.map((item): FileTreeNode => ({
                               name: item.name,
                               path: item.path,
                               type: item.isDir ? 'folder' : 'file',
                               sizeKb: item.size ? item.size / 1024 : undefined,
                             }))}
-                            selectedPath={undefined}
-                            onSelect={() => {}}
-                            onToggle={() => {}}
+                            selectedPath={viewingFile?.path}
+                            onSelect={handleFileSelect}
                           />
                         )}
                       </div>
                     </div>
                     
                     {/* Remote Configuration Status */}
-                    {!artifactsRemote ? (
-                      <Alert className="border-blue-200 bg-blue-50">
-                        <Info className="h-4 w-4 text-blue-600" />
-                        <AlertTitle className="text-blue-900">Configure Git Remote</AlertTitle>
-                        <AlertDescription className="text-blue-800">
-                          <p className="text-sm mb-2">Set up a Git repository to version control and sync your outputs.</p>
-                          <p className="text-xs mb-3 text-blue-600">This will initialize git in the artifacts directory and configure the remote.</p>
-                          <Button onClick={() => setArtifactsRemoteDialogOpen(true)} size="sm" className="w-full">
-                            <GitBranch className="mr-2 h-4 w-4" />
-                            Configure Remote
+                    {!currentRemote ? (
+                      <div className="border border-blue-200 bg-blue-50 rounded-md px-3 py-2 flex items-center justify-between">
+                        <span className="text-sm text-blue-800">Set up Git remote for version control</span>
+                        <Button onClick={() => {
+                          setRemoteUrl("");
+                          setRemoteBranch("main");
+                          setRemoteDialogOpen(true);
+                        }} size="sm" variant="outline">
+                          <GitBranch className="mr-2 h-3 w-3" />
+                          Configure
                           </Button>
-                        </AlertDescription>
-                      </Alert>
+                      </div>
                     ) : (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <div className="flex-1 truncate">
-                            <span className="font-medium">Remote:</span> {artifactsRemote.url}
+                      <div className="border rounded-md px-2 py-1.5">
+                        {/* Single-line git status bar */}
+                        <div className="flex items-center gap-2 text-xs">
+                          {/* Remote info */}
+                          <div className="flex items-center gap-1.5 text-muted-foreground">
+                            <Cloud className="h-3 w-3" />
+                            <span className="truncate max-w-[200px]">
+                              {currentRemote?.url?.split('/').slice(-2).join('/').replace('.git', '') || ''}/{currentRemote?.branch || 'main'}
+                            </span>
                           </div>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => setArtifactsRemoteDialogOpen(true)}
-                          >
-                            <Edit className="h-3 w-3" />
-                          </Button>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Branch: <code className="bg-muted px-1 py-0.5 rounded">{artifactsRemote.branch}</code>
+                          
+                          <div className="flex-1" />
+                          
+                          {/* Status indicator - changes based on state */}
+                          {mergeStatus && !mergeStatus.canMergeClean ? (
+                            // Conflicts
+                            <div className="flex items-center gap-1 text-red-600">
+                              <X className="h-3 w-3" />
+                              <span className="font-medium">conflict</span>
+                            </div>
+                          ) : (gitStatus?.uncommittedFiles || mergeStatus?.remoteCommitsAhead) ? (
+                            // Has commits to sync
+                            <div className="flex items-center gap-1.5 text-muted-foreground font-mono">
+                              <span>↓{mergeStatus?.remoteCommitsAhead || 0}</span>
+                              <span>↑{gitStatus?.uncommittedFiles || 0}</span>
+                            </div>
+                          ) : null}
+                          
+                          {/* Sync button - always visible */}
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={handleGitSynchronize}
+                                  disabled={!mergeStatus?.canMergeClean || synchronizing}
+                                  className="h-6 w-6 p-0"
+                                >
+                                  {synchronizing ? (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                  ) : (
+                                    <RefreshCw className="h-3 w-3" />
+                                  )}
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Sync with origin/{currentRemote?.branch || 'main'}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+
+                          {/* More options */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
+                                <MoreVertical className="h-3 w-3" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setRemoteUrl(currentRemote?.url || '');
+                                  setRemoteBranch(currentRemote?.branch || 'main');
+                                  setShowCreateBranch(false);
+                                  setRemoteDialogOpen(true);
+                                }}
+                              >
+                                <Edit className="mr-2 h-3 w-3" />
+                                Manage Remote
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={handleGitPull}
+                                disabled={!mergeStatus?.canMergeClean || gitPullMutation.isPending}
+                              >
+                                <CloudDownload className="mr-2 h-3 w-3" />
+                                Pull
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={handleGitPush}
+                                disabled={!mergeStatus?.canMergeClean || gitPushMutation.isPending || !gitStatus?.hasChanges}
+                              >
+                                <CloudUpload className="mr-2 h-3 w-3" />
+                                Push
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  const newRemotes = {...directoryRemotes};
+                                  delete newRemotes[selectedDirectory.path];
+                                  setDirectoryRemotes(newRemotes);
+                                  successToast("Git remote disconnected");
+                                }}
+                              >
+                                <X className="mr-2 h-3 w-3 text-red-600" />
+                                Disconnect
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </div>
                     )}
                     
-                    {/* Git Status Display */}
-                    {gitStatus?.hasChanges && (
-                      <div className="text-sm space-y-1">
-                        <div className="font-medium">Uncommitted Changes:</div>
-                        <div className="bg-yellow-50 border border-yellow-200 rounded p-2 text-xs space-y-0.5">
-                          {gitStatus.filesAdded > 0 && (
-                            <div className="text-green-700">+{gitStatus.filesAdded} files added</div>
-                          )}
-                          {gitStatus.filesRemoved > 0 && (
-                            <div className="text-red-700">-{gitStatus.filesRemoved} files removed</div>
-                          )}
-                          <div className="text-muted-foreground pt-1">
-                            {gitStatus.totalAdded} additions, {gitStatus.totalRemoved} deletions
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Synchronize Button */}
-                    {artifactsRemote && gitStatus?.initialized && (
-                      <Button 
-                        onClick={handleSynchronizeArtifacts}
-                        disabled={synchronizing || !gitStatus?.hasChanges}
-                        className="w-full"
-                        size="sm"
-                      >
-                        {synchronizing ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Synchronizing...
-                          </>
-                        ) : (
-                          <>
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                            Synchronize Changes
-                            {gitStatus?.hasChanges && ` (${gitStatus.uncommittedFiles})`}
-                          </>
-                        )}
-                      </Button>
-                    )}
                     
                   </div>
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Only show Spec Repository for plan-feature and develop-feature workflows */}
-              {(selectedWorkflow === "plan-feature" || selectedWorkflow === "develop-feature") && (
-              <AccordionItem value="spec-repository" className="border rounded-lg px-3 bg-white">
+              {/* Context - Add/Remove Repositories and other context sources */}
+              <AccordionItem value="context" className="border rounded-lg px-3 bg-white">
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
-                  Spec Repository
+                  <div className="flex items-center gap-2">
+                    <Link className="h-4 w-4" />
+                    <span>Context Sources</span>
+                    {session?.spec?.repos && session.spec.repos.length > 0 && (
+                      <Badge variant="secondary" className="ml-auto mr-2">
+                        {session.spec.repos.length}
+                      </Badge>
+                    )}
+                  </div>
                 </AccordionTrigger>
                 <AccordionContent className="pt-2 pb-3">
-                  {!rfeWorkflowId ? (
-                    <div className="text-center py-6">
-                      <FolderTree className="h-10 w-10 mx-auto mb-3 opacity-50 text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground mb-4">
-                        A spec repository is required to store agent config and workflow artifacts.
-                      </p>
-                      <Button onClick={() => setGithubModalOpen(true)}>
-                        Add Spec Repository
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="text-sm text-muted-foreground">Workspace: {workflowWorkspace}</div>
-
-                      {rfeWorkflow?.branchName && (
-                        <Alert className="border-blue-200 bg-blue-50">
-                          <GitBranch className="h-4 w-4 text-blue-600" />
-                          <AlertTitle className="text-blue-900">Feature Branch</AlertTitle>
-                          <AlertDescription className="text-blue-800">
-                            All modifications will occur on feature branch{' '}
-                            <code className="px-2 py-1 bg-blue-100 text-blue-900 rounded font-semibold">
-                              {rfeWorkflow.branchName}
-                            </code>
-                            {' '}for all supplied repositories.
-                          </AlertDescription>
-                        </Alert>
-                      )}
-
-                      {(rfeWorkflow?.umbrellaRepo || (rfeWorkflow?.supportingRepos || []).length > 0) && rfeWorkflow && (
-                        <div className="space-y-1">
-                          {rfeWorkflow.umbrellaRepo && (
-                            <div className="text-sm space-y-1">
-                              <div>
-                                <span className="font-medium">Spec Repo:</span> {rfeWorkflow.umbrellaRepo.url}
-                              </div>
-                              {rfeWorkflow.umbrellaRepo.branch && (
-                                <div className="ml-4 text-muted-foreground">
-                                  Base branch: <code className="text-xs bg-muted px-1 py-0.5 rounded">{rfeWorkflow.umbrellaRepo.branch}</code>
-                                  {rfeWorkflow.branchName && (
-                                    <span> → Feature branch <code className="text-xs bg-blue-50 text-blue-700 px-1 py-0.5 rounded">{rfeWorkflow.branchName}</code> {isSeeded ? 'set up' : 'will be set up'}</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          {(rfeWorkflow.supportingRepos || []).map(
-                            (r: { url: string; branch?: string }, i: number) => (
-                              <div key={i} className="text-sm space-y-1">
-                                <div>
-                                  <span className="font-medium">Supporting:</span> {r.url}
-                                </div>
-                                {r.branch && (
-                                  <div className="ml-4 text-muted-foreground">
-                                    Base branch: <code className="text-xs bg-muted px-1 py-0.5 rounded">{r.branch}</code>
-                                    {rfeWorkflow.branchName && (
-                                      <span> → Feature branch <code className="text-xs bg-blue-50 text-blue-700 px-1 py-0.5 rounded">{rfeWorkflow.branchName}</code> {isSeeded ? 'set up' : 'will be set up'}</span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          )}
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Add external context sources to enhance Claude&apos;s understanding
+                    </p>
+                    
+                    {/* Repository List */}
+                    {!session?.spec?.repos || session.spec.repos.length === 0 ? (
+                      <div className="text-center py-6">
+                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-2">
+                          <GitBranch className="h-5 w-5 text-gray-400" />
                         </div>
-                      )}
-
-                      {!isSeeded && !seedingStatus.checking && seedingStatus.hasChecked && rfeWorkflow?.umbrellaRepo && (
-                        <Alert variant="destructive">
-                          <AlertCircle className="h-4 w-4" />
-                          <AlertTitle>Spec Repository Not Seeded</AlertTitle>
-                          <AlertDescription className="mt-2">
-                            <p className="mb-3">
-                              Before you can start working on phases, the spec repository needs to be seeded.
-                              This will:
-                            </p>
-                            <ul className="list-disc list-inside space-y-1 mb-3 text-sm">
-                              <li>Set up the feature branch{rfeWorkflow.branchName && ` (${rfeWorkflow.branchName})`} from the base branch</li>
-                              <li>Add Spec-Kit template files for spec-driven development</li>
-                              <li>Add agent definition files in the .claude directory</li>
-                            </ul>
-                            {seedingError && (
-                              <div className="mb-3 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
-                                <strong>Seeding Failed:</strong> {seedingError}
-                              </div>
-                            )}
-                            <div className="flex gap-2">
-                              <Button
-                                onClick={() => setEditRepoDialogOpen(true)}
-                                disabled={updateWorkflowMutation.isPending}
-                                size="sm"
-                                variant="outline"
-                              >
-                                <Edit className="mr-2 h-4 w-4" />
-                                Edit Repositories
-                              </Button>
-                              <Button onClick={handleSeedWorkflow} disabled={seedWorkflowMutation.isPending || updateWorkflowMutation.isPending} size="sm">
-                                {seedWorkflowMutation.isPending ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Seeding Repository...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Sprout className="mr-2 h-4 w-4" />
-                                    {seedingError ? "Retry Seeding" : "Seed Repository"}
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          </AlertDescription>
-                        </Alert>
-                      )}
-
-                      {seedingStatus.checking && rfeWorkflow?.umbrellaRepo && (
-                        <div className="flex items-center gap-2 text-gray-600 bg-gray-50 p-3 rounded-lg">
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                          <span className="text-sm">Checking repository seeding status...</span>
-                        </div>
-                      )}
-
-                      {isSeeded && (
-                        <div className="flex items-center justify-between text-green-700 bg-green-50 p-3 rounded-lg">
-                          <div className="flex items-center gap-2">
-                            <CheckCircle2 className="h-5 w-5 text-green-600" />
-                            <span className="text-sm font-medium">Repository seeded and ready</span>
-                          </div>
-                          <Button
-                            onClick={() => setEditRepoDialogOpen(true)}
-                            disabled={updateWorkflowMutation.isPending}
-                            size="sm"
-                            variant="outline"
-                          >
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit Repositories
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Spec Repository Files - Only show after spec repository is seeded */}
-                  {rfeWorkflowId && isSeeded && (
-                    <div className="mt-4 pt-4 border-t">
-                      <div className="border rounded-md overflow-hidden">
-                        <div className="p-3 border-b flex items-center justify-between bg-gray-50">
-                          <div className="flex items-center gap-2">
-                            <FolderTree className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">Files</span>
-                            {!artifactsLoading && (
-                              <span className="text-xs text-muted-foreground">
-                                ({workflowArtifacts.length} {workflowArtifacts.length === 1 ? 'file' : 'files'})
-                              </span>
-                            )}
-                          </div>
-                          <Button 
-                            size="sm" 
-                            variant="outline" 
-                            onClick={handleRefreshArtifacts} 
-                            disabled={artifactsLoading}
-                            className="h-8"
-                          >
-                            <RefreshCw className={`h-4 w-4 ${artifactsLoading ? 'animate-spin' : ''}`} />
-                          </Button>
-                        </div>
-                        <div className="p-3">
-                          {artifactsLoading ? (
-                            <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-                              <Loader2 className="animate-spin h-4 w-4 mr-2" /> Loading files...
-                            </div>
-                          ) : workflowArtifacts.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center h-32 text-center text-sm text-muted-foreground">
-                              <FolderTree className="h-10 w-10 mb-2 opacity-50" />
-                              <p className="font-medium">No files yet</p>
-                              <p className="text-xs mt-1">Files will appear here as agents create artifacts</p>
-                            </div>
-                          ) : (
-                            <div className="space-y-1">
-                              {workflowArtifacts.map((artifact) => {
-                                const isDirectory = artifact.type === 'tree';
-                                const Icon = isDirectory ? Folder : FileText;
-                                const iconColor = isDirectory ? 'text-yellow-600' : 'text-blue-500';
-                                
-                                return (
-                                  <div
-                                    key={artifact.path}
-                                    className="flex items-center gap-2 p-2 rounded hover:bg-gray-50 text-sm"
-                                  >
-                                    <Icon className={`h-4 w-4 ${iconColor} flex-shrink-0`} />
-                                    <div className="flex-1 min-w-0">
-                                      <div className="font-medium truncate">{artifact.name}</div>
-                                      {artifact.path !== artifact.name && (
-                                        <div className="text-xs text-muted-foreground truncate">{artifact.path}</div>
-                                      )}
-                                    </div>
-                                    {!isDirectory && artifact.size > 0 && (
-                                      <div className="text-xs text-muted-foreground flex-shrink-0">
-                                        {(artifact.size / 1024).toFixed(1)} KB
-                                      </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
+                        <p className="text-sm text-muted-foreground mb-3">No repositories added</p>
+                        <Button size="sm" variant="outline" onClick={() => setContextModalOpen(true)}>
+                          <GitBranch className="mr-2 h-3 w-3" />
+                          Add Repository
+                        </Button>
                       </div>
-                    </div>
-                  )}
-                </AccordionContent>
-              </AccordionItem>
-              )}
-
-              <AccordionItem value="agents" className="border rounded-lg px-3 bg-white">
-                <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
-                  Agents
-                </AccordionTrigger>
-                <AccordionContent className="pt-2 pb-3">
-                  {loadingAgents ? (
-                    <div className="flex items-center justify-center py-6">
-                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : !rfeWorkflowId || repoAgents.length === 0 ? (
-                    <div className="text-center py-6 text-muted-foreground">
-                      <Bot className="h-10 w-10 mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">No agents found in repository .claude/agents directory</p>
-                      <p className="text-xs mt-1">Seed the repository to add agent definitions</p>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="grid grid-cols-1 gap-2">
-                        {repoAgents.map((agent) => {
-                          const isSelected = selectedAgents.includes(agent.persona);
+                    ) : (
+                      <div className="space-y-2">
+                        {session.spec.repos.map((repo, idx) => {
+                          const repoName = repo.input.url.split('/').pop()?.replace('.git', '') || `repo-${idx}`;
                           return (
-                            <div
-                              key={agent.persona}
-                              className={`p-2 rounded border transition-colors ${
-                                isSelected ? 'bg-primary/5 border-primary' : 'bg-background border-border hover:border-primary/50'
-                              }`}
-                            >
-                              <label className="flex items-start gap-2 cursor-pointer">
-                                <Checkbox
-                                  checked={isSelected}
-                                  onCheckedChange={(checked) => {
-                                    setSelectedAgents(
-                                      checked
-                                        ? [...selectedAgents, agent.persona]
-                                        : selectedAgents.filter(p => p !== agent.persona)
-                                    );
-                                  }}
-                                  className="mt-0.5"
-                                />
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-medium text-sm">{agent.name}</div>
-                                  <div className="text-xs text-muted-foreground">{agent.role}</div>
-                                </div>
-                              </label>
+                            <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-muted/30 hover:bg-muted/50 transition-colors">
+                              <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate">{repoName}</div>
+                                <div className="text-xs text-muted-foreground truncate">{repo.input.url}</div>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 flex-shrink-0"
+                                onClick={() => {
+                                  if (confirm(`Remove repository ${repoName}?`)) {
+                                    removeRepoMutation.mutate(repoName);
+                                  }
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                              </Button>
                             </div>
                           );
                         })}
+                        <Button onClick={() => setContextModalOpen(true)} variant="outline" className="w-full" size="sm">
+                          <GitBranch className="mr-2 h-3 w-3" />
+                          Add Repository
+                        </Button>
                       </div>
-                      {selectedAgents.length > 0 && (
-                        <div className="mt-3 pt-3 border-t">
-                          <div className="text-sm font-medium mb-1.5">Selected Agents ({selectedAgents.length})</div>
-                          <div className="flex flex-wrap gap-1.5">
-                            {selectedAgents.map(persona => {
-                              const agent = repoAgents.find(a => a.persona === persona);
-                              return agent ? (
-                                <Badge key={persona} variant="secondary" className="text-xs">
-                                  {agent.name}
-                                </Badge>
-                              ) : null;
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </AccordionContent>
-              </AccordionItem>
-
-              <AccordionItem value="context" className="border rounded-lg px-3 bg-white">
-                <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
-                  Context
-                </AccordionTrigger>
-                <AccordionContent className="pt-2 pb-3">
-                  {!rfeWorkflowId || !rfeWorkflow?.supportingRepos || rfeWorkflow.supportingRepos.length === 0 ? (
-                    <div className="text-center py-6">
-                      <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-3">
-                        <FolderTree className="h-8 w-8 text-gray-400" />
-                      </div>
-                      <p className="text-sm font-medium text-gray-900 mb-1">No associated repositories configured</p>
-                      <p className="text-xs text-muted-foreground mb-4">Add context from external sources</p>
-                      <Button onClick={() => setContextModalOpen(true)} disabled={!rfeWorkflowId}>
-                        Add Repository
-                      </Button>
-                      {!rfeWorkflowId && (
-                        <p className="text-xs text-muted-foreground mt-2">Configure a spec repository first</p>
-                      )}
+                    )}
+                    
+                    {/* Future: Files and URLs would go here */}
+                    <div className="border-t pt-3">
+                      <p className="text-xs text-muted-foreground text-center">
+                        Additional context types (file imports, Jira, Google drive) coming soon
+                      </p>
                     </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div className="space-y-2">
-                        {rfeWorkflow.supportingRepos.map((repo, index) => (
-                          <div key={index} className="flex items-start gap-2 p-2 rounded border bg-gray-50 hover:bg-gray-100 transition-colors">
-                            <GitBranch className="h-4 w-4 text-gray-600 mt-0.5 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-medium truncate">{repo.url}</div>
-                              {repo.branch && (
-                                <div className="text-xs text-muted-foreground">
-                                  Branch: <code className="text-xs bg-white px-1 py-0.5 rounded">{repo.branch}</code>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <Button onClick={() => setContextModalOpen(true)} variant="outline" className="w-full" size="sm">
-                        Add Another Repository
-                      </Button>
-                    </div>
-                  )}
+                  </div>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
@@ -1734,6 +1696,28 @@ export default function ProjectSessionDetailPage({
                       <AlertTitle>Activating Workflow...</AlertTitle>
                       <AlertDescription>
                         <p>Claude is restarting with the new workflow. Please wait...</p>
+                      </AlertDescription>
+                    </Alert>
+                  </div>
+                )}
+                
+                {/* Repository change overlay */}
+                {repoChanging && (
+                  <div className="absolute inset-0 bg-white/90 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
+                    <Alert className="max-w-md mx-4">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <AlertTitle>Updating Repositories...</AlertTitle>
+                      <AlertDescription>
+                        <div className="space-y-2">
+                          <p>Claude is paused while repositories are being updated.</p>
+                          <ul className="text-sm space-y-1 mt-2 list-disc list-inside">
+                            <li>Cloning repository to workspace</li>
+                            <li>Restarting Claude Code</li>
+                          </ul>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            This may take 10-20 seconds...
+                          </p>
+                        </div>
                       </AlertDescription>
                     </Alert>
                   </div>
@@ -1763,116 +1747,6 @@ export default function ProjectSessionDetailPage({
         </div>
       </div>
     </div>
-
-    {/* Add Spec Repository Modal */}
-    <Dialog open={githubModalOpen} onOpenChange={setGithubModalOpen}>
-      <DialogContent className="sm:max-w-[600px]">
-        <DialogHeader>
-          <DialogTitle>Add spec repository</DialogTitle>
-          <DialogDescription>
-            Set the spec repo and optional supporting repos. Base branch is the branch from which the feature branch will be set up. All modifications will be made to the feature branch.
-          </DialogDescription>
-        </DialogHeader>
-        
-        {!githubStatus?.installed && !secretsValues?.some(secret => secret.key === 'GIT_TOKEN' && secret.value) && (
-          <div className="mb-4">
-            <GitHubConnectionCard appSlug="ambient-code-vteam" showManageButton={false} />
-          </div>
-        )}
-
-        <div className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="spec-repo-url">Spec Repo URL</Label>
-            <Input
-              id="spec-repo-url"
-              placeholder="https://github.com/org/repo.git"
-              value={specRepoUrl}
-              onChange={(e) => setSpecRepoUrl(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              The spec repository contains your feature specifications, planning documents, and agent configurations for this RFE workspace
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="base-branch">Base Branch</Label>
-            <Input
-              id="base-branch"
-              placeholder="main"
-              value={baseBranch}
-              onChange={(e) => setBaseBranch(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Supporting Repositories (optional)</Label>
-            <Button variant="outline" className="w-full">
-              Add supporting repo
-            </Button>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setGithubModalOpen(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            type="button"
-            onClick={async () => {
-              if (!specRepoUrl.trim() || !projectName || !sessionName) return;
-              
-              // Generate a unique branch name based on session name
-              const timestamp = Date.now();
-              const branchName = `feature/${sessionName}-${timestamp}`;
-              
-              try {
-                // Create the workflow
-                const result = await createWorkflowMutation.mutateAsync({
-                  projectName,
-                  data: {
-                    title: `Workflow for ${sessionName}`,
-                    description: `Auto-generated workflow for session ${sessionName}`,
-                    branchName,
-                    umbrellaRepo: {
-                      url: specRepoUrl.trim(),
-                      branch: baseBranch.trim() || 'main',
-                    },
-                    supportingRepos: [],
-                  },
-                });
-                
-                // Link the session to the workflow
-                const { linkSessionToWorkflow } = await import('@/services/api/rfe');
-                await linkSessionToWorkflow(projectName, result.id, sessionName);
-                
-                successToast('Spec repository configured successfully');
-                setGithubModalOpen(false);
-                
-                // Refresh the session to get the updated workflow ID
-                await refetchSession();
-                await refetchWorkflow();
-              } catch (err) {
-                errorToast(err instanceof Error ? err.message : 'Failed to configure repository');
-              }
-            }}
-            disabled={!specRepoUrl.trim() || createWorkflowMutation.isPending}
-          >
-            {createWorkflowMutation.isPending ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              'Save Configuration'
-            )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
 
     {/* Add Context Modal */}
     <Dialog open={contextModalOpen} onOpenChange={setContextModalOpen}>
@@ -1910,13 +1784,6 @@ export default function ProjectSessionDetailPage({
               Leave empty to use the default branch
             </p>
           </div>
-
-          <Alert className="border-blue-200 bg-blue-50">
-            <Info className="h-4 w-4 text-blue-600" />
-            <AlertDescription className="text-blue-800 text-sm">
-              Google Drive and Jira support coming soon
-            </AlertDescription>
-          </Alert>
         </div>
 
         <DialogFooter>
@@ -1934,41 +1801,26 @@ export default function ProjectSessionDetailPage({
           <Button
             type="button"
             onClick={async () => {
-              if (!contextUrl.trim() || !rfeWorkflowId) return;
+              if (!contextUrl.trim()) return;
               
               try {
-                // Get existing supporting repos
-                const existingSupportingRepos = rfeWorkflow?.supportingRepos || [];
-                
-                // Add new repository
-                const newRepo = {
+                // Add repository to session
+                await addRepoMutation.mutateAsync({
                   url: contextUrl.trim(),
-                  ...(contextBranch.trim() && { branch: contextBranch.trim() })
-                };
-                
-                // Update workflow with new supporting repos
-                await updateWorkflowMutation.mutateAsync({
-                  projectName,
-                  workflowId: rfeWorkflowId,
-                  data: {
-                    supportingRepos: [...existingSupportingRepos, newRepo],
-                  },
+                  branch: contextBranch.trim() || 'main',
                 });
                 
-                successToast('Context repository added successfully');
+                successToast('Repository added successfully');
                 setContextUrl("");
                 setContextBranch("main");
                 setContextModalOpen(false);
-                
-                // Refresh workflow data
-                await refetchWorkflow();
               } catch (err) {
-                errorToast(err instanceof Error ? err.message : 'Failed to add context repository');
+                errorToast(err instanceof Error ? err.message : 'Failed to add repository');
               }
             }}
-            disabled={!contextUrl.trim() || !rfeWorkflowId || updateWorkflowMutation.isPending}
+            disabled={!contextUrl.trim() || addRepoMutation.isPending}
           >
-            {updateWorkflowMutation.isPending ? (
+            {addRepoMutation.isPending ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Adding...
@@ -2054,56 +1906,162 @@ export default function ProjectSessionDetailPage({
       </DialogContent>
     </Dialog>
 
-    {/* Configure Artifacts Remote Dialog */}
-    <Dialog open={artifactsRemoteDialogOpen} onOpenChange={setArtifactsRemoteDialogOpen}>
-      <DialogContent>
+    {/* Manage Remote Dialog - Combined URL and Branch Management */}
+    <Dialog open={remoteDialogOpen} onOpenChange={setRemoteDialogOpen}>
+      <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Configure Artifacts Repository</DialogTitle>
+          <DialogTitle>Manage Remote for {selectedDirectory.name}</DialogTitle>
           <DialogDescription>
-            Set up a Git repository to save and synchronize your workflow outputs.
+            Configure repository URL and select branch for git operations
           </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="artifacts-repo-url">Repository URL *</Label>
+            <Label htmlFor="remote-repo-url">Repository URL *</Label>
             <Input
-              id="artifacts-repo-url"
-              placeholder="https://github.com/org/my-outputs.git"
-              value={artifactsRepoUrl}
-              onChange={(e) => setArtifactsRepoUrl(e.target.value)}
+              id="remote-repo-url"
+              placeholder="https://github.com/org/my-repo.git"
+              value={remoteUrl}
+              onChange={(e) => setRemoteUrl(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">
-              The repository where your workflow outputs will be saved. Git will be initialized in artifacts/ if not already done.
-            </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="artifacts-branch">Branch</Label>
-            <Input
-              id="artifacts-branch"
-              placeholder="main"
-              value={artifactsBranch}
-              onChange={(e) => setArtifactsBranch(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Branch to push artifacts to (will be created if it doesn&apos;t exist)
-            </p>
-          </div>
+          {!showCreateBranch ? (
+            <div className="space-y-2">
+              <Label htmlFor="remote-branch">Branch</Label>
+              <div className="flex gap-2">
+                <Select 
+                  value={remoteBranch} 
+                  onValueChange={(branch) => setRemoteBranch(branch)}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {!remoteBranches.includes(remoteBranch) && remoteBranch && (
+                      <SelectItem value={remoteBranch}>{remoteBranch} (current)</SelectItem>
+                    )}
+                    {remoteBranches.map(b => (
+                      <SelectItem key={b} value={b}>{b}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button 
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setShowCreateBranch(true);
+                    setNewBranchName(`session-${sessionName.substring(0, 20)}`);
+                  }}
+                >
+                  New
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>Create New Branch</Label>
+              <Input 
+                placeholder="branch-name"
+                value={newBranchName}
+                onChange={e => setNewBranchName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && newBranchName.trim()) {
+                    setRemoteBranch(newBranchName.trim());
+                    setShowCreateBranch(false);
+                  }
+                }}
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button 
+                  size="sm"
+                  className="flex-1"
+                  onClick={() => {
+                    setRemoteBranch(newBranchName.trim());
+                    setShowCreateBranch(false);
+                  }}
+                  disabled={!newBranchName.trim()}
+                >
+                  Set Branch
+                </Button>
+                <Button 
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setShowCreateBranch(false);
+                    setNewBranchName("");
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+          
+          {mergeStatus && !showCreateBranch && (
+            <div className="text-xs text-muted-foreground border-t pt-2">
+              {mergeStatus.canMergeClean ? (
+                <span className="text-green-600">✓ Can merge cleanly</span>
+              ) : (
+                <span className="text-amber-600">⚠️ {mergeStatus.conflictingFiles.length} conflicts</span>
+              )}
+            </div>
+          )}
         </div>
-
+        
         <DialogFooter>
           <Button
             variant="outline"
-            onClick={() => setArtifactsRemoteDialogOpen(false)}
+            onClick={() => {
+              setRemoteDialogOpen(false);
+              setShowCreateBranch(false);
+            }}
           >
             Cancel
           </Button>
           <Button
-            onClick={handleConfigureArtifactsRemote}
-            disabled={!artifactsRepoUrl.trim()}
+            onClick={() => {
+              handleConfigureRemote();
+              setShowCreateBranch(false);
+            }}
+            disabled={!remoteUrl.trim()}
           >
-            Configure Remote
+            Save Remote
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    
+    {/* File Viewer Dialog */}
+    <Dialog open={fileViewerOpen} onOpenChange={setFileViewerOpen}>
+      <DialogContent className="max-w-4xl max-h-[80vh]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileText className="h-4 w-4" />
+            {viewingFile?.path || 'File'}
+          </DialogTitle>
+          <DialogDescription>
+            {selectedDirectory.path}/{viewingFile?.path}
+          </DialogDescription>
+        </DialogHeader>
+        
+        {loadingFileContent ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin" />
+          </div>
+        ) : (
+          <div className="max-h-[60vh] overflow-auto">
+            <pre className="text-xs bg-muted p-4 rounded-lg overflow-x-auto">
+              <code>{viewingFile?.content}</code>
+            </pre>
+          </div>
+        )}
+        
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setFileViewerOpen(false)}>
+            Close
           </Button>
         </DialogFooter>
       </DialogContent>
