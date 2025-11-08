@@ -88,6 +88,22 @@ export default function ProjectSessionDetailPage({
   const [pendingWorkflow, setPendingWorkflow] = useState<{ id: string; name: string; description: string; gitUrl: string; branch: string; path?: string; enabled: boolean } | null>(null);
   const [activeWorkflow, setActiveWorkflow] = useState<string | null>(null);
   const [workflowActivating, setWorkflowActivating] = useState(false);
+  
+  // Artifacts git management state
+  const [artifactsRemote, setArtifactsRemote] = useState<{url: string; branch: string} | null>(null);
+  const [artifactsRemoteDialogOpen, setArtifactsRemoteDialogOpen] = useState(false);
+  const [artifactsRepoUrl, setArtifactsRepoUrl] = useState("");
+  const [artifactsBranch, setArtifactsBranch] = useState("main");
+  const [synchronizing, setSynchronizing] = useState(false);
+  const [gitStatus, setGitStatus] = useState<{
+    initialized: boolean;
+    hasChanges: boolean;
+    uncommittedFiles: number;
+    filesAdded: number;
+    filesRemoved: number;
+    totalAdded: number;
+    totalRemoved: number;
+  } | null>(null);
 
   // Extract params
   useEffect(() => {
@@ -278,6 +294,120 @@ export default function ProjectSessionDetailPage({
     
     setCustomWorkflowDialogOpen(false);
     setSelectedWorkflow("custom");
+  };
+  
+  // Fetch artifacts git status
+  const fetchGitStatus = useCallback(async () => {
+    if (!projectName || !sessionName) return;
+    
+    try {
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/status?path=artifacts`
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        setGitStatus(data);
+        
+        // Try to infer remote from git config (would need another endpoint)
+        // For now, check if initialized and assume remote if it is
+        if (data.initialized && !artifactsRemote) {
+          // Could fetch from session annotations or git remote -v
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch git status:", error);
+    }
+  }, [projectName, sessionName, artifactsRemote]);
+  
+  // Poll git status when artifacts section is open
+  useEffect(() => {
+    if (openAccordionItems.includes("artifacts")) {
+      fetchGitStatus();
+      const interval = setInterval(fetchGitStatus, 30000); // Every 30s
+      return () => clearInterval(interval);
+    }
+  }, [openAccordionItems, fetchGitStatus]);
+  
+  // Handler to configure artifacts remote
+  const handleConfigureArtifactsRemote = async () => {
+    if (!artifactsRepoUrl.trim()) {
+      errorToast("Repository URL is required");
+      return;
+    }
+    
+    try {
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/configure-remote`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            path: "artifacts",
+            remoteUrl: artifactsRepoUrl.trim(),
+            branch: artifactsBranch.trim() || "main",
+          }),
+        }
+      );
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to configure remote");
+      }
+      
+      setArtifactsRemote({
+        url: artifactsRepoUrl.trim(),
+        branch: artifactsBranch.trim() || "main",
+      });
+      
+      setArtifactsRemoteDialogOpen(false);
+      successToast("Remote configured successfully");
+      await fetchGitStatus();
+      
+    } catch (error) {
+      errorToast(error instanceof Error ? error.message : "Failed to configure remote");
+    }
+  };
+  
+  // Handler to synchronize artifacts
+  const handleSynchronizeArtifacts = async () => {
+    if (!artifactsRemote) {
+      errorToast("No remote configured");
+      return;
+    }
+    
+    setSynchronizing(true);
+    
+    try {
+      const timestamp = new Date().toISOString();
+      const message = `Workflow progress - ${timestamp}`;
+      
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/synchronize`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            path: "artifacts",
+            message,
+            branch: artifactsRemote.branch,
+          }),
+        }
+      );
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Synchronization failed");
+      }
+      
+      successToast("Changes synchronized successfully");
+      await fetchGitStatus();
+      
+    } catch (error) {
+      errorToast(error instanceof Error ? error.message : "Failed to synchronize");
+    } finally {
+      setSynchronizing(false);
+    }
   };
 
   // Helper to derive repo folder from URL
@@ -900,7 +1030,7 @@ export default function ProjectSessionDetailPage({
               <AccordionItem value="workflows" className="border rounded-lg px-3 bg-white">
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
                   <div className="flex items-center gap-2">
-                    Workflows
+                  Workflows
                     {activeWorkflow && (
                       <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
                         Active
@@ -930,14 +1060,14 @@ export default function ProjectSessionDetailPage({
                     {/* Show selector only if no active workflow and not activating */}
                     {!activeWorkflow && !workflowActivating && (
                       <>
-                        <div>
-                          <label className="text-sm font-medium mb-1.5 block">Select a Workflow</label>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Select a Workflow</label>
                           <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
-                            <SelectTrigger className="w-full">
-                              <SelectValue placeholder="None selected" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">None selected</SelectItem>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="None selected" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None selected</SelectItem>
                               {ootbWorkflows.map((workflow) => (
                                 <SelectItem 
                                   key={workflow.id} 
@@ -948,12 +1078,12 @@ export default function ProjectSessionDetailPage({
                                 </SelectItem>
                               ))}
                               <SelectItem value="custom">Custom Workflow...</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                        </SelectContent>
+                      </Select>
+                    </div>
                         
                         {!pendingWorkflow && (
-                          <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground">
                             Workflows provide Ambient agents with structured steps to follow toward more complex goals.
                           </p>
                         )}
@@ -1004,6 +1134,100 @@ export default function ProjectSessionDetailPage({
                           </div>
                         </AlertDescription>
                       </Alert>
+                    )}
+                    
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Artifacts Management */}
+              <AccordionItem value="artifacts" className="border rounded-lg px-3 bg-white">
+                <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
+                  <div className="flex items-center gap-2 w-full">
+                    <Folder className="h-4 w-4" />
+                    <span>Artifacts</span>
+                    {gitStatus?.hasChanges && (
+                      <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200 ml-auto mr-2">
+                        {gitStatus.uncommittedFiles} changes
+                      </Badge>
+                    )}
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pt-2 pb-3">
+                  <div className="space-y-3">
+                    
+                    {/* Remote Configuration Status */}
+                    {!artifactsRemote ? (
+                      <Alert className="border-blue-200 bg-blue-50">
+                        <Info className="h-4 w-4 text-blue-600" />
+                        <AlertTitle className="text-blue-900">No Remote Configured</AlertTitle>
+                        <AlertDescription className="text-blue-800">
+                          <p className="text-sm mb-3">Configure a Git repository to save and sync your work.</p>
+                          <Button onClick={() => setArtifactsRemoteDialogOpen(true)} size="sm" className="w-full">
+                            <GitBranch className="mr-2 h-4 w-4" />
+                            Configure Remote
+                          </Button>
+                        </AlertDescription>
+                      </Alert>
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <div className="flex-1 truncate">
+                            <span className="font-medium">Remote:</span> {artifactsRemote.url}
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => setArtifactsRemoteDialogOpen(true)}
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          Branch: <code className="bg-muted px-1 py-0.5 rounded">{artifactsRemote.branch}</code>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Git Status Display */}
+                    {gitStatus?.hasChanges && (
+                      <div className="text-sm space-y-1">
+                        <div className="font-medium">Uncommitted Changes:</div>
+                        <div className="bg-yellow-50 border border-yellow-200 rounded p-2 text-xs space-y-0.5">
+                          {gitStatus.filesAdded > 0 && (
+                            <div className="text-green-700">+{gitStatus.filesAdded} files added</div>
+                          )}
+                          {gitStatus.filesRemoved > 0 && (
+                            <div className="text-red-700">-{gitStatus.filesRemoved} files removed</div>
+                          )}
+                          <div className="text-muted-foreground pt-1">
+                            {gitStatus.totalAdded} additions, {gitStatus.totalRemoved} deletions
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Synchronize Button */}
+                    {artifactsRemote && gitStatus?.initialized && (
+                      <Button 
+                        onClick={handleSynchronizeArtifacts}
+                        disabled={synchronizing || !gitStatus?.hasChanges}
+                        className="w-full"
+                        size="sm"
+                      >
+                        {synchronizing ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Synchronizing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="mr-2 h-4 w-4" />
+                            Synchronize Changes
+                            {gitStatus?.hasChanges && ` (${gitStatus.uncommittedFiles})`}
+                          </>
+                        )}
+                      </Button>
                     )}
                     
                   </div>
@@ -1748,6 +1972,61 @@ export default function ProjectSessionDetailPage({
             ) : (
               'Load Workflow'
             )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Configure Artifacts Remote Dialog */}
+    <Dialog open={artifactsRemoteDialogOpen} onOpenChange={setArtifactsRemoteDialogOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Configure Artifacts Repository</DialogTitle>
+          <DialogDescription>
+            Set up a Git repository to save and synchronize your workflow outputs.
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="artifacts-repo-url">Repository URL *</Label>
+            <Input
+              id="artifacts-repo-url"
+              placeholder="https://github.com/org/my-outputs.git"
+              value={artifactsRepoUrl}
+              onChange={(e) => setArtifactsRepoUrl(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              The repository where your workflow outputs will be saved
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="artifacts-branch">Branch</Label>
+            <Input
+              id="artifacts-branch"
+              placeholder="main"
+              value={artifactsBranch}
+              onChange={(e) => setArtifactsBranch(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Branch to push artifacts to (will be created if it doesn't exist)
+            </p>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setArtifactsRemoteDialogOpen(false)}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfigureArtifactsRemote}
+            disabled={!artifactsRepoUrl.trim()}
+          >
+            Configure Remote
           </Button>
         </DialogFooter>
       </DialogContent>

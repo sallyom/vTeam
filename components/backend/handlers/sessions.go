@@ -2721,3 +2721,170 @@ func DiffSessionRepo(c *gin.Context) {
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
+
+// GET /api/projects/:projectName/agentic-sessions/:sessionName/git/status?path=artifacts
+// GetGitStatus returns git status for a directory in the workspace
+func GetGitStatus(c *gin.Context) {
+	project := c.Param("projectName")
+	session := c.Param("sessionName")
+	relativePath := strings.TrimSpace(c.Query("path"))
+
+	if relativePath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path parameter required"})
+		return
+	}
+
+	// Build absolute path
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, relativePath)
+
+	// Get content service endpoint
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-status?path=%s", serviceName, project, url.QueryEscape(absPath))
+
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, endpoint, nil)
+	if v := c.GetHeader("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/configure-remote
+// ConfigureGitRemote initializes git and configures remote for a workspace directory
+// Body: { path: string, remoteUrl: string, branch: string }
+func ConfigureGitRemote(c *gin.Context) {
+	project := c.Param("projectName")
+	session := c.Param("sessionName")
+
+	var body struct {
+		Path      string `json:"path" binding:"required"`
+		RemoteUrl string `json:"remoteUrl" binding:"required"`
+		Branch    string `json:"branch"`
+	}
+
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	if body.Branch == "" {
+		body.Branch = "main"
+	}
+
+	// Build absolute path
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, body.Path)
+
+	// Get content service endpoint
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-configure-remote", serviceName, project)
+
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"path":      absPath,
+		"remoteUrl": body.RemoteUrl,
+		"branch":    body.Branch,
+	})
+
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	if v := c.GetHeader("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+}
+
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/synchronize
+// SynchronizeGit commits, pulls, and pushes changes for a workspace directory
+// Body: { path: string, message?: string, branch?: string }
+func SynchronizeGit(c *gin.Context) {
+	project := c.Param("projectName")
+	session := c.Param("sessionName")
+
+	var body struct {
+		Path    string `json:"path" binding:"required"`
+		Message string `json:"message"`
+		Branch  string `json:"branch"`
+	}
+
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	// Auto-generate commit message if not provided
+	if body.Message == "" {
+		body.Message = fmt.Sprintf("Session %s - %s", session, time.Now().Format(time.RFC3339))
+	}
+
+	// Build absolute path
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, body.Path)
+
+	// Get content service endpoint
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-sync", serviceName, project)
+
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"path":    absPath,
+		"message": body.Message,
+		"branch":  body.Branch,
+	})
+
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req.Header.Set("Content-Type", "application/json")
+	if v := c.GetHeader("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
+}

@@ -15,6 +15,9 @@ func registerContentRoutes(r *gin.Engine) {
 	r.POST("/content/github/push", handlers.ContentGitPush)
 	r.POST("/content/github/abandon", handlers.ContentGitAbandon)
 	r.GET("/content/github/diff", handlers.ContentGitDiff)
+	r.GET("/content/git-status", handlers.ContentGitStatus)
+	r.POST("/content/git-configure-remote", handlers.ContentGitConfigureRemote)
+	r.POST("/content/git-sync", handlers.ContentGitSync)
 }
 
 func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
@@ -52,6 +55,9 @@ func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
 			projectGroup.POST("/agentic-sessions/:sessionName/github/push", handlers.PushSessionRepo)
 			projectGroup.POST("/agentic-sessions/:sessionName/github/abandon", handlers.AbandonSessionRepo)
 			projectGroup.GET("/agentic-sessions/:sessionName/github/diff", handlers.DiffSessionRepo)
+			projectGroup.GET("/agentic-sessions/:sessionName/git/status", handlers.GetGitStatus)
+			projectGroup.POST("/agentic-sessions/:sessionName/git/configure-remote", handlers.ConfigureGitRemote)
+			projectGroup.POST("/agentic-sessions/:sessionName/git/synchronize", handlers.SynchronizeGit)
 			projectGroup.GET("/agentic-sessions/:sessionName/k8s-resources", handlers.GetSessionK8sResources)
 			projectGroup.POST("/agentic-sessions/:sessionName/spawn-content-pod", handlers.SpawnContentPod)
 			projectGroup.GET("/agentic-sessions/:sessionName/content-pod-status", handlers.GetContentPodStatus)

@@ -1129,3 +1129,95 @@ func createBranchInRepo(ctx context.Context, repo GitRepo, branchName, githubTok
 	log.Printf("Successfully created and pushed branch '%s' in %s", branchName, repoURL)
 	return nil
 }
+
+// InitRepo initializes a new git repository
+func InitRepo(ctx context.Context, repoDir string) error {
+	cmd := exec.CommandContext(ctx, "git", "init")
+	cmd.Dir = repoDir
+	
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to init git repo: %w (output: %s)", err, string(out))
+	}
+	
+	// Configure default user if not set
+	cmd = exec.CommandContext(ctx, "git", "config", "user.name", "Ambient Code Bot")
+	cmd.Dir = repoDir
+	_ = cmd.Run()  // Best effort
+	
+	cmd = exec.CommandContext(ctx, "git", "config", "user.email", "bot@ambient-code.local")
+	cmd.Dir = repoDir
+	_ = cmd.Run()  // Best effort
+	
+	return nil
+}
+
+// ConfigureRemote adds or updates a git remote
+func ConfigureRemote(ctx context.Context, repoDir, remoteName, remoteUrl string) error {
+	// Try to remove existing remote first
+	cmd := exec.CommandContext(ctx, "git", "remote", "remove", remoteName)
+	cmd.Dir = repoDir
+	_ = cmd.Run()  // Ignore error if remote doesn't exist
+	
+	// Add the remote
+	cmd = exec.CommandContext(ctx, "git", "remote", "add", remoteName, remoteUrl)
+	cmd.Dir = repoDir
+	
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to add remote: %w (output: %s)", err, string(out))
+	}
+	
+	return nil
+}
+
+// SyncRepo commits, pulls, and pushes changes
+func SyncRepo(ctx context.Context, repoDir, commitMessage, branch string) error {
+	if branch == "" {
+		branch = "main"
+	}
+	
+	// Stage all changes
+	cmd := exec.CommandContext(ctx, "git", "add", ".")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to stage changes: %w (output: %s)", err, string(out))
+	}
+	
+	// Commit changes (only if there are changes)
+	cmd = exec.CommandContext(ctx, "git", "commit", "-m", commitMessage)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		// Check if error is "nothing to commit"
+		outStr := string(out)
+		if !strings.Contains(outStr, "nothing to commit") && !strings.Contains(outStr, "no changes added") {
+			return fmt.Errorf("failed to commit: %w (output: %s)", err, outStr)
+		}
+		// Nothing to commit is not an error
+		log.Printf("SyncRepo: nothing to commit in %s", repoDir)
+	}
+	
+	// Pull with rebase to sync with remote
+	cmd = exec.CommandContext(ctx, "git", "pull", "--rebase", "origin", branch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		outStr := string(out)
+		// Check if it's just "no tracking information" (first push)
+		if !strings.Contains(outStr, "no tracking information") && !strings.Contains(outStr, "couldn't find remote ref") {
+			return fmt.Errorf("failed to pull: %w (output: %s)", err, outStr)
+		}
+		log.Printf("SyncRepo: pull skipped (no remote tracking): %s", outStr)
+	}
+	
+	// Push to remote
+	cmd = exec.CommandContext(ctx, "git", "push", "-u", "origin", branch)
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		outStr := string(out)
+		if strings.Contains(outStr, "Permission denied") || strings.Contains(outStr, "403") {
+			return fmt.Errorf("permission denied: no push access to remote")
+		}
+		return fmt.Errorf("failed to push: %w (output: %s)", err, outStr)
+	}
+	
+	log.Printf("Successfully synchronized %s to %s", repoDir, branch)
+	return nil
+}

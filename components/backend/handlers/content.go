@@ -149,6 +149,153 @@ func ContentGitDiff(c *gin.Context) {
 	})
 }
 
+// ContentGitStatus handles GET /content/git-status?path=
+func ContentGitStatus(c *gin.Context) {
+	path := filepath.Clean("/" + strings.TrimSpace(c.Query("path")))
+	if path == "/" || strings.Contains(path, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	
+	abs := filepath.Join(StateBaseDir, path)
+	
+	// Check if directory exists
+	if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+		c.JSON(http.StatusOK, gin.H{
+			"initialized": false,
+			"hasChanges":  false,
+		})
+		return
+	}
+	
+	// Check if git repo exists
+	gitDir := filepath.Join(abs, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"initialized": false,
+			"hasChanges":  false,
+		})
+		return
+	}
+	
+	// Get git status using existing git package
+	summary, err := GitDiffRepo(c.Request.Context(), abs)
+	if err != nil {
+		log.Printf("ContentGitStatus: git diff failed: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"initialized": true,
+			"hasChanges":  false,
+		})
+		return
+	}
+	
+	hasChanges := summary.FilesAdded > 0 || summary.FilesRemoved > 0 || summary.TotalAdded > 0 || summary.TotalRemoved > 0
+	
+	c.JSON(http.StatusOK, gin.H{
+		"initialized":      true,
+		"hasChanges":       hasChanges,
+		"filesAdded":       summary.FilesAdded,
+		"filesRemoved":     summary.FilesRemoved,
+		"uncommittedFiles": summary.FilesAdded + summary.FilesRemoved,
+		"totalAdded":       summary.TotalAdded,
+		"totalRemoved":     summary.TotalRemoved,
+	})
+}
+
+// ContentGitConfigureRemote handles POST /content/git-configure-remote
+// Body: { path: string, remoteUrl: string, branch: string }
+func ContentGitConfigureRemote(c *gin.Context) {
+	var body struct {
+		Path      string `json:"path"`
+		RemoteUrl string `json:"remoteUrl"`
+		Branch    string `json:"branch"`
+	}
+	
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	
+	path := filepath.Clean("/" + body.Path)
+	if path == "/" || strings.Contains(path, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	
+	abs := filepath.Join(StateBaseDir, path)
+	
+	// Check if directory exists
+	if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "directory not found"})
+		return
+	}
+	
+	// Initialize git if not already
+	gitDir := filepath.Join(abs, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		if err := git.InitRepo(c.Request.Context(), abs); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initialize git"})
+			return
+		}
+		log.Printf("Initialized git repository at %s", abs)
+	}
+	
+	// Configure remote
+	if err := git.ConfigureRemote(c.Request.Context(), abs, "origin", body.RemoteUrl); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to configure remote"})
+		return
+	}
+	
+	log.Printf("Configured remote for %s: %s", abs, body.RemoteUrl)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "remote configured",
+		"remote":  body.RemoteUrl,
+		"branch":  body.Branch,
+	})
+}
+
+// ContentGitSync handles POST /content/git-sync
+// Body: { path: string, message: string, branch: string }
+func ContentGitSync(c *gin.Context) {
+	var body struct {
+		Path    string `json:"path"`
+		Message string `json:"message"`
+		Branch  string `json:"branch"`
+	}
+	
+	if err := c.BindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	
+	path := filepath.Clean("/" + body.Path)
+	if path == "/" || strings.Contains(path, "..") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	
+	abs := filepath.Join(StateBaseDir, path)
+	
+	// Check if git repo exists
+	gitDir := filepath.Join(abs, ".git")
+	if _, err := os.Stat(gitDir); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "git repository not initialized"})
+		return
+	}
+	
+	// Perform git sync operations
+	if err := git.SyncRepo(c.Request.Context(), abs, body.Message, body.Branch); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	
+	log.Printf("Synchronized git repository at %s to branch %s", abs, body.Branch)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "synchronized successfully",
+		"branch":  body.Branch,
+	})
+}
+
 // ContentWrite handles POST /content/write when running in CONTENT_SERVICE_MODE
 func ContentWrite(c *gin.Context) {
 	var req struct {
