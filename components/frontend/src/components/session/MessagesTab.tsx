@@ -35,7 +35,6 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chat
   const [ending, setEnding] = useState(false);
   const [showSystemMessages, setShowSystemMessages] = useState(false);
   
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
@@ -78,9 +77,12 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chat
     setIsAtBottom(checkIfAtBottom());
   };
 
-  // Scroll to bottom function
+  // Scroll to bottom function - only scrolls the messages container, not the whole page
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = messagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   };
 
   // Auto-scroll to bottom when new messages arrive, but only if user was already at bottom
@@ -148,9 +150,6 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chat
             </p>
           </div>
         )}
-        
-        {/* Invisible anchor for scrolling to bottom */}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Settings for non-interactive sessions with messages */}
