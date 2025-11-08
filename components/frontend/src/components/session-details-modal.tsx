@@ -5,6 +5,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import type { AgenticSession } from '@/types/agentic-session';
 import { getPhaseColor } from '@/utils/session-helpers';
 
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  
+  if (hours > 0) {
+    const remainingMinutes = minutes % 60;
+    const remainingSeconds = seconds % 60;
+    return `${hours}h ${remainingMinutes}m ${remainingSeconds}s`;
+  } else if (minutes > 0) {
+    const remainingSeconds = seconds % 60;
+    return `${minutes}m ${remainingSeconds}s`;
+  } else {
+    return `${seconds}s`;
+  }
+}
+
 type SessionDetailsModalProps = {
   session: AgenticSession;
   open: boolean;
@@ -15,8 +32,6 @@ type SessionDetailsModalProps = {
     pvcSize?: string;
   };
   messageCount: number;
-  promptExpanded: boolean;
-  onPromptToggle: () => void;
 };
 
 export function SessionDetailsModal({
@@ -26,8 +41,6 @@ export function SessionDetailsModal({
   durationMs,
   k8sResources,
   messageCount,
-  promptExpanded,
-  onPromptToggle,
 }: SessionDetailsModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -69,13 +82,13 @@ export function SessionDetailsModal({
             
             <div className="flex items-start gap-3">
               <span className="font-semibold text-gray-700 min-w-[100px]">Duration:</span>
-              <span className="text-gray-900">{typeof durationMs === "number" ? `${durationMs}ms` : "-"}</span>
+              <span className="text-gray-900">{typeof durationMs === "number" ? formatDuration(durationMs) : "-"}</span>
             </div>
             
             {k8sResources?.pvcName && (
               <div className="flex items-start gap-3">
                 <span className="font-semibold text-gray-700 min-w-[100px]">PVC:</span>
-                <span className="text-gray-900 font-mono text-xs break-all">{k8sResources.pvcName}</span>
+                <span className="text-gray-900 font-mono break-all">{k8sResources.pvcName}</span>
               </div>
             )}
             
@@ -89,7 +102,7 @@ export function SessionDetailsModal({
             {session.status?.jobName && (
               <div className="flex items-start gap-3">
                 <span className="font-semibold text-gray-700 min-w-[100px]">K8s Job:</span>
-                <span className="text-gray-900 font-mono text-xs break-all">{session.status.jobName}</span>
+                <span className="text-gray-900 font-mono break-all">{session.status.jobName}</span>
               </div>
             )}
             
@@ -100,21 +113,13 @@ export function SessionDetailsModal({
           </div>
           
           {session.spec.prompt && (
-            <div className="pt-2 border-t">
-              <div className="flex items-start gap-3">
-                <span className="font-semibold text-gray-700 min-w-[100px]">Session prompt:</span>
-                <button
-                  onClick={onPromptToggle}
-                  className="text-blue-600 hover:underline text-sm"
-                >
-                  {promptExpanded ? "Hide" : "View"}
-                </button>
+            <div className="pt-2">
+              <div className="mb-2">
+                <span className="font-semibold text-gray-700">Session prompt:</span>
               </div>
-              {promptExpanded && (
-                <div className="mt-3 p-4 bg-gray-50 rounded-md border border-gray-200">
-                  <p className="whitespace-pre-wrap text-sm text-gray-800 leading-relaxed">{session.spec.prompt}</p>
-                </div>
-              )}
+              <div className="max-h-[200px] overflow-y-auto p-4 bg-gray-50 rounded-md border border-gray-200">
+                <p className="whitespace-pre-wrap text-sm text-gray-800 leading-relaxed">{session.spec.prompt}</p>
+              </div>
             </div>
           )}
         </div>
