@@ -520,6 +520,8 @@ class ClaudeCodeAdapter:
                             path = str(payload.get('path') or '').strip()
                             if git_url:
                                 await self._handle_workflow_selection(git_url, branch, path)
+                                # Break out of interactive loop to trigger restart
+                                break
                             else:
                                 await self._send_log("⚠️ Workflow change request missing gitUrl")
                         elif mtype == 'interrupt':
