@@ -85,10 +85,33 @@ export default function ProjectsPage() {
       <div className="sticky top-0 z-20 bg-white border-b">
         <div className="container mx-auto px-6 py-6">
           <PageHeader
-            title="Projects"
-            description="Manage your Ambient AI projects and configurations"
-            actions={
-              <>
+            title="Workspaces"
+            description="Select or create a workspace to get started"
+          />
+        </div>
+      </div>
+
+      <div className="container mx-auto p-0">
+        {/* Error state */}
+        {error && (
+          <div className="px-6 pt-4">
+            <ErrorMessage error={error} onRetry={() => refetch()} />
+          </div>
+        )}
+
+        {/* Content */}
+        <div className="px-6 pt-4">
+        <Card>
+          <CardHeader>
+            <div className="flex items-start justify-between">
+              <div>
+                <CardTitle>Workspaces</CardTitle>
+                <CardDescription>
+                  Configure and manage workspace settings, resource limits, and access
+                  controls
+                </CardDescription>
+              </div>
+              <div className="flex gap-2">
                 <Button
                   variant="outline"
                   onClick={handleRefreshClick}
