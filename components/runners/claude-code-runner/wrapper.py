@@ -700,6 +700,8 @@ class ClaudeCodeAdapter:
                         logging.info(f"Cloning {name} from {url} (branch: {branch})")
                         clone_url = self._url_with_token(url, token) if token else url
                         await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
+                        # Update remote URL to persist token (git strips it from clone URL)
+                        await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
                         logging.info(f"Successfully cloned {name}")
                     elif reusing_workspace:
                         # Reusing workspace - preserve local changes from previous session
@@ -755,6 +757,8 @@ class ClaudeCodeAdapter:
                 logging.info(f"Cloning from {input_repo} (branch: {input_branch})")
                 clone_url = self._url_with_token(input_repo, token) if token else input_repo
                 await self._run_cmd(["git", "clone", "--branch", input_branch, "--single-branch", clone_url, str(workspace)], cwd=str(workspace.parent))
+                # Update remote URL to persist token (git strips it from clone URL)
+                await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workspace), ignore_errors=True)
                 logging.info("Successfully cloned repository")
             elif reusing_workspace:
                 # Reusing workspace - preserve local changes from previous session
@@ -1598,7 +1602,7 @@ class ClaudeCodeAdapter:
             return ""
 
     async def _fetch_github_token(self) -> str:
-        # Try cached value from env first
+        # Try cached value from env first (GITHUB_TOKEN from ambient-non-vertex-integrations)
         cached = os.getenv("GITHUB_TOKEN", "").strip()
         if cached:
             logging.info("Using GITHUB_TOKEN from environment")

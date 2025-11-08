@@ -105,47 +105,39 @@ func GetGitHubToken(ctx context.Context, k8sClient *kubernetes.Clientset, dynCli
 		}
 	}
 
-	// Fall back to project runner secret GIT_TOKEN
+	// Fall back to project integration secret GITHUB_TOKEN (hardcoded secret name)
 	if k8sClient == nil {
-		log.Printf("Cannot read runner secret: k8s client is nil")
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		log.Printf("Cannot read integration secret: k8s client is nil")
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GITHUB_TOKEN in integration secrets")
 	}
 
-	settings, err := getProjectSettings(ctx, dynClient, project)
+	const secretName = "ambient-non-vertex-integrations"
 
-	// Default to "ambient-runner-secrets" if not configured
-	secretName := "ambient-runner-secrets"
-	if err != nil {
-		log.Printf("Failed to get ProjectSettings for %s (using default secret name): %v", project, err)
-	} else if settings != nil && settings.RunnerSecret != "" {
-		secretName = settings.RunnerSecret
-	}
-
-	log.Printf("Attempting to read GIT_TOKEN from secret %s/%s", project, secretName)
+	log.Printf("Attempting to read GITHUB_TOKEN from secret %s/%s", project, secretName)
 
 	secret, err := k8sClient.CoreV1().Secrets(project).Get(ctx, secretName, v1.GetOptions{})
 	if err != nil {
-		log.Printf("Failed to get runner secret %s/%s: %v", project, secretName, err)
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		log.Printf("Failed to get integration secret %s/%s: %v", project, secretName, err)
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GITHUB_TOKEN in integration secrets")
 	}
 
 	if secret.Data == nil {
 		log.Printf("Secret %s/%s exists but Data is nil", project, secretName)
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GITHUB_TOKEN in integration secrets")
 	}
 
-	token, ok := secret.Data["GIT_TOKEN"]
+	token, ok := secret.Data["GITHUB_TOKEN"]
 	if !ok {
-		log.Printf("Secret %s/%s exists but has no GIT_TOKEN key (available keys: %v)", project, secretName, getSecretKeys(secret.Data))
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		log.Printf("Secret %s/%s exists but has no GITHUB_TOKEN key (available keys: %v)", project, secretName, getSecretKeys(secret.Data))
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GITHUB_TOKEN in integration secrets")
 	}
 
 	if len(token) == 0 {
-		log.Printf("Secret %s/%s has GIT_TOKEN key but value is empty", project, secretName)
-		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GIT_TOKEN in project runner secret")
+		log.Printf("Secret %s/%s has GITHUB_TOKEN key but value is empty", project, secretName)
+		return "", fmt.Errorf("no GitHub credentials available. Either connect GitHub App or configure GITHUB_TOKEN in integration secrets")
 	}
 
-	log.Printf("Using GIT_TOKEN from project runner secret %s/%s", project, secretName)
+	log.Printf("Using GITHUB_TOKEN from integration secret %s/%s", project, secretName)
 	return string(token), nil
 }
 

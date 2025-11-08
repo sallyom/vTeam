@@ -3,5 +3,3 @@ kind: Kustomization
 resources:
 - agenticsessions-crd.yaml
 - projectsettings-crd.yaml
-
-
