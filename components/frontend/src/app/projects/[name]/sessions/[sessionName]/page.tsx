@@ -2010,7 +2010,7 @@ export default function ProjectSessionDetailPage({
               onChange={(e) => setArtifactsBranch(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Branch to push artifacts to (will be created if it doesn't exist)
+              Branch to push artifacts to (will be created if it doesn&apos;t exist)
             </p>
           </div>
         </div>
