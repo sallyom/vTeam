@@ -549,7 +549,10 @@ func parseFrontmatter(filePath string) map[string]string {
 
 // findActiveWorkflowDir finds the active workflow directory for a session
 func findActiveWorkflowDir(sessionName string) string {
-	workflowsBase := filepath.Join(StateBaseDir, "sessions", sessionName, "workspace", "workflows")
+	// Workflows are stored at {StateBaseDir}/workflows/{workflow-name}
+	// Note: sessionName parameter kept for future use/filtering, but currently
+	// the content pod's StateBaseDir already points to the session-specific workspace
+	workflowsBase := filepath.Join(StateBaseDir, "workflows")
 
 	entries, err := os.ReadDir(workflowsBase)
 	if err != nil {
@@ -557,9 +560,9 @@ func findActiveWorkflowDir(sessionName string) string {
 		return ""
 	}
 
-	// Find first directory that has .claude subdirectory
+	// Find first directory that has .claude subdirectory (excluding temp clones)
 	for _, entry := range entries {
-		if entry.IsDir() && entry.Name() != "default" {
+		if entry.IsDir() && entry.Name() != "default" && !strings.HasSuffix(entry.Name(), "-clone-temp") {
 			claudeDir := filepath.Join(workflowsBase, entry.Name(), ".claude")
 			if stat, err := os.Stat(claudeDir); err == nil && stat.IsDir() {
 				return filepath.Join(workflowsBase, entry.Name())

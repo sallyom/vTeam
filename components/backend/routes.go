@@ -18,6 +18,7 @@ func registerContentRoutes(r *gin.Engine) {
 	r.GET("/content/git-status", handlers.ContentGitStatus)
 	r.POST("/content/git-configure-remote", handlers.ContentGitConfigureRemote)
 	r.POST("/content/git-sync", handlers.ContentGitSync)
+	r.GET("/content/workflow-metadata", handlers.ContentWorkflowMetadata)
 }
 
 func registerRoutes(r *gin.Engine, jiraHandler *jira.Handler) {
