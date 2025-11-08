@@ -414,7 +414,7 @@ export default function ProjectRFEDetailPage() {
                             </div>
                           )}
                         </>
-                      )}
+                      ) : null}
                     </AccordionContent>
                   </AccordionItem>
                 </Accordion>

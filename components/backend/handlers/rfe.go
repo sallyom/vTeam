@@ -166,12 +166,18 @@ func CreateProjectRFEWorkflow(c *gin.Context) {
 		return
 	}
 
+	// Handle optional umbrella repo (will be set to default during seeding if not provided)
+	var umbrellaRepoPtr *GitRepository
+	if req.UmbrellaRepo.URL != "" {
+		umbrellaRepoPtr = &req.UmbrellaRepo
+	}
+
 	workflow := &RFEWorkflow{
 		ID:              workflowID,
 		Title:           req.Title,
 		Description:     req.Description,
 		BranchName:      branchName,
-		UmbrellaRepo:    &req.UmbrellaRepo,
+		UmbrellaRepo:    umbrellaRepoPtr,
 		SupportingRepos: req.SupportingRepos,
 		WorkspacePath:   req.WorkspacePath,
 		Project:         project,
@@ -322,9 +328,35 @@ func SeedProjectRFEWorkflow(c *gin.Context) {
 		return
 	}
 	wf := RfeFromUnstructured(item)
-	if wf == nil || wf.UmbrellaRepo == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No spec repo configured"})
+	if wf == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid workflow"})
 		return
+	}
+
+	// If no umbrella repo is configured, default to spec-kit-template (configurable via env vars)
+	if wf.UmbrellaRepo == nil || wf.UmbrellaRepo.URL == "" {
+		defaultURL := os.Getenv("DEFAULT_SPEC_REPO_URL")
+		if defaultURL == "" {
+			defaultURL = "https://github.com/Gkrumbach07/spec-kit-template.git"
+		}
+		defaultBranchStr := os.Getenv("DEFAULT_SPEC_REPO_BRANCH")
+		if defaultBranchStr == "" {
+			defaultBranchStr = "main"
+		}
+
+		wf.UmbrellaRepo = &GitRepository{
+			URL:    defaultURL,
+			Branch: &defaultBranchStr,
+		}
+
+		// Update the CR with the default umbrella repo
+		item.Object["spec"].(map[string]interface{})["umbrellaRepo"] = map[string]interface{}{
+			"url":    wf.UmbrellaRepo.URL,
+			"branch": *wf.UmbrellaRepo.Branch,
+		}
+		if _, err := DynamicClient.Resource(gvr).Namespace(project).Update(c.Request.Context(), item, v1.UpdateOptions{}); err != nil {
+			log.Printf("Warning: Failed to update workflow with default umbrella repo: %v", err)
+		}
 	}
 
 	// Ensure we have a branch name

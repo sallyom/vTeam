@@ -25,13 +25,21 @@ const repoSchema = z.object({
   branch: z.string().min(1, 'Branch is required').default('main'),
 });
 
+const optionalRepoSchema = z.object({
+  url: z.string().optional().refine(
+    (val) => !val || val === '' || z.string().url().safeParse(val).success,
+    'Please enter a valid repository URL'
+  ),
+  branch: z.string().min(1, 'Branch is required').default('main'),
+});
+
 const formSchema = z.object({
   title: z.string().min(5, 'Title must be at least 5 characters long'),
   description: z.string().min(20, 'Description must be at least 20 characters long'),
   branchName: z.string().min(1, 'Branch name is required'),
   workspacePath: z.string().optional(),
   parentOutcome: z.string().optional(),
-  umbrellaRepo: repoSchema,
+  umbrellaRepo: optionalRepoSchema,
   supportingRepos: z.array(repoSchema).optional().default([]),
 }).refine(
   (data) => {
@@ -130,7 +138,7 @@ export default function ProjectNewRFEWorkflowPage() {
       workspacePath: values.workspacePath || undefined,
       parentOutcome: values.parentOutcome?.trim() || undefined,
       umbrellaRepo: {
-        url: values.umbrellaRepo.url.trim(),
+        url: (values.umbrellaRepo.url || '').trim(),
         branch: (values.umbrellaRepo.branch || 'main').trim(),
       },
       supportingRepos: (values.supportingRepos || [])
@@ -277,12 +285,18 @@ export default function ProjectNewRFEWorkflowPage() {
                       name={`umbrellaRepo.url`}
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Spec Repo URL</FormLabel>
+                          <FormLabel>
+                            Spec Repo URL <span className="text-muted-foreground font-normal">(optional)</span>
+                          </FormLabel>
                           <FormControl>
                             <Input placeholder="https://github.com/org/repo.git" {...field} />
                           </FormControl>
                           <FormDescription>
-                            The spec repository contains your feature specifications, planning documents, and agent configurations for this RFE workspace
+                            The spec repository contains your feature specifications, planning documents, and agent configurations.
+                            <br />
+                            <strong>If not provided, spec-kit files will be loaded from {process.env.NEXT_PUBLIC_DEFAULT_SPEC_REPO_URL || 'https://github.com/Gkrumbach07/spec-kit-template'} {process.env.NEXT_PUBLIC_DEFAULT_SPEC_REPO_BRANCH || 'main'}.</strong>
+                            <br />
+                            <span className="text-muted-foreground text-xs">Artifact files can be downloaded. Jira and GDrive integration coming soon.</span>
                           </FormDescription>
                           <FormMessage />
                         </FormItem>

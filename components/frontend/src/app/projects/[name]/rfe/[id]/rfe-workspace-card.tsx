@@ -114,7 +114,7 @@ export function RfeWorkspaceCard({
           </div>
         )}
 
-        {!isSeeded && !seedingStatus.checking && seedingStatus.hasChecked && workflow.umbrellaRepo && (
+        {!isSeeded && !seedingStatus.checking && seedingStatus.hasChecked && (
           <Alert variant="destructive" className="mt-4">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Spec Repository Not Seeded</AlertTitle>
@@ -128,6 +128,11 @@ export function RfeWorkspaceCard({
                 <li>Add Spec-Kit template files for spec-driven development</li>
                 <li>Add agent definition files in the .claude directory</li>
               </ul>
+              {!workflow.umbrellaRepo && (
+                <div className="mb-3 p-2 bg-blue-100 border border-blue-300 rounded text-sm text-blue-800">
+                  <strong>Note:</strong> No spec repository was provided. Spec-kit files will be loaded from the default template repository during seeding.
+                </div>
+              )}
               {seedingError && (
                 <div className="mb-3 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
                   <strong>Seeding Failed:</strong> {seedingError}
@@ -161,7 +166,7 @@ export function RfeWorkspaceCard({
           </Alert>
         )}
 
-        {seedingStatus.checking && workflow.umbrellaRepo && (
+        {seedingStatus.checking && (
           <div className="mt-4 flex items-center gap-2 text-gray-600 bg-gray-50 p-3 rounded-lg">
             <Loader2 className="h-5 w-5 animate-spin" />
             <span className="text-sm">Checking repository seeding status...</span>
