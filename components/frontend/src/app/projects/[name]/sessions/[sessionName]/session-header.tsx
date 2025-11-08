@@ -63,10 +63,10 @@ export function SessionHeader({
           {session.spec.displayName && (
             <div className="text-sm text-gray-500">{session.metadata.name}</div>
           )}
-          <div className="text-xs text-gray-500 mt-1">
-            <span>{mode} session</span>
+          <div className="text-xs text-gray-500 mt-3">
+            <span>Started {started || formatDistanceToNow(new Date(session.metadata.creationTimestamp), { addSuffix: true })}</span>
             <span className="mx-1">•</span>
-            <span>{started || formatDistanceToNow(new Date(session.metadata.creationTimestamp), { addSuffix: true })}</span>
+            <span>{mode} session</span>
             <span className="mx-1">•</span>
             <span>{modelName}</span>
             <span className="mx-1">•</span>
