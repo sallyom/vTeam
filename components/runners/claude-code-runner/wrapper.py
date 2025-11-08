@@ -237,10 +237,8 @@ class ClaudeCodeAdapter:
                     
                     if derived_name:
                         workflow_path = str(Path(self.context.workspace_path) / "workflows" / derived_name)
-                        # Check if path is specified within the workflow
-                        workflow_subpath = (os.getenv('ACTIVE_WORKFLOW_PATH') or '').strip()
-                        if workflow_subpath:
-                            workflow_path = str(Path(workflow_path) / workflow_subpath)
+                        # NOTE: Don't append ACTIVE_WORKFLOW_PATH here - we already extracted 
+                        # the subdirectory during clone, so workflow_path is the final location
                         
                         if Path(workflow_path).exists():
                             cwd_path = workflow_path

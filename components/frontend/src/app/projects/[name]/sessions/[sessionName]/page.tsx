@@ -176,6 +176,16 @@ export default function ProjectSessionDetailPage({
         setActiveWorkflow("custom");
       }
     }
+    
+    // Load artifacts remote from session annotations if present
+    const artifactsUrl = session?.metadata?.annotations?.['ambient-code.io/artifacts-remote-url'];
+    const artifactsBranch = session?.metadata?.annotations?.['ambient-code.io/artifacts-remote-branch'];
+    if (artifactsUrl) {
+      setArtifactsRemote({
+        url: artifactsUrl,
+        branch: artifactsBranch || "main",
+      });
+    }
   }, [session, ootbWorkflows]);
 
   // Workspace state - removed unused tree/file management code
@@ -1155,13 +1165,30 @@ export default function ProjectSessionDetailPage({
                 <AccordionContent className="pt-2 pb-3">
                   <div className="space-y-3">
                     
+                    {/* File Browser for Artifacts */}
+                    <div className="border rounded-lg p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium">Files & Directories</span>
+                        <Button variant="ghost" size="sm" onClick={() => window.location.reload()}>
+                          <RefreshCw className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <div className="text-xs text-muted-foreground mb-2">
+                        Path: <code className="bg-muted px-1 py-0.5 rounded">artifacts/</code>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        All workflow outputs are stored here. Configure a Git remote below to save and sync your work.
+                      </p>
+                    </div>
+                    
                     {/* Remote Configuration Status */}
                     {!artifactsRemote ? (
                       <Alert className="border-blue-200 bg-blue-50">
                         <Info className="h-4 w-4 text-blue-600" />
-                        <AlertTitle className="text-blue-900">No Remote Configured</AlertTitle>
+                        <AlertTitle className="text-blue-900">Configure Git Remote</AlertTitle>
                         <AlertDescription className="text-blue-800">
-                          <p className="text-sm mb-3">Configure a Git repository to save and sync your work.</p>
+                          <p className="text-sm mb-2">Set up a Git repository to version control and sync your outputs.</p>
+                          <p className="text-xs mb-3 text-blue-600">This will initialize git in the artifacts directory and configure the remote.</p>
                           <Button onClick={() => setArtifactsRemoteDialogOpen(true)} size="sm" className="w-full">
                             <GitBranch className="mr-2 h-4 w-4" />
                             Configure Remote
@@ -1987,7 +2014,7 @@ export default function ProjectSessionDetailPage({
               onChange={(e) => setArtifactsRepoUrl(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              The repository where your workflow outputs will be saved
+              The repository where your workflow outputs will be saved. Git will be initialized in artifacts/ if not already done.
             </p>
           </div>
 

@@ -2771,58 +2771,82 @@ func GetGitStatus(c *gin.Context) {
 // Body: { path: string, remoteUrl: string, branch: string }
 func ConfigureGitRemote(c *gin.Context) {
 	project := c.Param("projectName")
-	session := c.Param("sessionName")
-
+	sessionName := c.Param("sessionName")
+	_, reqDyn := GetK8sClientsForRequest(c)
+	
 	var body struct {
 		Path      string `json:"path" binding:"required"`
 		RemoteUrl string `json:"remoteUrl" binding:"required"`
 		Branch    string `json:"branch"`
 	}
-
+	
 	if err := c.BindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 		return
 	}
-
+	
 	if body.Branch == "" {
 		body.Branch = "main"
 	}
-
+	
 	// Build absolute path
-	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", session, body.Path)
-
+	absPath := fmt.Sprintf("/sessions/%s/workspace/%s", sessionName, body.Path)
+	
 	// Get content service endpoint
-	serviceName := fmt.Sprintf("temp-content-%s", session)
+	serviceName := fmt.Sprintf("temp-content-%s", sessionName)
 	reqK8s, _ := GetK8sClientsForRequest(c)
 	if reqK8s != nil {
 		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
-			serviceName = fmt.Sprintf("ambient-content-%s", session)
+			serviceName = fmt.Sprintf("ambient-content-%s", sessionName)
 		}
 	} else {
-		serviceName = fmt.Sprintf("ambient-content-%s", session)
+		serviceName = fmt.Sprintf("ambient-content-%s", sessionName)
 	}
-
+	
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-configure-remote", serviceName, project)
-
+	
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"path":      absPath,
 		"remoteUrl": body.RemoteUrl,
 		"branch":    body.Branch,
 	})
-
+	
 	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
 	req.Header.Set("Content-Type", "application/json")
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
 	}
-
+	
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
 		return
 	}
 	defer resp.Body.Close()
-
+	
+	// If successful, persist remote config to session annotations for persistence
+	if resp.StatusCode == http.StatusOK && body.Path == "artifacts" {
+		// Persist artifacts remote config in annotations
+		gvr := GetAgenticSessionV1Alpha1Resource()
+		item, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), sessionName, v1.GetOptions{})
+		if err == nil {
+			metadata := item.Object["metadata"].(map[string]interface{})
+			if metadata["annotations"] == nil {
+				metadata["annotations"] = make(map[string]interface{})
+			}
+			anns := metadata["annotations"].(map[string]interface{})
+			anns["ambient-code.io/artifacts-remote-url"] = body.RemoteUrl
+			anns["ambient-code.io/artifacts-remote-branch"] = body.Branch
+			
+			_, err = reqDyn.Resource(gvr).Namespace(project).Update(c.Request.Context(), item, v1.UpdateOptions{})
+			if err != nil {
+				log.Printf("Warning: Failed to persist artifacts remote to annotations: %v", err)
+			} else {
+				log.Printf("Persisted artifacts remote to session annotations: %s@%s", body.RemoteUrl, body.Branch)
+			}
+		}
+	}
+	
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
