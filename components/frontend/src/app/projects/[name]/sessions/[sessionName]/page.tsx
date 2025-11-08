@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CloneSessionDialog } from "@/components/clone-session-dialog";
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { PageHeader } from "@/components/page-header";
+import { SessionHeader } from "./session-header";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { GitHubConnectionCard } from "@/components/github-connection-card";
 
@@ -1016,65 +1016,20 @@ export default function ProjectSessionDetailPage({
             ]}
             className="mb-4"
           />
-          <PageHeader
-            title={session.spec.displayName || session.metadata.name}
-            description={`Created ${formatDistanceToNow(new Date(session.metadata.creationTimestamp), { addSuffix: true })}`}
-            actions={
-              <>
-                {/* Continue button for completed sessions */}
-                {(session.status?.phase === "Completed" || session.status?.phase === "Failed" || session.status?.phase === "Stopped") && (
-                  <Button
-                    onClick={handleContinue}
-                    disabled={continueMutation.isPending}
-                  >
-                    <Play className="w-4 h-4 mr-2" />
-                    {continueMutation.isPending ? "Starting..." : "Continue"}
-                  </Button>
-                )}
-
-                {/* Stop button for active sessions */}
-                {(session.status?.phase === "Pending" || session.status?.phase === "Creating" || session.status?.phase === "Running") && (
-                  <Button
-                    variant="secondary"
-                    onClick={handleStop}
-                    disabled={stopMutation.isPending}
-                  >
-                    <Square className="w-4 h-4 mr-2" />
-                    {stopMutation.isPending ? "Stopping..." : "Stop"}
-                  </Button>
-                )}
-
-                {/* Actions dropdown menu */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="icon">
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <CloneSessionDialog
-                      session={session}
-                      onSuccess={() => refetchSession()}
-                      trigger={
-                        <DropdownMenuItem onSelect={(e) => e.preventDefault()}>
-                          <Copy className="w-4 h-4 mr-2" />
-                          Clone
-                        </DropdownMenuItem>
-                      }
-                    />
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      onClick={handleDelete}
-                      disabled={deleteMutation.isPending}
-                      className="text-red-600"
-                    >
-                      <Trash2 className="w-4 h-4 mr-2" />
-                      {deleteMutation.isPending ? "Deleting..." : "Delete"}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </>
+          <SessionHeader
+            session={session}
+            projectName={projectName}
+            actionLoading={
+              stopMutation.isPending ? "stopping" :
+              deleteMutation.isPending ? "deleting" :
+              null
             }
+            onRefresh={refetchSession}
+            onStop={handleStop}
+            onDelete={handleDelete}
+            durationMs={durationMs}
+            k8sResources={k8sResources}
+            messageCount={messages.length}
           />
         </div>
       </div>
@@ -1761,82 +1716,6 @@ export default function ProjectSessionDetailPage({
                       </Button>
                     </div>
                   )}
-                </AccordionContent>
-              </AccordionItem>
-
-              <AccordionItem value="session-details" className="border rounded-lg px-3 bg-white">
-                <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
-                  Session Details
-                </AccordionTrigger>
-                <AccordionContent className="pt-2 pb-3">
-                  <div className="space-y-3 text-sm">
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-gray-700">Status:</span>
-                        <span className={`text-gray-900 font-semibold ${getPhaseColor(session.status?.phase || "Pending")}`}>
-                          {session.status?.phase || "Pending"}
-                        </span>
-                      </div>
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-gray-700">Model:</span>
-                        <span className="text-gray-900">{session.spec.llmSettings.model}</span>
-                      </div>
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-gray-700">Temperature:</span>
-                        <span className="text-gray-900">{session.spec.llmSettings.temperature}</span>
-                      </div>
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-gray-700">Mode:</span>
-                        <span className="text-gray-900">{session.spec?.interactive ? "Interactive" : "Headless"}</span>
-                      </div>
-                      {session.status?.startTime && (
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-semibold text-gray-700">Started:</span>
-                          <span className="text-gray-900">{format(new Date(session.status.startTime), "PPp")}</span>
-                        </div>
-                      )}
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-gray-700">Duration:</span>
-                        <span className="text-gray-900">{typeof durationMs === "number" ? `${durationMs}ms` : "-"}</span>
-                      </div>
-                      {k8sResources?.pvcName && (
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-semibold text-gray-700">PVC:</span>
-                          <span className="text-gray-900 font-mono text-xs">{k8sResources.pvcName}</span>
-                        </div>
-                      )}
-                      {k8sResources?.pvcSize && (
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-semibold text-gray-700">PVC Size:</span>
-                          <span className="text-gray-900">{k8sResources.pvcSize}</span>
-                        </div>
-                      )}
-                      {session.status?.jobName && (
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-semibold text-gray-700">K8s Job:</span>
-                          <span className="text-gray-900 font-mono text-xs">{session.status.jobName}</span>
-                        </div>
-                      )}
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-gray-700">Messages:</span>
-                        <span className="text-gray-900">{messages.length}</span>
-                      </div>
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-semibold text-gray-700">Session prompt:</span>
-                        <button
-                          onClick={() => setPromptExpanded(!promptExpanded)}
-                          className="text-blue-600 hover:underline"
-                        >
-                          {promptExpanded ? "hide" : "view"}
-                        </button>
-                      </div>
-                      {promptExpanded && session.spec.prompt && (
-                        <div className="mt-2 p-3 bg-gray-50 rounded border border-gray-200">
-                          <p className="whitespace-pre-wrap text-sm text-gray-800">{session.spec.prompt}</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
