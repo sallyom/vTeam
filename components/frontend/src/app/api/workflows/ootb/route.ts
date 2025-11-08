@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { BACKEND_URL } from "@/lib/config";
 
 export async function GET() {
@@ -14,7 +13,7 @@ export async function GET() {
     // Forward the response from backend
     const data = await response.text();
 
-    return new NextResponse(data, {
+    return new Response(data, {
       status: response.status,
       headers: {
         "Content-Type": "application/json",
@@ -22,9 +21,12 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Failed to fetch OOTB workflows:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch OOTB workflows" },
-      { status: 500 }
+    return new Response(
+      JSON.stringify({ error: "Failed to fetch OOTB workflows" }),
+      { 
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      }
     );
   }
 }
