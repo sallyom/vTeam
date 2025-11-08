@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CloneSessionDialog } from "@/components/clone-session-dialog";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+import { PageHeader } from "@/components/page-header";
 import { SessionHeader } from "./session-header";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { GitHubConnectionCard } from "@/components/github-connection-card";
