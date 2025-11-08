@@ -49,7 +49,7 @@ export default function RepoBrowser({
   const updateChildrenByPath = useCallback((nodesIn: FileTreeNode[], targetPath: string, children: FileTreeNode[]): FileTreeNode[] => {
     return nodesIn.map((n) => {
       if (n.path === targetPath) {
-        return { ...n, children };
+        return { ...n, children, expanded: true };
       }
       if (n.type === 'folder' && n.children && n.children.length > 0) {
         return { ...n, children: updateChildrenByPath(n.children, targetPath, children) };

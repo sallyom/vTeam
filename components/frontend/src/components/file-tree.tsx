@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Folder, FolderOpen, FileText } from "lucide-react";
 
 export type FileTreeNode = {
@@ -46,8 +46,15 @@ type ItemProps = {
 };
 
 function FileTreeItem({ node, selectedPath, onSelect, onToggle, depth = 0 }: ItemProps) {
-  const [expanded, setExpanded] = useState<boolean>(node.expanded ?? true);
+  const [expanded, setExpanded] = useState<boolean>(node.expanded ?? false);
   const isSelected = node.path === selectedPath;
+
+  // Sync internal expanded state with node.expanded prop
+  useEffect(() => {
+    if (node.expanded !== undefined) {
+      setExpanded(node.expanded);
+    }
+  }, [node.expanded]);
 
   return (
     <div>
