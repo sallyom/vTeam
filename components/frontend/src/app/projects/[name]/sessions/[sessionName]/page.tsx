@@ -43,7 +43,6 @@ import { successToast, errorToast } from "@/hooks/use-toast";
 import { useOOTBWorkflows, useWorkflowMetadata } from "@/services/queries/use-workflows";
 import { useMutation } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 
 export default function ProjectSessionDetailPage({
   params,
@@ -1357,8 +1356,7 @@ export default function ProjectSessionDetailPage({
                           {workflowMetadata.commands.map((cmd) => (
                             <div
                               key={cmd.id}
-                              className="p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
-                              onClick={() => handleCommandClick(cmd.slashCommand)}
+                              className="p-2 rounded-md border"
                             >
                               <div className="flex items-center justify-between mb-1">
                                 <div className="flex items-center gap-2">
@@ -1371,24 +1369,14 @@ export default function ProjectSessionDetailPage({
                                     {cmd.slashCommand}
                                   </Badge>
                                 </div>
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 w-6 p-0 flex-shrink-0 cursor-pointer"
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      <Info className="h-4 w-4 text-muted-foreground" />
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent align="end" side="left" className="max-w-xs">
-                                    <div className="space-y-2">
-                                      <p className="font-medium text-sm">{cmd.name}</p>
-                                      <p className="text-xs text-muted-foreground">{cmd.description}</p>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  className="h-7 text-xs"
+                                  onClick={() => handleCommandClick(cmd.slashCommand)}
+                                >
+                                  Run {cmd.slashCommand}
+                                </Button>
                               </div>
                               {cmd.description && (
                                 <p className="text-xs text-muted-foreground ml-7">{cmd.description}</p>
