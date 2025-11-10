@@ -313,7 +313,18 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 
 	// Hardcoded secret names (convention over configuration)
 	const runnerSecretsName = "ambient-runner-secrets"              // ANTHROPIC_API_KEY only (ignored when Vertex enabled)
-	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, custom keys (always injected)
+	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, custom keys (optional)
+
+	// Check if integration secrets exist (optional)
+	integrationSecretsExist := false
+	if _, err := config.K8sClient.CoreV1().Secrets(sessionNamespace).Get(context.TODO(), integrationSecretsName, v1.GetOptions{}); err == nil {
+		integrationSecretsExist = true
+		log.Printf("Found %s secret in %s, will inject as env vars", integrationSecretsName, sessionNamespace)
+	} else if !errors.IsNotFound(err) {
+		log.Printf("Error checking for %s secret in %s: %v", integrationSecretsName, sessionNamespace, err)
+	} else {
+		log.Printf("No %s secret found in %s (optional, skipping)", integrationSecretsName, sessionNamespace)
+	}
 
 	// Extract input/output git configuration (support flat and nested forms)
 	inputRepo, _, _ := unstructured.NestedString(spec, "inputRepo")
@@ -575,19 +586,21 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 							}(),
 
 							// Import secrets as environment variables
-							// - integrationSecretsName: Always injected (GIT_TOKEN, JIRA_*, custom keys)
+							// - integrationSecretsName: Only if exists (GIT_TOKEN, JIRA_*, custom keys)
 							// - runnerSecretsName: Only when Vertex disabled (ANTHROPIC_API_KEY)
 							EnvFrom: func() []corev1.EnvFromSource {
 								sources := []corev1.EnvFromSource{}
 
-								// Always inject integration secrets if configured (regardless of Vertex)
-								if integrationSecretsName != "" {
+								// Only inject integration secrets if they exist (optional)
+								if integrationSecretsExist {
 									sources = append(sources, corev1.EnvFromSource{
 										SecretRef: &corev1.SecretEnvSource{
 											LocalObjectReference: corev1.LocalObjectReference{Name: integrationSecretsName},
 										},
 									})
 									log.Printf("Injecting integration secrets from '%s' for session %s", integrationSecretsName, name)
+								} else {
+									log.Printf("Skipping integration secrets '%s' for session %s (not found or not configured)", integrationSecretsName, name)
 								}
 
 								// Only inject runner secrets (ANTHROPIC_API_KEY) when Vertex is disabled

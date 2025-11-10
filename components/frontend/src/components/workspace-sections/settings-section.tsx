@@ -12,7 +12,8 @@ import { Plus, Trash2, Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-rea
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { successToast, errorToast } from "@/hooks/use-toast";
 import { useProject, useUpdateProject } from "@/services/queries/use-projects";
-import { useSecretsValues, useUpdateSecretsConfig, useUpdateSecrets, useIntegrationSecrets, useUpdateIntegrationSecrets } from "@/services/queries/use-secrets";
+import { useSecretsValues, useUpdateSecrets, useIntegrationSecrets, useUpdateIntegrationSecrets } from "@/services/queries/use-secrets";
+import { useClusterInfo } from "@/hooks/use-cluster-info";
 import { useMemo } from "react";
 
 type SettingsSectionProps = {
@@ -43,8 +44,8 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
   const { data: project, isLoading: projectLoading } = useProject(projectName);
   const { data: runnerSecrets } = useSecretsValues(projectName);  // ambient-runner-secrets (ANTHROPIC_API_KEY)
   const { data: integrationSecrets } = useIntegrationSecrets(projectName);  // ambient-non-vertex-integrations (GITHUB_TOKEN, GIT_USER_*, JIRA_*, custom)
+  const { vertexEnabled } = useClusterInfo();
   const updateProjectMutation = useUpdateProject();
-  const updateSecretsConfigMutation = useUpdateSecretsConfig();
   const updateSecretsMutation = useUpdateSecrets();
   const updateIntegrationSecretsMutation = useUpdateIntegrationSecrets();
 
@@ -95,15 +96,40 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
     );
   };
 
-  const handleSaveSecrets = () => {
+  // Save Anthropic API key separately (ambient-runner-secrets)
+  const handleSaveAnthropicKey = () => {
     if (!projectName) return;
 
-    // Split secrets into two groups
     const runnerData: Record<string, string> = {};
-    const integrationData: Record<string, string> = {};
-
-    // ANTHROPIC_API_KEY goes to ambient-runner-secrets
     if (anthropicApiKey) runnerData["ANTHROPIC_API_KEY"] = anthropicApiKey;
+
+    if (Object.keys(runnerData).length === 0) {
+      errorToast("No Anthropic API key to save");
+      return;
+    }
+
+    updateSecretsMutation.mutate(
+      {
+        projectName,
+        secrets: Object.entries(runnerData).map(([key, value]) => ({ key, value })),
+      },
+      {
+        onSuccess: () => {
+          successToast("Saved to ambient-runner-secrets");
+        },
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : "Failed to save Anthropic API key";
+          errorToast(message);
+        },
+      }
+    );
+  };
+
+  // Save integration secrets separately (ambient-non-vertex-integrations)
+  const handleSaveIntegrationSecrets = () => {
+    if (!projectName) return;
+
+    const integrationData: Record<string, string> = {};
 
     // GITHUB_TOKEN, GIT_USER_*, JIRA_*, custom keys go to ambient-non-vertex-integrations
     if (gitUserName) integrationData["GIT_USER_NAME"] = gitUserName;
@@ -119,78 +145,26 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
       integrationData[key] = value ?? "";
     }
 
-    const saveRunnerSecrets = Object.keys(runnerData).length > 0;
-    const saveIntegrationSecrets = Object.keys(integrationData).length > 0;
-
-    let completed = 0;
-    const total = (saveRunnerSecrets ? 1 : 0) + (saveIntegrationSecrets ? 1 : 0);
-    const savedSecrets: string[] = [];
-
-    const checkComplete = () => {
-      completed++;
-      if (completed === total) {
-        if (savedSecrets.length === 1) {
-          successToast(`Secrets saved to ${savedSecrets[0]}`);
-        } else if (savedSecrets.length === 2) {
-          successToast(`Secrets saved to ${savedSecrets[0]} and ${savedSecrets[1]}`);
-        }
-      }
-    };
-
-    // Save runner secrets (ANTHROPIC_API_KEY)
-    if (saveRunnerSecrets) {
-      updateSecretsConfigMutation.mutate(
-        { projectName, secretName: "ambient-runner-secrets" },
-        {
-          onSuccess: () => {
-            updateSecretsMutation.mutate(
-              {
-                projectName,
-                secrets: Object.entries(runnerData).map(([key, value]) => ({ key, value })),
-              },
-              {
-                onSuccess: () => {
-                  savedSecrets.push("ambient-runner-secrets");
-                  checkComplete();
-                },
-                onError: (error) => {
-                  const message = error instanceof Error ? error.message : "Failed to save Anthropic API key";
-                  errorToast(message);
-                },
-              }
-            );
-          },
-          onError: (error) => {
-            const message = error instanceof Error ? error.message : "Failed to configure runner secrets";
-            errorToast(message);
-          },
-        }
-      );
+    if (Object.keys(integrationData).length === 0) {
+      errorToast("No integration secrets to save");
+      return;
     }
 
-    // Save integration secrets (GIT_*, JIRA_*, custom)
-    if (saveIntegrationSecrets) {
-      updateIntegrationSecretsMutation.mutate(
-        {
-          projectName,
-          secrets: Object.entries(integrationData).map(([key, value]) => ({ key, value })),
+    updateIntegrationSecretsMutation.mutate(
+      {
+        projectName,
+        secrets: Object.entries(integrationData).map(([key, value]) => ({ key, value })),
+      },
+      {
+        onSuccess: () => {
+          successToast("Saved to ambient-non-vertex-integrations");
         },
-        {
-          onSuccess: () => {
-            savedSecrets.push("ambient-non-vertex-integrations");
-            checkComplete();
-          },
-          onError: (error) => {
-            const message = error instanceof Error ? error.message : "Failed to save integration secrets";
-            errorToast(message);
-          },
-        }
-      );
-    }
-
-    if (!saveRunnerSecrets && !saveIntegrationSecrets) {
-      errorToast("No secrets to save");
-    }
+        onError: (error) => {
+          const message = error instanceof Error ? error.message : "Failed to save integration secrets";
+          errorToast(message);
+        },
+      }
+    );
   };
 
   const addSecretRow = () => {
@@ -304,9 +278,17 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
             </button>
             {anthropicExpanded && (
               <div className="px-3 pb-3 space-y-3 border-t pt-3">
+                {vertexEnabled && anthropicApiKey && (
+                  <Alert variant="default" className="border-amber-200 bg-amber-50">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <AlertDescription className="text-amber-800 text-sm">
+                      Vertex AI is enabled for this cluster. The ANTHROPIC_API_KEY will be ignored. Sessions will use Vertex AI instead.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="anthropicApiKey">ANTHROPIC_API_KEY</Label>
-                  <div className="text-xs text-muted-foreground">Your Anthropic API key for Claude Code runner</div>
+                  <div className="text-xs text-muted-foreground">Your Anthropic API key for Claude Code runner (saved to ambient-runner-secrets)</div>
                   <div className="flex items-center gap-2">
                     <Input
                       id="anthropicApiKey"
@@ -320,6 +302,21 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
                       {showAnthropicKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </Button>
                   </div>
+                </div>
+                <div className="pt-2">
+                  <Button onClick={handleSaveAnthropicKey} disabled={updateSecretsMutation.isPending} size="sm">
+                    {updateSecretsMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Anthropic Key
+                      </>
+                    )}
+                  </Button>
                 </div>
               </div>
             )}
@@ -468,14 +465,10 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
           {/* Save Button */}
           <div className="pt-4 border-t">
             <Button
-              onClick={handleSaveSecrets}
-              disabled={
-                updateSecretsConfigMutation.isPending ||
-                updateSecretsMutation.isPending ||
-                updateIntegrationSecretsMutation.isPending
-              }
+              onClick={handleSaveIntegrationSecrets}
+              disabled={updateIntegrationSecretsMutation.isPending}
             >
-              {(updateSecretsConfigMutation.isPending || updateSecretsMutation.isPending || updateIntegrationSecretsMutation.isPending) ? (
+              {updateIntegrationSecretsMutation.isPending ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Saving...
