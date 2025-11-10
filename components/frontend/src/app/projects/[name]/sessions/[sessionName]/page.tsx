@@ -1351,7 +1351,7 @@ export default function ProjectSessionDetailPage({
                     {/* Commands Section */}
                     {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
                       <div className="space-y-2">
-                        <div className="text-sm font-medium">Slash Commands</div>
+                        <div className="text-sm font-medium">Commands</div>
                         <div className="relative">
                           {commandsScrollTop && (
                             <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-white to-transparent pointer-events-none z-10" />
