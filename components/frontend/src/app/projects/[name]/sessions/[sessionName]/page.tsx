@@ -1275,12 +1275,12 @@ export default function ProjectSessionDetailPage({
                         Workflows
                       </label>
                           <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
-                        <SelectTrigger className="w-full">
+                        <SelectTrigger className="w-full h-auto py-3">
                           <SelectValue placeholder="None selected" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">
-                            <div className="flex flex-col items-start gap-0.5">
+                            <div className="flex flex-col items-start gap-0.5 py-1">
                               <span>None selected</span>
                             </div>
                           </SelectItem>
@@ -1290,7 +1290,7 @@ export default function ProjectSessionDetailPage({
                                   value={workflow.id}
                                   disabled={!workflow.enabled}
                                 >
-                                  <div className="flex flex-col items-start gap-0.5">
+                                  <div className="flex flex-col items-start gap-0.5 py-1">
                                     <span>{workflow.name}</span>
                                     <span className="text-xs text-muted-foreground font-normal">
                                       {workflow.description}
@@ -1299,7 +1299,7 @@ export default function ProjectSessionDetailPage({
                                 </SelectItem>
                               ))}
                               <SelectItem value="custom">
-                                <div className="flex flex-col items-start gap-0.5">
+                                <div className="flex flex-col items-start gap-0.5 py-1">
                                   <span>Custom Workflow...</span>
                                   <span className="text-xs text-muted-foreground font-normal">
                                     Load a workflow from a custom Git repository
@@ -1321,13 +1321,11 @@ export default function ProjectSessionDetailPage({
                           <Alert className="bg-blue-50 border-blue-200">
                             <AlertCircle className="h-4 w-4 text-blue-600" />
                             <AlertTitle className="text-blue-900">
-                              {activeWorkflow ? 'Ready to Switch' : 'Ready to Activate'}
+                              Reload required
                             </AlertTitle>
                             <AlertDescription className="text-blue-800">
                               <div className="space-y-2 mt-2">
-                                <p className="font-medium">{pendingWorkflow.name}</p>
-                                <p className="text-sm">{pendingWorkflow.description}</p>
-                                <p className="text-xs text-blue-600 mt-2">
+                                <p className="text-sm">
                                   Claude will {activeWorkflow ? 'restart and switch to' : 'pause briefly to load'} the workflow. Your chat history will be preserved.
                                 </p>
                                 <Button 
@@ -1336,7 +1334,7 @@ export default function ProjectSessionDetailPage({
                                   size="sm"
                                 >
                                   <Play className="mr-2 h-4 w-4" />
-                                  {activeWorkflow ? 'Switch Workflow' : 'Activate Workflow'}
+                                  Load new workflow
                                 </Button>
                               </div>
                             </AlertDescription>
@@ -1354,43 +1352,47 @@ export default function ProjectSessionDetailPage({
                     {/* Commands Section */}
                     {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
                       <div className="space-y-2">
-                        <div className="text-sm font-medium">Commands</div>
-                        <div className="space-y-1">
+                        <div className="text-sm font-medium">Slash Commands</div>
+                        <div className="space-y-2">
                           {workflowMetadata.commands.map((cmd) => (
                             <div
                               key={cmd.id}
-                              className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer group"
+                              className="p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
                               onClick={() => handleCommandClick(cmd.slashCommand)}
                             >
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                {cmd.icon && (
-                                  <span className="text-base flex-shrink-0 w-5 text-center">
-                                    {cmd.icon}
-                                  </span>
-                                )}
-                                <span className="text-sm font-medium truncate">{cmd.name}</span>
-                                <Badge variant="secondary" className="text-xs flex-shrink-0">
-                                  {cmd.slashCommand}
-                                </Badge>
+                              <div className="flex items-center justify-between mb-1">
+                                <div className="flex items-center gap-2">
+                                  {cmd.icon && (
+                                    <span className="text-base flex-shrink-0 w-5 text-center">
+                                      {cmd.icon}
+                                    </span>
+                                  )}
+                                  <Badge variant="secondary" className="text-xs flex-shrink-0">
+                                    {cmd.slashCommand}
+                                  </Badge>
+                                </div>
+                                <Popover>
+                                  <PopoverTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 flex-shrink-0 cursor-pointer"
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <Info className="h-4 w-4 text-muted-foreground" />
+                                    </Button>
+                                  </PopoverTrigger>
+                                  <PopoverContent align="end" side="left" className="max-w-xs">
+                                    <div className="space-y-2">
+                                      <p className="font-medium text-sm">{cmd.name}</p>
+                                      <p className="text-xs text-muted-foreground">{cmd.description}</p>
+                                    </div>
+                                  </PopoverContent>
+                                </Popover>
                               </div>
-                              <Popover>
-                                <PopoverTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 w-6 p-0 flex-shrink-0 cursor-pointer"
-                                    onClick={(e) => e.stopPropagation()}
-                                  >
-                                    <Info className="h-4 w-4 text-muted-foreground" />
-                                  </Button>
-                                </PopoverTrigger>
-                                <PopoverContent align="end" side="left" className="max-w-xs">
-                                  <div className="space-y-2">
-                                    <p className="font-medium text-sm">{cmd.name}</p>
-                                    <p className="text-xs text-muted-foreground">{cmd.description}</p>
-                                  </div>
-                                </PopoverContent>
-                              </Popover>
+                              {cmd.description && (
+                                <p className="text-xs text-muted-foreground ml-7">{cmd.description}</p>
+                              )}
                             </div>
                           ))}
                         </div>

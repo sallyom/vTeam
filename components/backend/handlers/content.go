@@ -505,11 +505,17 @@ func ContentWorkflowMetadata(c *gin.Context) {
 					displayName = commandName
 				}
 
+				// Extract short command (last segment after final dot)
+				shortCommand := commandName
+				if lastDot := strings.LastIndex(commandName, "."); lastDot != -1 {
+					shortCommand = commandName[lastDot+1:]
+				}
+
 			commands = append(commands, map[string]interface{}{
 				"id":           commandName,
 				"name":         displayName,
 				"description":  metadata["description"],
-				"slashCommand": "/" + commandName,
+				"slashCommand": "/" + shortCommand,
 				"icon":         metadata["icon"],
 			})
 			}
