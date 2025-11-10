@@ -75,6 +75,7 @@ export default function ProjectSessionDetailPage({
   const [repoChanging, setRepoChanging] = useState(false);
   const [autoSelectAgents, setAutoSelectAgents] = useState(true);
   const [showAgentsList, setShowAgentsList] = useState(false);
+  const [showCommandsList, setShowCommandsList] = useState(false);
   
   // Directory browser state (unified for artifacts, repos, and workflow)
   const [selectedDirectory, setSelectedDirectory] = useState<{
@@ -1352,55 +1353,77 @@ export default function ProjectSessionDetailPage({
                     {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
                       <div className="space-y-2">
                         <div className="text-sm font-medium">Commands</div>
-                        <div className="relative">
-                          {commandsScrollTop && (
-                            <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-white to-transparent pointer-events-none z-10" />
-                          )}
-                          <div 
-                            className="max-h-[400px] overflow-y-auto space-y-2 pr-1"
-                            onScroll={(e) => {
-                              const target = e.currentTarget;
-                              const isScrolledFromTop = target.scrollTop > 10;
-                              const isScrolledToBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 10;
-                              setCommandsScrollTop(isScrolledFromTop);
-                              setCommandsScrollBottom(!isScrolledToBottom);
-                            }}
+                        
+                        {/* View commands expandable section */}
+                        <div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-between h-8 px-2"
+                            onClick={() => setShowCommandsList(!showCommandsList)}
                           >
-                          {workflowMetadata.commands.map((cmd) => {
-                            // Extract command name after last dot and capitalize
-                            const commandTitle = cmd.name.includes('.') 
-                              ? cmd.name.split('.').pop() 
-                              : cmd.name;
-                            
-                            return (
-                              <div
-                                key={cmd.id}
-                                className="p-3 rounded-md border bg-muted/30"
+                            <span className="text-xs font-medium">
+                              View {workflowMetadata.commands.length} available command{workflowMetadata.commands.length !== 1 ? 's' : ''}
+                            </span>
+                            {showCommandsList ? (
+                              <ChevronUp className="h-3 w-3" />
+                            ) : (
+                              <ChevronDown className="h-3 w-3" />
+                            )}
+                          </Button>
+
+                          {showCommandsList && (
+                            <div className="relative mt-2">
+                              {commandsScrollTop && (
+                                <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-white to-transparent pointer-events-none z-10" />
+                              )}
+                              <div 
+                                className="max-h-[400px] overflow-y-auto space-y-2 pr-1"
+                                onScroll={(e) => {
+                                  const target = e.currentTarget;
+                                  const isScrolledFromTop = target.scrollTop > 10;
+                                  const isScrolledToBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 10;
+                                  setCommandsScrollTop(isScrolledFromTop);
+                                  setCommandsScrollBottom(!isScrolledToBottom);
+                                }}
                               >
-                                <div className="flex items-center justify-between mb-1">
-                                  <h3 className="text-sm font-bold capitalize">
-                                    {commandTitle}
-                                  </h3>
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    className="flex-shrink-0 h-7 text-xs"
-                                    onClick={() => handleCommandClick(cmd.slashCommand)}
-                                  >
-                                    Run {cmd.slashCommand}
-                                  </Button>
-                                </div>
-                                {cmd.description && (
-                                  <p className="text-xs text-muted-foreground">
-                                    {cmd.description}
-                                  </p>
-                                )}
+                                {workflowMetadata.commands.map((cmd) => {
+                                  // Extract command name after last dot and capitalize
+                                  const commandTitle = cmd.name.includes('.') 
+                                    ? cmd.name.split('.').pop() 
+                                    : cmd.name;
+                                  
+                                  return (
+                                    <div
+                                      key={cmd.id}
+                                      className="p-3 rounded-md border bg-muted/30"
+                                    >
+                                      <div className="flex items-center justify-between mb-1">
+                                        <h3 className="text-sm font-bold capitalize">
+                                          {commandTitle}
+                                        </h3>
+                                        <Button
+                                          variant="secondary"
+                                          size="sm"
+                                          className="flex-shrink-0 h-7 text-xs"
+                                          onClick={() => handleCommandClick(cmd.slashCommand)}
+                                        >
+                                          Run {cmd.slashCommand}
+                                        </Button>
+                                      </div>
+                                      {cmd.description && (
+                                        <p className="text-xs text-muted-foreground">
+                                          {cmd.description}
+                                        </p>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            );
-                          })}
-                          </div>
-                          {commandsScrollBottom && (
-                            <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none z-10" />
+                              {commandsScrollBottom && (
+                                <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none z-10" />
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
