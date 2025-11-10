@@ -979,82 +979,6 @@ func CheckBranchExists(ctx context.Context, repoURL, branchName, githubToken str
 	return false, fmt.Errorf("GitHub API error: %s (body: %s)", resp.Status, string(body))
 }
 
-// validatePushAccess checks if the user has push access to a repository via GitHub API
-// For GitHub App tokens, we test actual push capability since permissions.push may not be reliable
-func validatePushAccess(ctx context.Context, repoURL, githubToken string) error {
-	owner, repo, err := ParseGitHubURL(repoURL)
-	if err != nil {
-		return fmt.Errorf("invalid repository URL: %w", err)
-	}
-
-	// Use GitHub API to check repository access
-	log.Printf("Validating push access to %s with token (len=%d)", repoURL, len(githubToken))
-	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/%s", owner, repo)
-
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Authorization", "Bearer "+githubToken)
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to check repository access: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body once
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("repository %s/%s not found or you don't have access to it", owner, repo)
-	}
-
-	if resp.StatusCode == http.StatusTooManyRequests {
-		resetTime := resp.Header.Get("X-RateLimit-Reset")
-		if resetTime != "" {
-			return fmt.Errorf("GitHub API rate limit exceeded. Rate limit will reset at %s. Please try again later", resetTime)
-		}
-		return fmt.Errorf("GitHub API rate limit exceeded. Please try again later")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("GitHub API error: %s (body: %s)", resp.Status, string(body))
-	}
-
-	// Parse response to check permissions
-	var repoInfo struct {
-		Permissions struct {
-			Push bool `json:"push"`
-		} `json:"permissions"`
-		// Check if this is a GitHub App token by looking for installation info
-		// GitHub App tokens may not have accurate permissions.push, so we test actual capability
-	}
-
-	if err := json.Unmarshal(body, &repoInfo); err != nil {
-		return fmt.Errorf("failed to parse repository info: %w (body: %s)", err, string(body))
-	}
-
-	// If permissions.push is true, we're good
-	if repoInfo.Permissions.Push {
-		log.Printf("Validated push access to %s (permissions.push=true)", repoURL)
-		return nil
-	}
-
-	// If permissions.push is false, it might be a GitHub App token with inaccurate permissions
-	// GitHub App tokens may report permissions.push=false even when they have write access
-	// If we successfully accessed the repository (status 200), assume we have write access
-	// since GitHub Apps have "Read and write access to code and pull requests" permission
-	log.Printf("permissions.push=false for %s, but repository is accessible - assuming GitHub App write access", repoURL)
-	log.Printf("Validated push access to %s (repository accessible, assuming GitHub App write permissions)", repoURL)
-	return nil
-}
-
 // createBranchInRepo creates a feature branch in a supporting repository
 // Follows the same pattern as umbrella repo seeding but without adding files
 // Note: This function assumes push access has already been validated by the caller
@@ -1153,14 +1077,14 @@ func InitRepo(ctx context.Context, repoDir string) error {
 }
 
 // ConfigureRemote adds or updates a git remote
-func ConfigureRemote(ctx context.Context, repoDir, remoteName, remoteUrl string) error {
+func ConfigureRemote(ctx context.Context, repoDir, remoteName, remoteURL string) error {
 	// Try to remove existing remote first
 	cmd := exec.CommandContext(ctx, "git", "remote", "remove", remoteName)
 	cmd.Dir = repoDir
 	_ = cmd.Run() // Ignore error if remote doesn't exist
 
 	// Add the remote
-	cmd = exec.CommandContext(ctx, "git", "remote", "add", remoteName, remoteUrl)
+	cmd = exec.CommandContext(ctx, "git", "remote", "add", remoteName, remoteURL)
 	cmd.Dir = repoDir
 
 	if out, err := cmd.CombinedOutput(); err != nil {

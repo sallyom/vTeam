@@ -40,15 +40,6 @@ var (
 	SendMessageToSession              func(string, string, map[string]interface{})
 )
 
-// contentListItem represents a file/directory in the workspace
-type contentListItem struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	IsDir      bool   `json:"isDir"`
-	Size       int64  `json:"size"`
-	ModifiedAt string `json:"modifiedAt"`
-}
-
 // parseSpec parses AgenticSessionSpec with v1alpha1 fields
 func parseSpec(spec map[string]interface{}) types.AgenticSessionSpec {
 	result := types.AgenticSessionSpec{}
@@ -188,8 +179,8 @@ func parseSpec(spec map[string]interface{}) types.AgenticSessionSpec {
 	// Parse activeWorkflow
 	if workflow, ok := spec["activeWorkflow"].(map[string]interface{}); ok {
 		ws := &types.WorkflowSelection{}
-		if gitUrl, ok := workflow["gitUrl"].(string); ok {
-			ws.GitUrl = gitUrl
+		if gitURL, ok := workflow["gitUrl"].(string); ok {
+			ws.GitURL = gitURL
 		}
 		if branch, ok := workflow["branch"].(string); ok {
 			ws.Branch = branch
@@ -1048,8 +1039,8 @@ func UpdateSessionDisplayName(c *gin.Context) {
 	c.JSON(http.StatusOK, session)
 }
 
-// POST /api/projects/:projectName/agentic-sessions/:sessionName/workflow
 // SelectWorkflow sets the active workflow for a session
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/workflow
 func SelectWorkflow(c *gin.Context) {
 	project := c.GetString("project")
 	sessionName := c.Param("sessionName")
@@ -1084,7 +1075,7 @@ func SelectWorkflow(c *gin.Context) {
 
 	// Set activeWorkflow
 	workflowMap := map[string]interface{}{
-		"gitUrl": req.GitUrl,
+		"gitUrl": req.GitURL,
 	}
 	if req.Branch != "" {
 		workflowMap["branch"] = req.Branch
@@ -1104,7 +1095,7 @@ func SelectWorkflow(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Workflow updated for session %s: %s@%s", sessionName, req.GitUrl, workflowMap["branch"])
+	log.Printf("Workflow updated for session %s: %s@%s", sessionName, req.GitURL, workflowMap["branch"])
 
 	// Note: The workflow will be available on next user interaction. The frontend should
 	// send a workflow_change message via the WebSocket to notify the runner immediately.
@@ -1128,8 +1119,8 @@ func SelectWorkflow(c *gin.Context) {
 	})
 }
 
-// POST /api/projects/:projectName/agentic-sessions/:sessionName/repos
 // AddRepo adds a new repository to a running session
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/repos
 func AddRepo(c *gin.Context) {
 	project := c.GetString("project")
 	sessionName := c.Param("sessionName")
@@ -1213,8 +1204,8 @@ func AddRepo(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Repository added", "name": repoName})
 }
 
-// DELETE /api/projects/:projectName/agentic-sessions/:sessionName/repos/:repoName
 // RemoveRepo removes a repository from a running session
+// DELETE /api/projects/:projectName/agentic-sessions/:sessionName/repos/:repoName
 func RemoveRepo(c *gin.Context) {
 	project := c.GetString("project")
 	sessionName := c.Param("sessionName")
@@ -1424,9 +1415,9 @@ type OOTBWorkflow struct {
 	Enabled     bool   `json:"enabled"`
 }
 
-// GET /api/workflows/ootb?project=<projectName>
 // ListOOTBWorkflows returns the list of out-of-the-box workflows dynamically discovered from GitHub
 // Attempts to use user's GitHub token for better rate limits, falls back to unauthenticated for public repos
+// GET /api/workflows/ootb?project=<projectName>
 func ListOOTBWorkflows(c *gin.Context) {
 	// Try to get user's GitHub token (best effort - not required)
 	// This gives better rate limits (5000/hr vs 60/hr) and supports private repos
@@ -3034,8 +3025,8 @@ func DiffSessionRepo(c *gin.Context) {
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
-// GET /api/projects/:projectName/agentic-sessions/:sessionName/git/status?path=artifacts
 // GetGitStatus returns git status for a directory in the workspace
+// GET /api/projects/:projectName/agentic-sessions/:sessionName/git/status?path=artifacts
 func GetGitStatus(c *gin.Context) {
 	project := c.Param("projectName")
 	session := c.Param("sessionName")
@@ -3078,9 +3069,9 @@ func GetGitStatus(c *gin.Context) {
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
-// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/configure-remote
 // ConfigureGitRemote initializes git and configures remote for a workspace directory
-// Body: { path: string, remoteUrl: string, branch: string }
+// Body: { path: string, remoteURL: string, branch: string }
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/configure-remote
 func ConfigureGitRemote(c *gin.Context) {
 	project := c.Param("projectName")
 	sessionName := c.Param("sessionName")
@@ -3088,7 +3079,7 @@ func ConfigureGitRemote(c *gin.Context) {
 
 	var body struct {
 		Path      string `json:"path" binding:"required"`
-		RemoteUrl string `json:"remoteUrl" binding:"required"`
+		RemoteURL string `json:"remoteUrl" binding:"required"`
 		Branch    string `json:"branch"`
 	}
 
@@ -3119,7 +3110,7 @@ func ConfigureGitRemote(c *gin.Context) {
 
 	reqBody, _ := json.Marshal(map[string]interface{}{
 		"path":      absPath,
-		"remoteUrl": body.RemoteUrl,
+		"remoteUrl": body.RemoteURL,
 		"branch":    body.Branch,
 	})
 
@@ -3150,14 +3141,14 @@ func ConfigureGitRemote(c *gin.Context) {
 
 			// Derive safe annotation key from path (use :: as separator to avoid conflicts with hyphens in path)
 			annotationKey := strings.ReplaceAll(body.Path, "/", "::")
-			anns[fmt.Sprintf("ambient-code.io/remote-%s-url", annotationKey)] = body.RemoteUrl
+			anns[fmt.Sprintf("ambient-code.io/remote-%s-url", annotationKey)] = body.RemoteURL
 			anns[fmt.Sprintf("ambient-code.io/remote-%s-branch", annotationKey)] = body.Branch
 
 			_, err = reqDyn.Resource(gvr).Namespace(project).Update(c.Request.Context(), item, v1.UpdateOptions{})
 			if err != nil {
 				log.Printf("Warning: Failed to persist remote config to annotations: %v", err)
 			} else {
-				log.Printf("Persisted remote config for %s to session annotations: %s@%s", body.Path, body.RemoteUrl, body.Branch)
+				log.Printf("Persisted remote config for %s to session annotations: %s@%s", body.Path, body.RemoteURL, body.Branch)
 			}
 		}
 	}
@@ -3166,9 +3157,9 @@ func ConfigureGitRemote(c *gin.Context) {
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
-// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/synchronize
 // SynchronizeGit commits, pulls, and pushes changes for a workspace directory
 // Body: { path: string, message?: string, branch?: string }
+// POST /api/projects/:projectName/agentic-sessions/:sessionName/git/synchronize
 func SynchronizeGit(c *gin.Context) {
 	project := c.Param("projectName")
 	session := c.Param("sessionName")

@@ -103,7 +103,7 @@ type CloneAgenticSessionRequest struct {
 
 // WorkflowSelection represents a workflow to load into the session
 type WorkflowSelection struct {
-	GitUrl string `json:"gitUrl" binding:"required"`
+	GitURL string `json:"gitUrl" binding:"required"`
 	Branch string `json:"branch,omitempty"`
 	Path   string `json:"path,omitempty"`
 }

@@ -210,11 +210,11 @@ func ContentGitStatus(c *gin.Context) {
 }
 
 // ContentGitConfigureRemote handles POST /content/git-configure-remote
-// Body: { path: string, remoteUrl: string, branch: string }
+// Body: { path: string, remoteURL: string, branch: string }
 func ContentGitConfigureRemote(c *gin.Context) {
 	var body struct {
 		Path      string `json:"path"`
-		RemoteUrl string `json:"remoteUrl"`
+		RemoteURL string `json:"remoteUrl"`
 		Branch    string `json:"branch"`
 	}
 
@@ -248,12 +248,12 @@ func ContentGitConfigureRemote(c *gin.Context) {
 	}
 
 	// Configure remote
-	if err := git.ConfigureRemote(c.Request.Context(), abs, "origin", body.RemoteUrl); err != nil {
+	if err := git.ConfigureRemote(c.Request.Context(), abs, "origin", body.RemoteURL); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to configure remote"})
 		return
 	}
 
-	log.Printf("Configured remote for %s: %s", abs, body.RemoteUrl)
+	log.Printf("Configured remote for %s: %s", abs, body.RemoteURL)
 
 	// Fetch from remote so merge status can be checked
 	// This is best-effort - don't fail if fetch fails
@@ -271,7 +271,7 @@ func ContentGitConfigureRemote(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "remote configured",
-		"remote":  body.RemoteUrl,
+		"remote":  body.RemoteURL,
 		"branch":  body.Branch,
 	})
 }
@@ -721,7 +721,7 @@ func ContentGitPull(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "pulled successfully", "branch": body.Branch})
 }
 
-// ContentGitPush handles POST /content/git-push
+// ContentGitPushToBranch handles POST /content/git-push
 // Body: { path: string, branch: string, message: string }
 func ContentGitPushToBranch(c *gin.Context) {
 	var body struct {

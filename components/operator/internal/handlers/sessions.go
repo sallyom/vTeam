@@ -550,8 +550,8 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									}
 									// Inject activeWorkflow environment variables if present
 									if workflow, ok := spec["activeWorkflow"].(map[string]interface{}); ok {
-										if gitUrl, ok := workflow["gitUrl"].(string); ok && strings.TrimSpace(gitUrl) != "" {
-											base = append(base, corev1.EnvVar{Name: "ACTIVE_WORKFLOW_GIT_URL", Value: gitUrl})
+										if gitURL, ok := workflow["gitUrl"].(string); ok && strings.TrimSpace(gitURL) != "" {
+											base = append(base, corev1.EnvVar{Name: "ACTIVE_WORKFLOW_GIT_URL", Value: gitURL})
 										}
 										if branch, ok := workflow["branch"].(string); ok && strings.TrimSpace(branch) != "" {
 											base = append(base, corev1.EnvVar{Name: "ACTIVE_WORKFLOW_BRANCH", Value: branch})
