@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, FileText } from "lucide-react";
+import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // Custom components
@@ -90,9 +90,9 @@ export default function ProjectSessionDetailPage({
   const [synchronizing, setSynchronizing] = useState(false);
   const [newBranchName, setNewBranchName] = useState("");
   const [showCreateBranch, setShowCreateBranch] = useState(false);
-  const [fileViewerOpen, setFileViewerOpen] = useState(false);
-  const [viewingFile, setViewingFile] = useState<{path: string; content: string} | null>(null);
-  const [loadingFileContent, setLoadingFileContent] = useState(false);
+  const [currentSubPath, setCurrentSubPath] = useState<string>("");
+  const [inlineViewingFile, setInlineViewingFile] = useState<{path: string; content: string} | null>(null);
+  const [loadingInlineFile, setLoadingInlineFile] = useState(false);
   const [gitStatus, setGitStatus] = useState<{
     initialized: boolean;
     hasChanges: boolean;
@@ -250,13 +250,23 @@ export default function ProjectSessionDetailPage({
   const gitPullMutation = useGitPull();
   const gitPushMutation = useGitPush();
   
-  // Fetch directory file listing
+  // Fetch directory file listing (with subpath support)
+  const fullDirectoryPath = currentSubPath 
+    ? `${selectedDirectory.path}/${currentSubPath}` 
+    : selectedDirectory.path;
+  
   const { data: directoryFiles = [], refetch: refetchDirectoryFiles } = useWorkspaceList(
     projectName,
     sessionName,
-    selectedDirectory.path,
+    fullDirectoryPath,
     { enabled: openAccordionItems.includes("directories") }
   );
+  
+  // Reset subpath and inline file view when directory changes
+  useEffect(() => {
+    setCurrentSubPath("");
+    setInlineViewingFile(null);
+  }, [selectedDirectory.path, selectedDirectory.type]);
   
   // Track if we've already initialized from session to prevent infinite loops
   const initializedFromSessionRef = useRef(false);
@@ -298,30 +308,38 @@ export default function ProjectSessionDetailPage({
     initializedFromSessionRef.current = true;
   }, [session, ootbWorkflows]);
   
-  // Handler to view file contents
-  const handleFileSelect = useCallback(async (node: FileTreeNode) => {
-    if (node.type !== 'file') return;
-    
-    setLoadingFileContent(true);
-    try {
-      const fullPath = `${selectedDirectory.path}/${node.path}`;
-      const response = await fetch(
-        `/api/projects/${projectName}/agentic-sessions/${sessionName}/workspace/${encodeURIComponent(fullPath)}`
-      );
-      
-      if (response.ok) {
-        const content = await response.text();
-        setViewingFile({ path: node.path, content });
-        setFileViewerOpen(true);
-      } else {
+  // Handler for inline file viewing and folder navigation
+  const handleInlineFileOrFolderSelect = useCallback(async (node: FileTreeNode) => {
+    if (node.type === 'folder') {
+      // Navigate into folder
+      const newSubPath = currentSubPath ? `${currentSubPath}/${node.name}` : node.name;
+      setCurrentSubPath(newSubPath);
+      setInlineViewingFile(null);
+    } else {
+      // Load file content inline
+      setLoadingInlineFile(true);
+      try {
+        const fullPath = currentSubPath 
+          ? `${selectedDirectory.path}/${currentSubPath}/${node.name}`
+          : `${selectedDirectory.path}/${node.name}`;
+        
+        const response = await fetch(
+          `/api/projects/${projectName}/agentic-sessions/${sessionName}/workspace/${encodeURIComponent(fullPath)}`
+        );
+        
+        if (response.ok) {
+          const content = await response.text();
+          setInlineViewingFile({ path: node.name, content });
+        } else {
+          errorToast('Failed to load file');
+        }
+      } catch {
         errorToast('Failed to load file');
+      } finally {
+        setLoadingInlineFile(false);
       }
-    } catch {
-      errorToast('Failed to load file');
-    } finally {
-      setLoadingFileContent(false);
     }
-  }, [projectName, sessionName, selectedDirectory.path]);
+  }, [projectName, sessionName, selectedDirectory.path, currentSubPath]);
 
   // Compute directory options from session data
   const directoryOptions = useMemo(() => {
@@ -1453,25 +1471,70 @@ export default function ProjectSessionDetailPage({
                     
                     {/* File Browser for Selected Directory */}
                     <div className="border rounded-lg overflow-hidden">
+                      {/* Header with breadcrumbs and actions */}
                       <div className="px-2 py-1.5 border-b flex items-center justify-between bg-muted/30">
-                        <div className="text-xs text-muted-foreground">
-                          <Folder className="inline h-3 w-3 mr-1" />
-                          <code className="bg-muted px-1 py-0.5 rounded text-xs">
-                            {selectedDirectory.path}/
+                        <div className="flex items-center gap-1 text-xs text-muted-foreground min-w-0 flex-1">
+                          {/* Back button when in subfolder or viewing file */}
+                          {(currentSubPath || inlineViewingFile) && (
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={() => {
+                                if (inlineViewingFile) {
+                                  // Go back to file tree
+                                  setInlineViewingFile(null);
+                                } else if (currentSubPath) {
+                                  // Go back to parent folder
+                                  const pathParts = currentSubPath.split('/');
+                                  pathParts.pop();
+                                  setCurrentSubPath(pathParts.join('/'));
+                                }
+                              }}
+                              className="h-6 px-1.5 mr-1"
+                            >
+                              ← Back
+                            </Button>
+                          )}
+                          
+                          {/* Breadcrumb path */}
+                          <Folder className="inline h-3 w-3 mr-1 flex-shrink-0" />
+                          <code className="bg-muted px-1 py-0.5 rounded text-xs truncate">
+                            {selectedDirectory.path}
+                            {currentSubPath && `/${currentSubPath}`}
+                            {inlineViewingFile && `/${inlineViewingFile.path}`}
                           </code>
                         </div>
-                        <Button variant="ghost" size="sm" onClick={() => refetchDirectoryFiles()} className="h-6 px-2">
-                          <FolderSync className="h-3 w-3" />
-                        </Button>
+                        
+                        {/* Refresh button (only when not viewing file) */}
+                        {!inlineViewingFile && (
+                          <Button variant="ghost" size="sm" onClick={() => refetchDirectoryFiles()} className="h-6 px-2 flex-shrink-0">
+                            <FolderSync className="h-3 w-3" />
+                          </Button>
+                        )}
                       </div>
+                      
+                      {/* Content area */}
                       <div className="p-2 max-h-64 overflow-y-auto">
-                        {directoryFiles.length === 0 ? (
+                        {loadingInlineFile ? (
+                          <div className="flex items-center justify-center py-8">
+                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : inlineViewingFile ? (
+                          /* File content view */
+                          <div className="text-xs">
+                            <pre className="bg-muted/50 p-2 rounded overflow-x-auto">
+                              <code>{inlineViewingFile.content}</code>
+                            </pre>
+                          </div>
+                        ) : directoryFiles.length === 0 ? (
+                          /* Empty state */
                           <div className="text-center py-4 text-sm text-muted-foreground">
                             <FolderTree className="h-8 w-8 mx-auto mb-2 opacity-30" />
                             <p>No files yet</p>
                             <p className="text-xs mt-1">Files will appear here</p>
                           </div>
                         ) : (
+                          /* File tree */
                           <FileTree 
                             nodes={directoryFiles.map((item): FileTreeNode => ({
                               name: item.name,
@@ -1479,8 +1542,7 @@ export default function ProjectSessionDetailPage({
                               type: item.isDir ? 'folder' : 'file',
                               sizeKb: item.size ? item.size / 1024 : undefined,
                             }))}
-                            selectedPath={viewingFile?.path}
-                            onSelect={handleFileSelect}
+                            onSelect={handleInlineFileOrFolderSelect}
                           />
                         )}
                       </div>
@@ -2029,39 +2091,6 @@ export default function ProjectSessionDetailPage({
             disabled={!remoteUrl.trim()}
           >
             Save Remote
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-    
-    {/* File Viewer Dialog */}
-    <Dialog open={fileViewerOpen} onOpenChange={setFileViewerOpen}>
-      <DialogContent className="max-w-4xl max-h-[80vh]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FileText className="h-4 w-4" />
-            {viewingFile?.path || 'File'}
-          </DialogTitle>
-          <DialogDescription>
-            {selectedDirectory.path}/{viewingFile?.path}
-          </DialogDescription>
-        </DialogHeader>
-        
-        {loadingFileContent ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-6 w-6 animate-spin" />
-          </div>
-        ) : (
-          <div className="max-h-[60vh] overflow-auto">
-            <pre className="text-xs bg-muted p-4 rounded-lg overflow-x-auto">
-              <code>{viewingFile?.content}</code>
-            </pre>
-          </div>
-        )}
-        
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setFileViewerOpen(false)}>
-            Close
           </Button>
         </DialogFooter>
       </DialogContent>
