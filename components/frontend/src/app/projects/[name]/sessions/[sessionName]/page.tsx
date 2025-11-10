@@ -35,7 +35,6 @@ import {
   useDeleteSession,
   useSendChatMessage,
   useSendControlMessage,
-  useAllSessionGitHubDiffs,
   useSessionK8sResources,
   useContinueSession,
 } from "@/services/queries";
@@ -93,6 +92,9 @@ export default function ProjectSessionDetailPage({
   const [showCreateBranch, setShowCreateBranch] = useState(false);
   const [currentSubPath, setCurrentSubPath] = useState<string>("");
   const [inlineViewingFile, setInlineViewingFile] = useState<{path: string; content: string} | null>(null);
+  const [commitModalOpen, setCommitModalOpen] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("");
+  const [committing, setCommitting] = useState(false);
   const [loadingInlineFile, setLoadingInlineFile] = useState(false);
   const [gitStatus, setGitStatus] = useState<{
     initialized: boolean;
@@ -308,7 +310,7 @@ export default function ProjectSessionDetailPage({
     
     initializedFromSessionRef.current = true;
   }, [session, ootbWorkflows]);
-  
+
   // Handler for inline file viewing and folder navigation
   const handleInlineFileOrFolderSelect = useCallback(async (node: FileTreeNode) => {
     if (node.type === 'folder') {
@@ -644,33 +646,49 @@ export default function ProjectSessionDetailPage({
     }
   };
 
+  // Handler to commit changes without pushing
+  const handleCommit = async () => {
+    if (!commitMessage.trim()) {
+      errorToast("Commit message is required");
+      return;
+    }
 
-  // Helper to derive repo folder from URL
-  const deriveRepoFolderFromUrl = useCallback((url: string): string => {
+    setCommitting(true);
     try {
-      const cleaned = url.replace(/^git@([^:]+):/, "https://$1/");
-      const u = new URL(cleaned);
-      const segs = u.pathname.split('/').filter(Boolean);
-      const last = segs[segs.length - 1] || "repo";
-      return last.replace(/\.git$/i, "");
-    } catch {
-      const parts = url.split('/');
-      const last = parts[parts.length - 1] || "repo";
-      return last.replace(/\.git$/i, "");
-    }
-  }, []);
+      // Use the synchronize endpoint but it will detect there's nothing on remote to pull
+      // So it just commits locally
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/synchronize`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            path: selectedDirectory.path,
+            message: commitMessage.trim(),
+            branch: currentRemote?.branch || 'main',
+          }),
+        }
+      );
 
-  // Fetch all repo diffs using React Query hook
-  useAllSessionGitHubDiffs(
-    projectName,
-    sessionName,
-    session?.spec?.repos as Array<{ input: { url: string; branch: string }; output?: { url: string; branch: string } }> | undefined,
-    deriveRepoFolderFromUrl,
-    { 
-      enabled: !!session?.spec?.repos,
-      sessionPhase: session?.status?.phase 
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to commit');
+      }
+
+      successToast('Changes committed successfully');
+      setCommitMessage("");
+      setCommitModalOpen(false);
+      fetchGitStatus();
+      refetchMergeStatus();
+    } catch (error) {
+      errorToast(error instanceof Error ? error.message : 'Failed to commit');
+    } finally {
+      setCommitting(false);
     }
-  );
+  };
+
+  // Removed: deriveRepoFolderFromUrl - No longer needed
+  // Removed: useAllSessionGitHubDiffs - Old diff endpoint not used, git/status provides current info
 
   // Adapter: convert SessionMessage to StreamMessage
   type RawWireMessage = SessionMessage & { payload?: unknown; timestamp?: string };
@@ -1217,7 +1235,7 @@ export default function ProjectSessionDetailPage({
                     {/* Show active workflow info */}
                     {activeWorkflow && !workflowActivating && (
                       <>
-                       
+
                         {/* Commands Section */}
                         {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
                           <div className="space-y-2">
@@ -1438,7 +1456,7 @@ export default function ProjectSessionDetailPage({
                         {gitStatus.totalRemoved > 0 && (
                           <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
                             -{gitStatus.totalRemoved}
-                          </Badge>
+                      </Badge>
                         )}
                       </div>
                     )}
@@ -1519,7 +1537,7 @@ export default function ProjectSessionDetailPage({
                         {!inlineViewingFile && (
                           <Button variant="ghost" size="sm" onClick={() => refetchDirectoryFiles()} className="h-6 px-2 flex-shrink-0">
                             <FolderSync className="h-3 w-3" />
-                          </Button>
+                        </Button>
                         )}
                       </div>
                       
@@ -1585,41 +1603,43 @@ export default function ProjectSessionDetailPage({
                           
                           <div className="flex-1" />
                           
-                          {/* Status indicator - changes based on state */}
+                          {/* Status indicator */}
                           {mergeStatus && !mergeStatus.canMergeClean ? (
-                            // Conflicts
                             <div className="flex items-center gap-1 text-red-600">
                               <X className="h-3 w-3" />
                               <span className="font-medium">conflict</span>
                             </div>
-                          ) : (gitStatus?.uncommittedFiles || mergeStatus?.remoteCommitsAhead) ? (
-                            // Has commits to sync
-                            <div className="flex items-center gap-1.5 text-muted-foreground font-mono">
-                              <span>↓{mergeStatus?.remoteCommitsAhead || 0}</span>
-                              <span>↑{gitStatus?.uncommittedFiles || 0}</span>
+                          ) : (gitStatus?.hasChanges || mergeStatus?.remoteCommitsAhead) ? (
+                            <div className="flex items-center gap-1.5 text-muted-foreground text-xs">
+                              {mergeStatus?.remoteCommitsAhead ? (
+                                <span>↓{mergeStatus.remoteCommitsAhead}</span>
+                              ) : null}
+                              {gitStatus?.hasChanges ? (
+                                <span className="font-normal">{gitStatus.uncommittedFiles} uncommitted</span>
+                              ) : null}
                             </div>
                           ) : null}
                           
-                          {/* Sync button - always visible */}
+                          {/* Sync button - only enabled when NO uncommitted changes */}
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button
-                                  size="sm"
+                              <Button 
+                                size="sm"
                                   variant="ghost"
                                   onClick={handleGitSynchronize}
-                                  disabled={!mergeStatus?.canMergeClean || synchronizing}
+                                  disabled={!mergeStatus?.canMergeClean || synchronizing || gitStatus?.hasChanges}
                                   className="h-6 w-6 p-0"
                                 >
                                   {synchronizing ? (
-                                    <Loader2 className="h-3 w-3 animate-spin" />
-                                  ) : (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
                                     <RefreshCw className="h-3 w-3" />
-                                  )}
-                                </Button>
+                                )}
+                              </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>Sync with origin/{currentRemote?.branch || 'main'}</p>
+                                <p>{gitStatus?.hasChanges ? 'Commit changes first' : `Sync with origin/${currentRemote?.branch || 'main'}`}</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -1645,6 +1665,16 @@ export default function ProjectSessionDetailPage({
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
+                                onClick={() => {
+                                  setCommitMessage(`Update ${selectedDirectory.name} - ${new Date().toLocaleString()}`);
+                                  setCommitModalOpen(true);
+                                }}
+                                disabled={!gitStatus?.hasChanges}
+                              >
+                                <Edit className="mr-2 h-3 w-3" />
+                                Commit Changes
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
                                 onClick={handleGitPull}
                                 disabled={!mergeStatus?.canMergeClean || gitPullMutation.isPending}
                               >
@@ -1653,11 +1683,12 @@ export default function ProjectSessionDetailPage({
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={handleGitPush}
-                                disabled={!mergeStatus?.canMergeClean || gitPushMutation.isPending || !gitStatus?.hasChanges}
+                                disabled={!mergeStatus?.canMergeClean || gitPushMutation.isPending || gitStatus?.hasChanges}
                               >
                                 <CloudUpload className="mr-2 h-3 w-3" />
                                 Push
                               </DropdownMenuItem>
+                              <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onClick={() => {
                                   const newRemotes = {...directoryRemotes};
@@ -1694,7 +1725,7 @@ export default function ProjectSessionDetailPage({
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="pt-2 pb-3">
-                  <div className="space-y-3">
+                    <div className="space-y-3">
                     <p className="text-xs text-muted-foreground">
                       Add external context sources to enhance Claude&apos;s understanding
                     </p>
@@ -1709,8 +1740,8 @@ export default function ProjectSessionDetailPage({
                         <Button size="sm" variant="outline" onClick={() => setContextModalOpen(true)}>
                           <GitBranch className="mr-2 h-3 w-3" />
                           Add Repository
-                        </Button>
-                      </div>
+                          </Button>
+                        </div>
                     ) : (
                       <div className="space-y-2">
                         {session.spec.repos.map((repo, idx) => {
@@ -1721,10 +1752,10 @@ export default function ProjectSessionDetailPage({
                               <div className="flex-1 min-w-0">
                                 <div className="text-sm font-medium truncate">{repoName}</div>
                                 <div className="text-xs text-muted-foreground truncate">{repo.input.url}</div>
-                              </div>
-                              <Button
+                          </div>
+                          <Button 
                                 variant="ghost"
-                                size="sm"
+                            size="sm" 
                                 className="h-7 w-7 p-0 flex-shrink-0"
                                 onClick={() => {
                                   if (confirm(`Remove repository ${repoName}?`)) {
@@ -1733,24 +1764,24 @@ export default function ProjectSessionDetailPage({
                                 }}
                               >
                                 <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          );
-                        })}
+                          </Button>
+                                  </div>
+                                );
+                              })}
                         <Button onClick={() => setContextModalOpen(true)} variant="outline" className="w-full" size="sm">
                           <GitBranch className="mr-2 h-3 w-3" />
-                          Add Repository
-                        </Button>
-                      </div>
-                    )}
+                        Add Repository
+                      </Button>
+                                </div>
+                              )}
                     
                     {/* Future: Files and URLs would go here */}
                     <div className="border-t pt-3">
                       <p className="text-xs text-muted-foreground text-center">
                         Additional context types (file imports, Jira, Google drive) coming soon
                       </p>
-                    </div>
-                  </div>
+                            </div>
+                          </div>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
@@ -2000,7 +2031,7 @@ export default function ProjectSessionDetailPage({
           </div>
 
           {!showCreateBranch ? (
-            <div className="space-y-2">
+          <div className="space-y-2">
               <Label htmlFor="remote-branch">Branch</Label>
               <div className="flex gap-2">
                 <Select 
@@ -2034,7 +2065,7 @@ export default function ProjectSessionDetailPage({
           ) : (
             <div className="space-y-2">
               <Label>Create New Branch</Label>
-              <Input 
+            <Input
                 placeholder="branch-name"
                 value={newBranchName}
                 onChange={e => setNewBranchName(e.target.value)}
@@ -2068,7 +2099,7 @@ export default function ProjectSessionDetailPage({
                 >
                   Cancel
                 </Button>
-              </div>
+          </div>
             </div>
           )}
           
@@ -2082,7 +2113,7 @@ export default function ProjectSessionDetailPage({
             </div>
           )}
         </div>
-        
+
         <DialogFooter>
           <Button
             variant="outline"
@@ -2101,6 +2132,74 @@ export default function ProjectSessionDetailPage({
             disabled={!remoteUrl.trim()}
           >
             Save Remote
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    
+    {/* Commit Changes Dialog */}
+    <Dialog open={commitModalOpen} onOpenChange={setCommitModalOpen}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Commit Changes</DialogTitle>
+          <DialogDescription>
+            Commit {gitStatus?.uncommittedFiles || 0} files to {selectedDirectory.name}
+          </DialogDescription>
+        </DialogHeader>
+        
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="commit-message">Commit Message *</Label>
+            <Input
+              id="commit-message"
+              placeholder="Update feature specification"
+              value={commitMessage}
+              onChange={(e) => setCommitMessage(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && commitMessage.trim()) {
+                  handleCommit();
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          
+          {gitStatus && (
+            <div className="text-xs text-muted-foreground bg-muted p-2 rounded">
+              <div className="font-medium mb-1">Changes to commit:</div>
+              <div className="space-y-0.5">
+                <div>Files: {gitStatus.uncommittedFiles}</div>
+                <div className="text-green-600">+{gitStatus.totalAdded} lines</div>
+                {gitStatus.totalRemoved > 0 && (
+                  <div className="text-red-600">-{gitStatus.totalRemoved} lines</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setCommitModalOpen(false);
+              setCommitMessage("");
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleCommit}
+            disabled={!commitMessage.trim() || committing}
+          >
+            {committing ? (
+              <>
+                <Loader2 className="mr-2 h-3 w-3 animate-spin" />
+                Committing...
+              </>
+            ) : (
+              'Commit'
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
