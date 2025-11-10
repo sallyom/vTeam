@@ -278,8 +278,13 @@ export default function ProjectSessionDetailPage({
   
   // Load active workflow from session spec if present
   useEffect(() => {
-    // Only initialize once from session data
+    // Only initialize once from session data, but wait for both session and ootbWorkflows to be ready
     if (initializedFromSessionRef.current || !session) return;
+    
+    // If session has an active workflow, wait for ootbWorkflows to load before initializing
+    if (session.spec?.activeWorkflow && ootbWorkflows.length === 0) {
+      return; // Wait for ootbWorkflows to load
+    }
     
     if (session.spec?.activeWorkflow) {
       // Derive workflow ID from gitUrl if possible
@@ -1274,17 +1279,33 @@ export default function ProjectSessionDetailPage({
                           <SelectValue placeholder="None selected" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="none">None selected</SelectItem>
+                          <SelectItem value="none">
+                            <div className="flex flex-col items-start gap-0.5">
+                              <span>None selected</span>
+                            </div>
+                          </SelectItem>
                               {ootbWorkflows.map((workflow) => (
                                 <SelectItem 
                                   key={workflow.id} 
                                   value={workflow.id}
                                   disabled={!workflow.enabled}
                                 >
-                                  {workflow.name}
+                                  <div className="flex flex-col items-start gap-0.5">
+                                    <span>{workflow.name}</span>
+                                    <span className="text-xs text-muted-foreground font-normal">
+                                      {workflow.description}
+                                    </span>
+                                  </div>
                                 </SelectItem>
                               ))}
-                              <SelectItem value="custom">Custom Workflow...</SelectItem>
+                              <SelectItem value="custom">
+                                <div className="flex flex-col items-start gap-0.5">
+                                  <span>Custom Workflow...</span>
+                                  <span className="text-xs text-muted-foreground font-normal">
+                                    Load a workflow from a custom Git repository
+                                  </span>
+                                </div>
+                              </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1333,7 +1354,7 @@ export default function ProjectSessionDetailPage({
                     {/* Commands Section */}
                     {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
                       <div className="space-y-2">
-                        <div className="text-sm font-medium">Slash Commands</div>
+                        <div className="text-sm font-medium">Commands</div>
                         <div className="space-y-1">
                           {workflowMetadata.commands.map((cmd) => (
                             <div
@@ -1357,7 +1378,7 @@ export default function ProjectSessionDetailPage({
                                   <Button
                                     variant="ghost"
                                     size="sm"
-                                    className="h-6 w-6 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="h-6 w-6 p-0 flex-shrink-0 cursor-pointer"
                                     onClick={(e) => e.stopPropagation()}
                                   >
                                     <Info className="h-4 w-4 text-muted-foreground" />
