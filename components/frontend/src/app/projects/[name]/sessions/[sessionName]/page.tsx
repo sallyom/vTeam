@@ -63,6 +63,8 @@ export default function ProjectSessionDetailPage({
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const [contextUrl, setContextUrl] = useState("");
   const [contextBranch, setContextBranch] = useState("main");
+  const [commandsScrollTop, setCommandsScrollTop] = useState(false);
+  const [commandsScrollBottom, setCommandsScrollBottom] = useState(true);
   const [customWorkflowDialogOpen, setCustomWorkflowDialogOpen] = useState(false);
   const [customWorkflowUrl, setCustomWorkflowUrl] = useState("");
   const [customWorkflowBranch, setCustomWorkflowBranch] = useState("main");
@@ -1275,12 +1277,12 @@ export default function ProjectSessionDetailPage({
                       </label>
                           <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
                         <SelectTrigger className="w-full h-auto py-3">
-                          <SelectValue placeholder="None selected" />
+                          <SelectValue placeholder="Generic chat" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">
                             <div className="flex flex-col items-start gap-0.5 py-1">
-                              <span>None selected</span>
+                              <span>Generic chat</span>
                             </div>
                           </SelectItem>
                               {ootbWorkflows.map((workflow) => (
@@ -1352,37 +1354,56 @@ export default function ProjectSessionDetailPage({
                     {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
                       <div className="space-y-2">
                         <div className="text-sm font-medium">Slash Commands</div>
-                        <div className="space-y-2">
-                          {workflowMetadata.commands.map((cmd) => (
-                            <div
-                              key={cmd.id}
-                              className="p-2 rounded-md border"
-                            >
-                              <div className="flex items-center justify-between mb-1">
-                                <div className="flex items-center gap-2">
-                                  {cmd.icon && (
-                                    <span className="text-base flex-shrink-0 w-5 text-center">
-                                      {cmd.icon}
-                                    </span>
-                                  )}
-                                  <Badge variant="secondary" className="text-xs flex-shrink-0">
-                                    {cmd.slashCommand}
-                                  </Badge>
+                        <div className="relative">
+                          {commandsScrollTop && (
+                            <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-white to-transparent pointer-events-none z-10" />
+                          )}
+                          <div 
+                            className="max-h-[400px] overflow-y-auto space-y-2 pr-1"
+                            onScroll={(e) => {
+                              const target = e.currentTarget;
+                              const isScrolledFromTop = target.scrollTop > 10;
+                              const isScrolledToBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 10;
+                              setCommandsScrollTop(isScrolledFromTop);
+                              setCommandsScrollBottom(!isScrolledToBottom);
+                            }}
+                          >
+                          {workflowMetadata.commands.map((cmd) => {
+                            // Extract command name after last dot and capitalize
+                            const commandTitle = cmd.name.includes('.') 
+                              ? cmd.name.split('.').pop() 
+                              : cmd.name;
+                            
+                            return (
+                              <div
+                                key={cmd.id}
+                                className="p-3 rounded-md border bg-muted/30"
+                              >
+                                <div className="flex items-center justify-between mb-1">
+                                  <h3 className="text-sm font-bold capitalize">
+                                    {commandTitle}
+                                  </h3>
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="flex-shrink-0 h-7 text-xs"
+                                    onClick={() => handleCommandClick(cmd.slashCommand)}
+                                  >
+                                    Run {cmd.slashCommand}
+                                  </Button>
                                 </div>
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  className="h-7 text-xs"
-                                  onClick={() => handleCommandClick(cmd.slashCommand)}
-                                >
-                                  Run {cmd.slashCommand}
-                                </Button>
+                                {cmd.description && (
+                                  <p className="text-xs text-muted-foreground">
+                                    {cmd.description}
+                                  </p>
+                                )}
                               </div>
-                              {cmd.description && (
-                                <p className="text-xs text-muted-foreground ml-7">{cmd.description}</p>
-                              )}
-                            </div>
-                          ))}
+                            );
+                          })}
+                          </div>
+                          {commandsScrollBottom && (
+                            <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none z-10" />
+                          )}
                         </div>
                       </div>
                     )}
@@ -1511,12 +1532,86 @@ export default function ProjectSessionDetailPage({
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Directory Browser (unified for artifacts, repos, and workflow) */}
+              {/* Context - Add/Remove Repositories and other context sources */}
+              <AccordionItem value="context" className="border rounded-lg px-3 bg-white">
+                <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
+                  <div className="flex items-center gap-2">
+                    <Link className="h-4 w-4" />
+                    <span>Context Sources</span>
+                    {session?.spec?.repos && session.spec.repos.length > 0 && (
+                      <Badge variant="secondary" className="ml-auto mr-2">
+                        {session.spec.repos.length}
+                      </Badge>
+                    )}
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pt-2 pb-3">
+                    <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      Add external context sources to enhance Claude&apos;s understanding
+                    </p>
+                    
+                    {/* Repository List */}
+                    {!session?.spec?.repos || session.spec.repos.length === 0 ? (
+                      <div className="text-center py-6">
+                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-2">
+                          <GitBranch className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-3">No repositories added</p>
+                        <Button size="sm" variant="outline" onClick={() => setContextModalOpen(true)}>
+                          <GitBranch className="mr-2 h-3 w-3" />
+                          Add Repository
+                          </Button>
+                        </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {session.spec.repos.map((repo, idx) => {
+                          const repoName = repo.input.url.split('/').pop()?.replace('.git', '') || `repo-${idx}`;
+                          return (
+                            <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-muted/30 hover:bg-muted/50 transition-colors">
+                              <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate">{repoName}</div>
+                                <div className="text-xs text-muted-foreground truncate">{repo.input.url}</div>
+                          </div>
+                          <Button 
+                                variant="ghost"
+                            size="sm" 
+                                className="h-7 w-7 p-0 flex-shrink-0"
+                                onClick={() => {
+                                  if (confirm(`Remove repository ${repoName}?`)) {
+                                    removeRepoMutation.mutate(repoName);
+                                  }
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                          </Button>
+                                  </div>
+                                );
+                              })}
+                        <Button onClick={() => setContextModalOpen(true)} variant="outline" className="w-full" size="sm">
+                          <GitBranch className="mr-2 h-3 w-3" />
+                        Add Repository
+                      </Button>
+                                </div>
+                              )}
+                    
+                    {/* Future: Files and URLs would go here */}
+                    <div className="border-t pt-3">
+                      <p className="text-xs text-muted-foreground text-center">
+                        Additional context types (file imports, Jira, Google drive) coming soon
+                      </p>
+                            </div>
+                          </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* File Explorer (unified for artifacts, repos, and workflow) */}
               <AccordionItem value="directories" className="border rounded-lg px-3 bg-white">
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
                   <div className="flex items-center gap-2 w-full">
                     <Folder className="h-4 w-4" />
-                    <span>Directory Browser</span>
+                    <span>File Explorer</span>
                     {gitStatus?.hasChanges && (
                       <div className="flex gap-1 ml-auto mr-2">
                         {gitStatus.totalAdded > 0 && (
@@ -1535,6 +1630,10 @@ export default function ProjectSessionDetailPage({
                 </AccordionTrigger>
                 <AccordionContent className="pt-2 pb-3">
                   <div className="space-y-3">
+                    {/* Panel Description */}
+                    <p className="text-sm text-muted-foreground">
+                      Browse, view, and manage files in your workspace directories. Track changes and sync with Git for version control.
+                    </p>
                     
                     {/* Directory Selector */}
                     <div className="flex items-center justify-between gap-2">
@@ -1808,80 +1907,6 @@ export default function ProjectSessionDetailPage({
                     
                     
                   </div>
-                </AccordionContent>
-              </AccordionItem>
-
-              {/* Context - Add/Remove Repositories and other context sources */}
-              <AccordionItem value="context" className="border rounded-lg px-3 bg-white">
-                <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
-                  <div className="flex items-center gap-2">
-                    <Link className="h-4 w-4" />
-                    <span>Context Sources</span>
-                    {session?.spec?.repos && session.spec.repos.length > 0 && (
-                      <Badge variant="secondary" className="ml-auto mr-2">
-                        {session.spec.repos.length}
-                      </Badge>
-                    )}
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent className="pt-2 pb-3">
-                    <div className="space-y-3">
-                    <p className="text-xs text-muted-foreground">
-                      Add external context sources to enhance Claude&apos;s understanding
-                    </p>
-                    
-                    {/* Repository List */}
-                    {!session?.spec?.repos || session.spec.repos.length === 0 ? (
-                      <div className="text-center py-6">
-                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-2">
-                          <GitBranch className="h-5 w-5 text-gray-400" />
-                        </div>
-                        <p className="text-sm text-muted-foreground mb-3">No repositories added</p>
-                        <Button size="sm" variant="outline" onClick={() => setContextModalOpen(true)}>
-                          <GitBranch className="mr-2 h-3 w-3" />
-                          Add Repository
-                          </Button>
-                        </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {session.spec.repos.map((repo, idx) => {
-                          const repoName = repo.input.url.split('/').pop()?.replace('.git', '') || `repo-${idx}`;
-                          return (
-                            <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-muted/30 hover:bg-muted/50 transition-colors">
-                              <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">{repoName}</div>
-                                <div className="text-xs text-muted-foreground truncate">{repo.input.url}</div>
-                          </div>
-                          <Button 
-                                variant="ghost"
-                            size="sm" 
-                                className="h-7 w-7 p-0 flex-shrink-0"
-                                onClick={() => {
-                                  if (confirm(`Remove repository ${repoName}?`)) {
-                                    removeRepoMutation.mutate(repoName);
-                                  }
-                                }}
-                              >
-                                <X className="h-3 w-3" />
-                          </Button>
-                                  </div>
-                                );
-                              })}
-                        <Button onClick={() => setContextModalOpen(true)} variant="outline" className="w-full" size="sm">
-                          <GitBranch className="mr-2 h-3 w-3" />
-                        Add Repository
-                      </Button>
-                                </div>
-                              )}
-                    
-                    {/* Future: Files and URLs would go here */}
-                    <div className="border-t pt-3">
-                      <p className="text-xs text-muted-foreground text-center">
-                        Additional context types (file imports, Jira, Google drive) coming soon
-                      </p>
-                            </div>
-                          </div>
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
