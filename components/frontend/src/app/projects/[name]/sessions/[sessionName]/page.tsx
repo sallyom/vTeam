@@ -1271,11 +1271,9 @@ export default function ProjectSessionDetailPage({
                     {/* Workflow selector - always visible except when activating */}
                     {!workflowActivating && (
                       <>
-                        {!pendingWorkflow && (
-                          <p className="text-sm text-muted-foreground">
-                            Workflows provide Ambient agents with structured steps to follow toward more complex goals.
-                          </p>
-                        )}
+                        <p className="text-sm text-muted-foreground">
+                          Workflows provide Ambient agents with structured steps to follow toward more complex goals.
+                        </p>
                         
                         <div>
                           <label className="text-sm font-medium mb-1.5 block">
