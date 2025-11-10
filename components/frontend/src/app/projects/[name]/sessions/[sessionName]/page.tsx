@@ -1271,20 +1271,26 @@ export default function ProjectSessionDetailPage({
                     {/* Workflow selector - always visible except when activating */}
                     {!workflowActivating && (
                       <>
-                    <div>
-                      <label className="text-sm font-medium mb-1.5 block">
-                        Workflows
-                      </label>
+                        {!pendingWorkflow && (
+                          <p className="text-sm text-muted-foreground">
+                            Workflows provide Ambient agents with structured steps to follow toward more complex goals.
+                          </p>
+                        )}
+                        
+                        <div>
+                          <label className="text-sm font-medium mb-1.5 block">
+                            Workflows
+                          </label>
                           <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
-                        <SelectTrigger className="w-full h-auto py-3">
-                          <SelectValue placeholder="Generic chat" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">
-                            <div className="flex flex-col items-start gap-0.5 py-1">
-                              <span>Generic chat</span>
-                            </div>
-                          </SelectItem>
+                            <SelectTrigger className="w-full h-auto py-3">
+                              <SelectValue placeholder="Generic chat" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">
+                                <div className="flex flex-col items-start gap-0.5 py-1">
+                                  <span>Generic chat</span>
+                                </div>
+                              </SelectItem>
                               {ootbWorkflows.map((workflow) => (
                                 <SelectItem 
                                   key={workflow.id} 
@@ -1307,15 +1313,9 @@ export default function ProjectSessionDetailPage({
                                   </span>
                                 </div>
                               </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                        
-                        {!pendingWorkflow && (
-                    <p className="text-sm text-muted-foreground">
-                            Workflows provide Ambient agents with structured steps to follow toward more complex goals.
-                          </p>
-                        )}
+                            </SelectContent>
+                          </Select>
+                        </div>
                         
                         {/* Show workflow preview and activate/switch button */}
                         {pendingWorkflow && (
