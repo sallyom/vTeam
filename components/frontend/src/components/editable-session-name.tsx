@@ -11,7 +11,6 @@ import { Loader2 } from 'lucide-react';
 
 type EditableSessionNameProps = {
   currentName: string;
-  metadataName: string;
   onSave: (newName: string) => Promise<void>;
   isSaving?: boolean;
   className?: string;
@@ -19,7 +18,6 @@ type EditableSessionNameProps = {
 
 export function EditableSessionName({
   currentName,
-  metadataName,
   onSave,
   isSaving = false,
   className,

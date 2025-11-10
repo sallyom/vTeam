@@ -54,9 +54,9 @@ export function PopoverTrigger({ children, asChild, className }: PopoverTriggerP
   }
 
   if (asChild && React.isValidElement(children)) {
-    return React.cloneElement(children as React.ReactElement<any>, {
+    return React.cloneElement(children as React.ReactElement<React.HTMLAttributes<HTMLElement>>, {
       onClick: handleClick,
-      className: cn((children as any).props?.className, className),
+      className: cn((children as React.ReactElement<React.HTMLAttributes<HTMLElement>>).props?.className, className),
     })
   }
 
