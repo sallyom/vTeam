@@ -73,7 +73,7 @@ export default function ProjectsPage() {
       <div className="container mx-auto p-6">
         <div className="flex items-center justify-center h-64">
           <RefreshCw className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading projects...</span>
+          <span className="ml-2">Loading workspaces...</span>
         </div>
       </div>
     );
