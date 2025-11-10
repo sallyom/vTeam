@@ -13,6 +13,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { successToast, errorToast } from "@/hooks/use-toast";
 import { useProject, useUpdateProject } from "@/services/queries/use-projects";
 import { useSecretsValues, useUpdateSecretsConfig, useUpdateSecrets, useIntegrationSecrets, useUpdateIntegrationSecrets } from "@/services/queries/use-secrets";
+import { useClusterInfo } from "@/hooks/use-cluster-info";
 import { useMemo } from "react";
 
 type SettingsSectionProps = {
@@ -43,6 +44,7 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
   const { data: project, isLoading: projectLoading } = useProject(projectName);
   const { data: runnerSecrets } = useSecretsValues(projectName);  // ambient-runner-secrets (ANTHROPIC_API_KEY)
   const { data: integrationSecrets } = useIntegrationSecrets(projectName);  // ambient-non-vertex-integrations (GITHUB_TOKEN, GIT_USER_*, JIRA_*, custom)
+  const { vertexEnabled } = useClusterInfo();
   const updateProjectMutation = useUpdateProject();
   const updateSecretsConfigMutation = useUpdateSecretsConfig();
   const updateSecretsMutation = useUpdateSecrets();
@@ -304,6 +306,14 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
             </button>
             {anthropicExpanded && (
               <div className="px-3 pb-3 space-y-3 border-t pt-3">
+                {vertexEnabled && anthropicApiKey && (
+                  <Alert variant="default" className="border-amber-200 bg-amber-50">
+                    <AlertTriangle className="h-4 w-4 text-amber-600" />
+                    <AlertDescription className="text-amber-800 text-sm">
+                      Vertex AI is enabled for this cluster. The ANTHROPIC_API_KEY will be ignored. Sessions will use Vertex AI instead.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="anthropicApiKey">ANTHROPIC_API_KEY</Label>
                   <div className="text-xs text-muted-foreground">Your Anthropic API key for Claude Code runner</div>

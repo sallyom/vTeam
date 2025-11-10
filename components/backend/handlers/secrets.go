@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -13,7 +14,7 @@ import (
 
 // Two-secret architecture (hardcoded secret names):
 // 1. ambient-runner-secrets: ANTHROPIC_API_KEY only (ignored when Vertex enabled)
-// 2. ambient-non-vertex-integrations: GITHUB_TOKEN, JIRA_*, custom keys (always injected)
+// 2. ambient-non-vertex-integrations: GITHUB_TOKEN, JIRA_*, custom keys (optional, injected if present)
 
 // ListNamespaceSecrets handles GET /api/projects/:projectName/secrets -> { items: [{name, createdAt}] }
 func ListNamespaceSecrets(c *gin.Context) {
@@ -102,6 +103,20 @@ func UpdateRunnerSecrets(c *gin.Context) {
 		return
 	}
 
+	// Validate that only allowed keys are present in runner secrets
+	allowedKeys := map[string]bool{
+		"ANTHROPIC_API_KEY": true,
+		// Future: "GEMINI_KEY": true, etc.
+	}
+	for key := range req.Data {
+		if !allowedKeys[key] {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("Invalid key '%s' for ambient-runner-secrets. Only ANTHROPIC_API_KEY is allowed.", key),
+			})
+			return
+		}
+	}
+
 	const secretName = "ambient-runner-secrets"
 
 	sec, err := reqK8s.CoreV1().Secrets(projectName).Get(c.Request.Context(), secretName, v1.GetOptions{})
@@ -147,7 +162,7 @@ func UpdateRunnerSecrets(c *gin.Context) {
 
 // Integration secrets (GITHUB_TOKEN, JIRA_*, custom keys)
 // Hardcoded secret name: "ambient-non-vertex-integrations"
-// Always injected as env vars, regardless of Vertex setting
+// Injected as env vars if present (optional), regardless of Vertex setting
 
 // ListIntegrationSecrets handles GET /api/projects/:projectName/integration-secrets -> { data: { key: value } }
 func ListIntegrationSecrets(c *gin.Context) {
