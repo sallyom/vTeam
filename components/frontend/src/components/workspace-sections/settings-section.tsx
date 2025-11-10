@@ -12,7 +12,7 @@ import { Plus, Trash2, Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-rea
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { successToast, errorToast } from "@/hooks/use-toast";
 import { useProject, useUpdateProject } from "@/services/queries/use-projects";
-import { useSecretsValues, useUpdateSecretsConfig, useUpdateSecrets, useIntegrationSecrets, useUpdateIntegrationSecrets } from "@/services/queries/use-secrets";
+import { useSecretsValues, useUpdateSecrets, useIntegrationSecrets, useUpdateIntegrationSecrets } from "@/services/queries/use-secrets";
 import { useClusterInfo } from "@/hooks/use-cluster-info";
 import { useMemo } from "react";
 
@@ -46,7 +46,6 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
   const { data: integrationSecrets } = useIntegrationSecrets(projectName);  // ambient-non-vertex-integrations (GITHUB_TOKEN, GIT_USER_*, JIRA_*, custom)
   const { vertexEnabled } = useClusterInfo();
   const updateProjectMutation = useUpdateProject();
-  const updateSecretsConfigMutation = useUpdateSecretsConfig();
   const updateSecretsMutation = useUpdateSecrets();
   const updateIntegrationSecretsMutation = useUpdateIntegrationSecrets();
 
@@ -141,29 +140,18 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
 
     // Save runner secrets (ANTHROPIC_API_KEY)
     if (saveRunnerSecrets) {
-      updateSecretsConfigMutation.mutate(
-        { projectName, secretName: "ambient-runner-secrets" },
+      updateSecretsMutation.mutate(
+        {
+          projectName,
+          secrets: Object.entries(runnerData).map(([key, value]) => ({ key, value })),
+        },
         {
           onSuccess: () => {
-            updateSecretsMutation.mutate(
-              {
-                projectName,
-                secrets: Object.entries(runnerData).map(([key, value]) => ({ key, value })),
-              },
-              {
-                onSuccess: () => {
-                  savedSecrets.push("ambient-runner-secrets");
-                  checkComplete();
-                },
-                onError: (error) => {
-                  const message = error instanceof Error ? error.message : "Failed to save Anthropic API key";
-                  errorToast(message);
-                },
-              }
-            );
+            savedSecrets.push("ambient-runner-secrets");
+            checkComplete();
           },
           onError: (error) => {
-            const message = error instanceof Error ? error.message : "Failed to configure runner secrets";
+            const message = error instanceof Error ? error.message : "Failed to save runner secrets";
             errorToast(message);
           },
         }
