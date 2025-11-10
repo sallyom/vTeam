@@ -43,6 +43,7 @@ import { successToast, errorToast } from "@/hooks/use-toast";
 import { useOOTBWorkflows, useWorkflowMetadata } from "@/services/queries/use-workflows";
 import { useMutation } from "@tanstack/react-query";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 
 export default function ProjectSessionDetailPage({
   params,
@@ -286,8 +287,10 @@ export default function ProjectSessionDetailPage({
       const matchingWorkflow = ootbWorkflows.find(w => w.gitUrl === gitUrl);
       if (matchingWorkflow) {
         setActiveWorkflow(matchingWorkflow.id);
+        setSelectedWorkflow(matchingWorkflow.id);
       } else {
         setActiveWorkflow("custom");
+        setSelectedWorkflow("custom");
       }
     }
     
@@ -1327,39 +1330,51 @@ export default function ProjectSessionDetailPage({
                         {/* Divider when workflow is active */}
                         <div className="border-t pt-3" />
 
-                        {/* Commands Section */}
-                        {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium">Slash Commands</div>
-                            <TooltipProvider>
-                              <div className="grid grid-cols-2 gap-2">
-                                {workflowMetadata.commands.map((cmd) => (
-                                  <Tooltip key={cmd.id}>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="justify-start h-auto py-2 px-3 text-left"
-                                        onClick={() => handleCommandClick(cmd.slashCommand)}
-                                      >
-                                        <div className="flex items-center gap-2 w-full min-w-0">
-                                          <Badge variant="secondary" className="text-xs flex-shrink-0">
-                                            {cmd.slashCommand}
-                                          </Badge>
-                                          <span className="font-medium text-xs truncate">{cmd.name}</span>
-                                        </div>
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-xs">
-                                      <p className="font-medium text-xs mb-1">{cmd.name}</p>
-                                      <p className="text-xs">{cmd.description}</p>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ))}
+                    {/* Commands Section */}
+                    {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="text-sm font-medium">Slash Commands</div>
+                        <div className="space-y-1">
+                          {workflowMetadata.commands.map((cmd) => (
+                            <div
+                              key={cmd.id}
+                              className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer group"
+                              onClick={() => handleCommandClick(cmd.slashCommand)}
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                {cmd.icon && (
+                                  <span className="text-base flex-shrink-0 w-5 text-center">
+                                    {cmd.icon}
+                                  </span>
+                                )}
+                                <span className="text-sm font-medium truncate">{cmd.name}</span>
+                                <Badge variant="secondary" className="text-xs flex-shrink-0">
+                                  {cmd.slashCommand}
+                                </Badge>
                               </div>
-                            </TooltipProvider>
-                          </div>
-                        )}
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-6 w-6 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Info className="h-4 w-4 text-muted-foreground" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent align="end" side="left" className="max-w-xs">
+                                  <div className="space-y-2">
+                                    <p className="font-medium text-sm">{cmd.name}</p>
+                                    <p className="text-xs text-muted-foreground">{cmd.description}</p>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                         {workflowMetadata?.commands?.length === 0 && (
                           <p className="text-xs text-muted-foreground text-center py-2">
@@ -1372,7 +1387,7 @@ export default function ProjectSessionDetailPage({
                           <div className="space-y-2">
                             <div className="text-sm font-medium">Agents</div>
 
-                            <div className="flex items-center space-x-2 pb-2 border-b">
+                            <div className="flex items-center space-x-2 pb-2">
                               <Checkbox
                                 id="auto-select-agents"
                                 checked={autoSelectAgents}
@@ -1405,7 +1420,7 @@ export default function ProjectSessionDetailPage({
 
                               {showAgentsList && (
                                 <TooltipProvider>
-                                  <div className="space-y-1 max-h-48 overflow-y-auto mt-2 pt-2 border-t">
+                                  <div className="space-y-1 max-h-48 overflow-y-auto mt-2 pt-2">
                                     {workflowMetadata.agents.map((agent) => (
                                       <Tooltip key={agent.id}>
                                         <TooltipTrigger asChild>

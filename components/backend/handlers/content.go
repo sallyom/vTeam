@@ -505,12 +505,13 @@ func ContentWorkflowMetadata(c *gin.Context) {
 					displayName = commandName
 				}
 
-				commands = append(commands, map[string]interface{}{
-					"id":           commandName,
-					"name":         displayName,
-					"description":  metadata["description"],
-					"slashCommand": "/" + commandName,
-				})
+			commands = append(commands, map[string]interface{}{
+				"id":           commandName,
+				"name":         displayName,
+				"description":  metadata["description"],
+				"slashCommand": "/" + commandName,
+				"icon":         metadata["icon"],
+			})
 			}
 		}
 		log.Printf("ContentWorkflowMetadata: found %d commands", len(commands))
