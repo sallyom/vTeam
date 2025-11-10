@@ -1257,9 +1257,73 @@ export default function ProjectSessionDetailPage({
                   ) : (
                   <div className="space-y-3">
                     
+                    {/* Workflow selector - always visible except when activating */}
+                    {!workflowActivating && (
+                      <>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">
+                        Workflows
+                      </label>
+                          <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="None selected" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">None selected</SelectItem>
+                              {ootbWorkflows.map((workflow) => (
+                                <SelectItem 
+                                  key={workflow.id} 
+                                  value={workflow.id}
+                                  disabled={!workflow.enabled}
+                                >
+                                  {workflow.name}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="custom">Custom Workflow...</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                        
+                        {!pendingWorkflow && (
+                    <p className="text-sm text-muted-foreground">
+                            Workflows provide Ambient agents with structured steps to follow toward more complex goals.
+                          </p>
+                        )}
+                        
+                        {/* Show workflow preview and activate/switch button */}
+                        {pendingWorkflow && (
+                          <Alert className="bg-blue-50 border-blue-200">
+                            <AlertCircle className="h-4 w-4 text-blue-600" />
+                            <AlertTitle className="text-blue-900">
+                              {activeWorkflow ? 'Ready to Switch' : 'Ready to Activate'}
+                            </AlertTitle>
+                            <AlertDescription className="text-blue-800">
+                              <div className="space-y-2 mt-2">
+                                <p className="font-medium">{pendingWorkflow.name}</p>
+                                <p className="text-sm">{pendingWorkflow.description}</p>
+                                <p className="text-xs text-blue-600 mt-2">
+                                  Claude will {activeWorkflow ? 'restart and switch to' : 'pause briefly to load'} the workflow. Your chat history will be preserved.
+                                </p>
+                                <Button 
+                                  onClick={handleActivateWorkflow}
+                                  className="w-full mt-3"
+                                  size="sm"
+                                >
+                                  <Play className="mr-2 h-4 w-4" />
+                                  {activeWorkflow ? 'Switch Workflow' : 'Activate Workflow'}
+                                </Button>
+                              </div>
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                      </>
+                    )}
+                    
                     {/* Show active workflow info */}
                     {activeWorkflow && !workflowActivating && (
                       <>
+                        {/* Divider when workflow is active */}
+                        <div className="border-t pt-3" />
 
                         {/* Commands Section */}
                         {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
@@ -1370,71 +1434,6 @@ export default function ProjectSessionDetailPage({
                           <p className="text-xs text-muted-foreground text-center py-2">
                             No agents found in this workflow
                           </p>
-                        )}
-
-                        {/* Divider when workflow is active */}
-                        <div className="border-t pt-3" />
-                      </>
-                    )}
-                    
-                    {/* Workflow selector - always visible except when activating */}
-                    {!workflowActivating && (
-                      <>
-                    <div>
-                      <label className="text-sm font-medium mb-1.5 block">
-                        {activeWorkflow ? "Switch Workflow" : "Select a Workflow"}
-                      </label>
-                          <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="None selected" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None selected</SelectItem>
-                              {ootbWorkflows.map((workflow) => (
-                                <SelectItem 
-                                  key={workflow.id} 
-                                  value={workflow.id}
-                                  disabled={!workflow.enabled}
-                                >
-                                  {workflow.name}
-                                </SelectItem>
-                              ))}
-                              <SelectItem value="custom">Custom Workflow...</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                        
-                        {!pendingWorkflow && (
-                    <p className="text-sm text-muted-foreground">
-                            Workflows provide Ambient agents with structured steps to follow toward more complex goals.
-                          </p>
-                        )}
-                        
-                        {/* Show workflow preview and activate/switch button */}
-                        {pendingWorkflow && (
-                          <Alert className="bg-blue-50 border-blue-200">
-                            <AlertCircle className="h-4 w-4 text-blue-600" />
-                            <AlertTitle className="text-blue-900">
-                              {activeWorkflow ? 'Ready to Switch' : 'Ready to Activate'}
-                            </AlertTitle>
-                            <AlertDescription className="text-blue-800">
-                              <div className="space-y-2 mt-2">
-                                <p className="font-medium">{pendingWorkflow.name}</p>
-                                <p className="text-sm">{pendingWorkflow.description}</p>
-                                <p className="text-xs text-blue-600 mt-2">
-                                  Claude will {activeWorkflow ? 'restart and switch to' : 'pause briefly to load'} the workflow. Your chat history will be preserved.
-                                </p>
-                                <Button 
-                                  onClick={handleActivateWorkflow}
-                                  className="w-full mt-3"
-                                  size="sm"
-                                >
-                                  <Play className="mr-2 h-4 w-4" />
-                                  {activeWorkflow ? 'Switch Workflow' : 'Activate Workflow'}
-                                </Button>
-                              </div>
-                            </AlertDescription>
-                          </Alert>
                         )}
                       </>
                     )}
