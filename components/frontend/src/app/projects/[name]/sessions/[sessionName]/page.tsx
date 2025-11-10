@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, Download } from "lucide-react";
+import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, Download, Workflow } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // Custom components
@@ -1238,8 +1238,9 @@ export default function ProjectSessionDetailPage({
               <AccordionItem value="workflows" className="border rounded-lg px-3 bg-white">
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
                   <div className="flex items-center gap-2">
-                  Workflows
-                    {activeWorkflow && (
+                    <Workflow className="h-4 w-4" />
+                    <span>Workflows</span>
+                    {activeWorkflow && !openAccordionItems.includes("workflows") && (
                       <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
                         {ootbWorkflows.find(w => w.id === activeWorkflow)?.name || "Custom Workflow"}
                       </Badge>
