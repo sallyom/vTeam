@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, Download, Workflow } from "lucide-react";
+import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, Download, Workflow, ChevronDown, ChevronUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // Custom components
@@ -71,7 +71,8 @@ export default function ProjectSessionDetailPage({
   const [activeWorkflow, setActiveWorkflow] = useState<string | null>(null);
   const [workflowActivating, setWorkflowActivating] = useState(false);
   const [repoChanging, setRepoChanging] = useState(false);
-  const [autoSelectAgents, setAutoSelectAgents] = useState(false);
+  const [autoSelectAgents, setAutoSelectAgents] = useState(true);
+  const [showAgentsList, setShowAgentsList] = useState(false);
   
   // Directory browser state (unified for artifacts, repos, and workflow)
   const [selectedDirectory, setSelectedDirectory] = useState<{
@@ -1386,39 +1387,58 @@ export default function ProjectSessionDetailPage({
                               </Label>
                             </div>
 
-                            <TooltipProvider>
-                              <div className="space-y-1 max-h-48 overflow-y-auto">
-                                {workflowMetadata.agents.map((agent) => (
-                                  <Tooltip key={agent.id}>
-                                    <TooltipTrigger asChild>
-                                      <div className="flex items-center space-x-2">
-                                        <Checkbox
-                                          id={`agent-${agent.id}`}
-                                          checked={selectedAgents.includes(agent.id)}
-                                          disabled={autoSelectAgents}
-                                          onCheckedChange={(checked) => {
-                                            if (checked) {
-                                              setSelectedAgents([...selectedAgents, agent.id]);
-                                            } else {
-                                              setSelectedAgents(selectedAgents.filter(id => id !== agent.id));
-                                            }
-                                          }}
-                                        />
-                                        <Label
-                                          htmlFor={`agent-${agent.id}`}
-                                          className="text-sm font-normal cursor-pointer flex-1"
-                                        >
-                                          {agent.name}
-                                        </Label>
-                                      </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                      <p className="max-w-xs">{agent.description}</p>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ))}
-                              </div>
-                            </TooltipProvider>
+                            {/* View agents expandable section */}
+                            <div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-between h-8 px-2"
+                                onClick={() => setShowAgentsList(!showAgentsList)}
+                              >
+                                <span className="text-xs font-medium">View agents</span>
+                                {showAgentsList ? (
+                                  <ChevronUp className="h-3 w-3" />
+                                ) : (
+                                  <ChevronDown className="h-3 w-3" />
+                                )}
+                              </Button>
+
+                              {showAgentsList && (
+                                <TooltipProvider>
+                                  <div className="space-y-1 max-h-48 overflow-y-auto mt-2 pt-2 border-t">
+                                    {workflowMetadata.agents.map((agent) => (
+                                      <Tooltip key={agent.id}>
+                                        <TooltipTrigger asChild>
+                                          <div className="flex items-center space-x-2">
+                                            <Checkbox
+                                              id={`agent-${agent.id}`}
+                                              checked={selectedAgents.includes(agent.id)}
+                                              disabled={autoSelectAgents}
+                                              onCheckedChange={(checked) => {
+                                                if (checked) {
+                                                  setSelectedAgents([...selectedAgents, agent.id]);
+                                                } else {
+                                                  setSelectedAgents(selectedAgents.filter(id => id !== agent.id));
+                                                }
+                                              }}
+                                            />
+                                            <Label
+                                              htmlFor={`agent-${agent.id}`}
+                                              className="text-sm font-normal cursor-pointer flex-1"
+                                            >
+                                              {agent.name}
+                                            </Label>
+                                          </div>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                          <p className="max-w-xs">{agent.description}</p>
+                                        </TooltipContent>
+                                      </Tooltip>
+                                    ))}
+                                  </div>
+                                </TooltipProvider>
+                              )}
+                            </div>
 
                             {(selectedAgents.length > 0 || autoSelectAgents) && (
                               <div className="bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 flex items-center gap-2">
