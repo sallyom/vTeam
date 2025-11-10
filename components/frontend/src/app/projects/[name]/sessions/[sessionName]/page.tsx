@@ -1537,7 +1537,7 @@ export default function ProjectSessionDetailPage({
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
                   <div className="flex items-center gap-2">
                     <Link className="h-4 w-4" />
-                    <span>Context Sources</span>
+                    <span>Context</span>
                     {session?.spec?.repos && session.spec.repos.length > 0 && (
                       <Badge variant="secondary" className="ml-auto mr-2">
                         {session.spec.repos.length}
