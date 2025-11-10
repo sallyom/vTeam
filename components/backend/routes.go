@@ -91,10 +91,10 @@ func registerRoutes(r *gin.Engine) {
 			projectGroup.DELETE("/keys/:keyId", handlers.DeleteProjectKey)
 
 			projectGroup.GET("/secrets", handlers.ListNamespaceSecrets)
-			projectGroup.GET("/runner-secrets/config", handlers.GetRunnerSecretsConfig)
-			projectGroup.PUT("/runner-secrets/config", handlers.UpdateRunnerSecretsConfig)
 			projectGroup.GET("/runner-secrets", handlers.ListRunnerSecrets)
 			projectGroup.PUT("/runner-secrets", handlers.UpdateRunnerSecrets)
+			projectGroup.GET("/integration-secrets", handlers.ListIntegrationSecrets)
+			projectGroup.PUT("/integration-secrets", handlers.UpdateIntegrationSecrets)
 		}
 
 		api.POST("/auth/github/install", handlers.LinkGitHubInstallationGlobal)

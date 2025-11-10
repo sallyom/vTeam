@@ -7,14 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Save, Loader2, Info } from "lucide-react";
-import { Plus, Trash2, Eye, EyeOff } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Save, Loader2, Info, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Eye, EyeOff, ChevronDown, ChevronRight } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { successToast, errorToast } from "@/hooks/use-toast";
 import { useProject, useUpdateProject } from "@/services/queries/use-projects";
-import { useSecretsList, useSecretsConfig, useSecretsValues, useUpdateSecretsConfig, useUpdateSecrets } from "@/services/queries/use-secrets";
+import { useSecretsValues, useUpdateSecretsConfig, useUpdateSecrets, useIntegrationSecrets, useUpdateIntegrationSecrets } from "@/services/queries/use-secrets";
 import { useMemo } from "react";
 
 type SettingsSectionProps = {
@@ -23,9 +21,7 @@ type SettingsSectionProps = {
 
 export function SettingsSection({ projectName }: SettingsSectionProps) {
   const [formData, setFormData] = useState({ displayName: "", description: "" });
-  const [secretName, setSecretName] = useState<string>("");
   const [secrets, setSecrets] = useState<Array<{ key: string; value: string }>>([]);
-  const [mode, setMode] = useState<"existing" | "new">("existing");
   const [showValues, setShowValues] = useState<Record<number, boolean>>({});
   const [anthropicApiKey, setAnthropicApiKey] = useState<string>("");
   const [showAnthropicKey, setShowAnthropicKey] = useState<boolean>(false);
@@ -38,16 +34,19 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
   const [jiraEmail, setJiraEmail] = useState<string>("");
   const [jiraToken, setJiraToken] = useState<string>("");
   const [showJiraToken, setShowJiraToken] = useState<boolean>(false);
-  const FIXED_KEYS = useMemo(() => ["ANTHROPIC_API_KEY","GIT_USER_NAME","GIT_USER_EMAIL","GIT_TOKEN","JIRA_URL","JIRA_PROJECT","JIRA_EMAIL","JIRA_API_TOKEN"] as const, []);
+  const [anthropicExpanded, setAnthropicExpanded] = useState<boolean>(false);
+  const [githubExpanded, setGithubExpanded] = useState<boolean>(false);
+  const [jiraExpanded, setJiraExpanded] = useState<boolean>(false);
+  const FIXED_KEYS = useMemo(() => ["ANTHROPIC_API_KEY","GIT_USER_NAME","GIT_USER_EMAIL","GITHUB_TOKEN","JIRA_URL","JIRA_PROJECT","JIRA_EMAIL","JIRA_API_TOKEN"] as const, []);
 
   // React Query hooks
   const { data: project, isLoading: projectLoading } = useProject(projectName);
-  const { data: secretsList } = useSecretsList(projectName);
-  const { data: secretsConfig } = useSecretsConfig(projectName);
-  const { data: secretsValues } = useSecretsValues(projectName);
+  const { data: runnerSecrets } = useSecretsValues(projectName);  // ambient-runner-secrets (ANTHROPIC_API_KEY)
+  const { data: integrationSecrets } = useIntegrationSecrets(projectName);  // ambient-non-vertex-integrations (GITHUB_TOKEN, GIT_USER_*, JIRA_*, custom)
   const updateProjectMutation = useUpdateProject();
   const updateSecretsConfigMutation = useUpdateSecretsConfig();
   const updateSecretsMutation = useUpdateSecrets();
+  const updateIntegrationSecretsMutation = useUpdateIntegrationSecrets();
 
   // Sync project data to form
   useEffect(() => {
@@ -56,34 +55,22 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
     }
   }, [project]);
 
-  // Sync secrets config to state
+  // Sync secrets values to state (merge both secrets)
   useEffect(() => {
-    if (secretsConfig) {
-      if (secretsConfig.secretName) {
-        setSecretName(secretsConfig.secretName);
-        setMode("existing");
-      } else {
-        setSecretName("ambient-runner-secrets");
-        setMode("new");
-      }
-    }
-  }, [secretsConfig]);
-
-  // Sync secrets values to state
-  useEffect(() => {
-    if (secretsValues) {
-      const byKey: Record<string, string> = Object.fromEntries(secretsValues.map(s => [s.key, s.value]));
+    const allSecrets = [...(runnerSecrets || []), ...(integrationSecrets || [])];
+    if (allSecrets.length > 0) {
+      const byKey: Record<string, string> = Object.fromEntries(allSecrets.map(s => [s.key, s.value]));
       setAnthropicApiKey(byKey["ANTHROPIC_API_KEY"] || "");
       setGitUserName(byKey["GIT_USER_NAME"] || "");
       setGitUserEmail(byKey["GIT_USER_EMAIL"] || "");
-      setGitToken(byKey["GIT_TOKEN"] || "");
+      setGitToken(byKey["GITHUB_TOKEN"] || "");
       setJiraUrl(byKey["JIRA_URL"] || "");
       setJiraProject(byKey["JIRA_PROJECT"] || "");
       setJiraEmail(byKey["JIRA_EMAIL"] || "");
       setJiraToken(byKey["JIRA_API_TOKEN"] || "");
-      setSecrets(secretsValues.filter(s => !FIXED_KEYS.includes(s.key as typeof FIXED_KEYS[number])));
+      setSecrets(allSecrets.filter(s => !FIXED_KEYS.includes(s.key as typeof FIXED_KEYS[number])));
     }
-  }, [secretsValues, FIXED_KEYS]);
+  }, [runnerSecrets, integrationSecrets, FIXED_KEYS]);
 
   const handleSave = () => {
     if (!project) return;
@@ -111,51 +98,99 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
   const handleSaveSecrets = () => {
     if (!projectName) return;
 
-    const name = secretName.trim() || "ambient-runner-secrets";
+    // Split secrets into two groups
+    const runnerData: Record<string, string> = {};
+    const integrationData: Record<string, string> = {};
 
-    // First update config
-    updateSecretsConfigMutation.mutate(
-      { projectName, secretName: name },
-      {
-        onSuccess: () => {
-          // Then update secrets values
-          const data: Record<string, string> = {};
-          if (anthropicApiKey) data["ANTHROPIC_API_KEY"] = anthropicApiKey;
-          if (gitUserName) data["GIT_USER_NAME"] = gitUserName;
-          if (gitUserEmail) data["GIT_USER_EMAIL"] = gitUserEmail;
-          if (gitToken) data["GIT_TOKEN"] = gitToken;
-          if (jiraUrl) data["JIRA_URL"] = jiraUrl;
-          if (jiraProject) data["JIRA_PROJECT"] = jiraProject;
-          if (jiraEmail) data["JIRA_EMAIL"] = jiraEmail;
-          if (jiraToken) data["JIRA_API_TOKEN"] = jiraToken;
-          for (const { key, value } of secrets) {
-            if (!key) continue;
-            if (FIXED_KEYS.includes(key as typeof FIXED_KEYS[number])) continue;
-            data[key] = value ?? "";
-          }
+    // ANTHROPIC_API_KEY goes to ambient-runner-secrets
+    if (anthropicApiKey) runnerData["ANTHROPIC_API_KEY"] = anthropicApiKey;
 
-          updateSecretsMutation.mutate(
-            {
-              projectName,
-              secrets: Object.entries(data).map(([key, value]) => ({ key, value })),
-            },
-            {
-              onSuccess: () => {
-                successToast("Secrets saved successfully!");
-              },
-              onError: (error) => {
-                const message = error instanceof Error ? error.message : "Failed to save secrets";
-                errorToast(message);
-              },
-            }
-          );
-        },
-        onError: (error) => {
-          const message = error instanceof Error ? error.message : "Failed to save secret config";
-          errorToast(message);
-        },
+    // GITHUB_TOKEN, GIT_USER_*, JIRA_*, custom keys go to ambient-non-vertex-integrations
+    if (gitUserName) integrationData["GIT_USER_NAME"] = gitUserName;
+    if (gitUserEmail) integrationData["GIT_USER_EMAIL"] = gitUserEmail;
+    if (gitToken) integrationData["GITHUB_TOKEN"] = gitToken;
+    if (jiraUrl) integrationData["JIRA_URL"] = jiraUrl;
+    if (jiraProject) integrationData["JIRA_PROJECT"] = jiraProject;
+    if (jiraEmail) integrationData["JIRA_EMAIL"] = jiraEmail;
+    if (jiraToken) integrationData["JIRA_API_TOKEN"] = jiraToken;
+    for (const { key, value } of secrets) {
+      if (!key) continue;
+      if (FIXED_KEYS.includes(key as typeof FIXED_KEYS[number])) continue;
+      integrationData[key] = value ?? "";
+    }
+
+    const saveRunnerSecrets = Object.keys(runnerData).length > 0;
+    const saveIntegrationSecrets = Object.keys(integrationData).length > 0;
+
+    let completed = 0;
+    const total = (saveRunnerSecrets ? 1 : 0) + (saveIntegrationSecrets ? 1 : 0);
+    const savedSecrets: string[] = [];
+
+    const checkComplete = () => {
+      completed++;
+      if (completed === total) {
+        if (savedSecrets.length === 1) {
+          successToast(`Secrets saved to ${savedSecrets[0]}`);
+        } else if (savedSecrets.length === 2) {
+          successToast(`Secrets saved to ${savedSecrets[0]} and ${savedSecrets[1]}`);
+        }
       }
-    );
+    };
+
+    // Save runner secrets (ANTHROPIC_API_KEY)
+    if (saveRunnerSecrets) {
+      updateSecretsConfigMutation.mutate(
+        { projectName, secretName: "ambient-runner-secrets" },
+        {
+          onSuccess: () => {
+            updateSecretsMutation.mutate(
+              {
+                projectName,
+                secrets: Object.entries(runnerData).map(([key, value]) => ({ key, value })),
+              },
+              {
+                onSuccess: () => {
+                  savedSecrets.push("ambient-runner-secrets");
+                  checkComplete();
+                },
+                onError: (error) => {
+                  const message = error instanceof Error ? error.message : "Failed to save Anthropic API key";
+                  errorToast(message);
+                },
+              }
+            );
+          },
+          onError: (error) => {
+            const message = error instanceof Error ? error.message : "Failed to configure runner secrets";
+            errorToast(message);
+          },
+        }
+      );
+    }
+
+    // Save integration secrets (GIT_*, JIRA_*, custom)
+    if (saveIntegrationSecrets) {
+      updateIntegrationSecretsMutation.mutate(
+        {
+          projectName,
+          secrets: Object.entries(integrationData).map(([key, value]) => ({ key, value })),
+        },
+        {
+          onSuccess: () => {
+            savedSecrets.push("ambient-non-vertex-integrations");
+            checkComplete();
+          },
+          onError: (error) => {
+            const message = error instanceof Error ? error.message : "Failed to save integration secrets";
+            errorToast(message);
+          },
+        }
+      );
+    }
+
+    if (!saveRunnerSecrets && !saveIntegrationSecrets) {
+      errorToast("No secrets to save");
+    }
   };
 
   const addSecretRow = () => {
@@ -238,279 +273,217 @@ export function SettingsSection({ projectName }: SettingsSectionProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Runner Secrets</CardTitle>
+          <CardTitle>Integration Secrets</CardTitle>
           <CardDescription>
-            Configure the Secret and manage key/value pairs used by workspace runners.
-          </CardDescription>
-        </CardHeader>
-        <Separator />
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <Label>Runner Secret</Label>
-                <div className="text-sm text-muted-foreground">Using: {secretName || "ambient-runner-secrets"}</div>
-              </div>
-            </div>
-            <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
-              <TabsList>
-                <TabsTrigger value="existing">Use existing</TabsTrigger>
-                <TabsTrigger value="new">Create new</TabsTrigger>
-              </TabsList>
-              <TabsContent value="existing">
-                <div className="flex gap-2 items-center pt-2">
-                  {(secretsList?.items?.length ?? 0) > 0 && (
-                    <Select
-                      value={secretName}
-                      onValueChange={setSecretName}
-                    >
-                      <SelectTrigger className="w-80">
-                        <SelectValue placeholder="Select a secret..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {secretsList?.items?.map((s) => (
-                          <SelectItem key={s.name} value={s.name}>{s.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </div>
-                {(secretsList?.items?.length ?? 0) === 0 ? (
-                  <div className="mt-2 text-sm text-amber-600">No runner secrets found in this project. Use the &quot;Create new&quot; tab to create one.</div>
-                ) : (!secretName ? (
-                  <div className="mt-2 text-sm text-muted-foreground">No secret selected. You can still add key/value pairs below and Save; they will be written to the default secret name.</div>
-                ) : null)}
-              </TabsContent>
-              <TabsContent value="new">
-                <div className="flex gap-2 items-center pt-2">
-                  <Input
-                    id="secretName"
-                    value={secretName}
-                    onChange={(e) => setSecretName(e.target.value)}
-                    placeholder="ambient-runner-secrets"
-                    maxLength={253}
-                  />
-                </div>
-              </TabsContent>
-            </Tabs>
-          </div>
-
-          {(mode === "new" || (mode === "existing" && !!secretName)) && (
-            <div className="pt-2 space-y-4">
-              <div className="space-y-2">
-                <Label>Additional Secrets</Label>
-                <div className="space-y-2">
-                  {secrets.map((item, idx) => (
-                    <div key={idx} className="flex gap-2 items-center">
-                      <Input
-                        value={item.key}
-                        onChange={(e) =>
-                          setSecrets((prev) => prev.map((it, i) => (i === idx ? { ...it, key: e.target.value } : it)))
-                        }
-                        placeholder="KEY"
-                        className="w-1/3"
-                      />
-                      <div className="flex-1 flex items-center gap-2">
-                        <Input
-                          type={showValues[idx] ? "text" : "password"}
-                          value={item.value}
-                          onChange={(e) =>
-                            setSecrets((prev) => prev.map((it, i) => (i === idx ? { ...it, value: e.target.value } : it)))
-                          }
-                          placeholder="value"
-                          className="flex-1"
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          onClick={() => setShowValues((prev) => ({ ...prev, [idx]: !prev[idx] }))}
-                          aria-label={showValues[idx] ? "Hide value" : "Show value"}
-                        >
-                          {showValues[idx] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </Button>
-                      </div>
-                      <Button variant="ghost" onClick={() => removeSecretRow(idx)} aria-label="Remove row">
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <Button variant="outline" onClick={addSecretRow}>
-                <Plus className="w-4 h-4 mr-2" /> Add Secret
-              </Button>
-            </div>
-          )}
-
-          {(mode === "new" || (mode === "existing" && !!secretName)) && (
-            <div className="flex gap-3 pt-2">
-              <Button
-                onClick={handleSaveSecrets}
-                disabled={
-                  updateSecretsConfigMutation.isPending ||
-                  updateSecretsMutation.isPending ||
-                  (mode === "existing" && ((secretsList?.items?.length ?? 0) === 0 || !secretName))
-                }
-              >
-                {(updateSecretsConfigMutation.isPending || updateSecretsMutation.isPending) ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Saving Secrets
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4 mr-2" />
-                    Save Secrets
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>API Keys</CardTitle>
-          <CardDescription>
-            Configure API keys for your workspace runners.
-          </CardDescription>
-        </CardHeader>
-        <Separator />
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="anthropicApiKey">Anthropic API Key</Label>
-            <div className="text-xs text-muted-foreground mb-2">Your Anthropic API key for Claude Code runner</div>
-            <div className="flex items-center gap-2">
-              <Input
-                id="anthropicApiKey"
-                type={showAnthropicKey ? "text" : "password"}
-                placeholder="sk-ant-..."
-                value={anthropicApiKey}
-                onChange={(e) => setAnthropicApiKey(e.target.value)}
-                className="flex-1"
-              />
-              <Button type="button" variant="ghost" onClick={() => setShowAnthropicKey((v) => !v)} aria-label={showAnthropicKey ? "Hide key" : "Show key"}>
-                {showAnthropicKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </Button>
-            </div>
-          </div>
-          <div className="pt-2">
-            <Button
-              onClick={handleSaveSecrets}
-              disabled={
-                updateSecretsConfigMutation.isPending ||
-                updateSecretsMutation.isPending ||
-                (mode === "existing" && ((secretsList?.items?.length ?? 0) === 0 || !secretName))
-              }
-            >
-              {(updateSecretsConfigMutation.isPending || updateSecretsMutation.isPending) ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Saving Keys
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Keys
-                </>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Integrations</CardTitle>
-          <CardDescription>
-            Configure external integrations for your workspace runners.
+            Configure environment variables for workspace runners. All values are injected into runner pods.
           </CardDescription>
         </CardHeader>
         <Separator />
         <CardContent className="space-y-6">
-          <div className="space-y-3">
-            <Label className="text-base font-semibold">Git Integration (Optional)</Label>
-            <div className="text-xs text-muted-foreground mb-3">Configure Git credentials for repository operations (clone, commit, push)</div>
-            <div className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded p-2 mb-3">
-              <strong>Note:</strong> These fields are only needed if you have not connected a GitHub Application. When GitHub App integration is configured, it will be used automatically and these fields will serve as a fallback.
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="gitUserName">Git User Name</Label>
-                <Input id="gitUserName" placeholder="Your Name" value={gitUserName} onChange={(e) => setGitUserName(e.target.value)} />
+          {/* Warning about centralized integrations */}
+          <Alert variant="default" className="border-amber-200 bg-amber-50">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            <AlertTitle className="text-amber-900">Centralized Integrations Recommended</AlertTitle>
+            <AlertDescription className="text-amber-800 text-sm">
+              <p>Cluster-level integrations (Vertex AI, GitHub App, Jira OAuth) are more secure than personal tokens. Only configure these secrets if centralized integrations are unavailable.</p>
+            </AlertDescription>
+          </Alert>
+
+          {/* Anthropic Section */}
+          <div className="border rounded-lg">
+            <button
+              type="button"
+              onClick={() => setAnthropicExpanded(!anthropicExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors rounded-lg"
+            >
+              <div className="flex items-center gap-2">
+                {anthropicExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <span className="font-semibold">Anthropic</span>
+                {anthropicApiKey && <span className="text-xs text-muted-foreground">(configured)</span>}
               </div>
-              <div className="space-y-1">
-                <Label htmlFor="gitUserEmail">Git User Email</Label>
-                <Input id="gitUserEmail" placeholder="you@example.com" value={gitUserEmail} onChange={(e) => setGitUserEmail(e.target.value)} />
+            </button>
+            {anthropicExpanded && (
+              <div className="px-3 pb-3 space-y-3 border-t pt-3">
+                <div className="space-y-2">
+                  <Label htmlFor="anthropicApiKey">ANTHROPIC_API_KEY</Label>
+                  <div className="text-xs text-muted-foreground">Your Anthropic API key for Claude Code runner</div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="anthropicApiKey"
+                      type={showAnthropicKey ? "text" : "password"}
+                      placeholder="sk-ant-..."
+                      value={anthropicApiKey}
+                      onChange={(e) => setAnthropicApiKey(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setShowAnthropicKey((v) => !v)} aria-label={showAnthropicKey ? "Hide key" : "Show key"}>
+                      {showAnthropicKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* GitHub Integration Section */}
+          <div className="border rounded-lg">
+            <button
+              type="button"
+              onClick={() => setGithubExpanded(!githubExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors rounded-lg"
+            >
+              <div className="flex items-center gap-2">
+                {githubExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <span className="font-semibold">GitHub Integration</span>
+                {(gitUserName || gitUserEmail || gitToken) && <span className="text-xs text-muted-foreground">(configured)</span>}
+              </div>
+            </button>
+            {githubExpanded && (
+              <div className="px-3 pb-3 space-y-3 border-t pt-3">
+                <div className="text-xs text-muted-foreground">Configure Git credentials for repository operations (clone, commit, push)</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="gitUserName">GIT_USER_NAME</Label>
+                    <Input id="gitUserName" placeholder="Your Name" value={gitUserName} onChange={(e) => setGitUserName(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="gitUserEmail">GIT_USER_EMAIL</Label>
+                    <Input id="gitUserEmail" placeholder="you@example.com" value={gitUserEmail} onChange={(e) => setGitUserEmail(e.target.value)} />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="gitToken">GITHUB_TOKEN</Label>
+                  <div className="text-xs text-muted-foreground mb-1">GitHub personal access token or fine-grained token for git operations and API access</div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="gitToken"
+                      type={showGitToken ? "text" : "password"}
+                      placeholder="ghp_... or glpat-..."
+                      value={gitToken}
+                      onChange={(e) => setGitToken(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setShowGitToken((v) => !v)} aria-label={showGitToken ? "Hide token" : "Show token"}>
+                      {showGitToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Jira Integration Section */}
+          <div className="border rounded-lg">
+            <button
+              type="button"
+              onClick={() => setJiraExpanded(!jiraExpanded)}
+              className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors rounded-lg"
+            >
+              <div className="flex items-center gap-2">
+                {jiraExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                <span className="font-semibold">Jira Integration</span>
+                {(jiraUrl || jiraProject || jiraEmail || jiraToken) && <span className="text-xs text-muted-foreground">(configured)</span>}
+              </div>
+            </button>
+            {jiraExpanded && (
+              <div className="px-3 pb-3 space-y-3 border-t pt-3">
+                <div className="text-xs text-muted-foreground">Configure Jira integration for issue management</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label htmlFor="jiraUrl">JIRA_URL</Label>
+                    <Input id="jiraUrl" placeholder="https://your-domain.atlassian.net" value={jiraUrl} onChange={(e) => setJiraUrl(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="jiraProject">JIRA_PROJECT</Label>
+                    <Input id="jiraProject" placeholder="ABC" value={jiraProject} onChange={(e) => setJiraProject(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="jiraEmail">JIRA_EMAIL</Label>
+                    <Input id="jiraEmail" placeholder="you@example.com" value={jiraEmail} onChange={(e) => setJiraEmail(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="jiraToken">JIRA_API_TOKEN</Label>
+                    <div className="flex items-center gap-2">
+                      <Input id="jiraToken" type={showJiraToken ? "text" : "password"} placeholder="token" value={jiraToken} onChange={(e) => setJiraToken(e.target.value)} />
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setShowJiraToken((v) => !v)} aria-label={showJiraToken ? "Hide token" : "Show token"}>
+                        {showJiraToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Custom Environment Variables Section */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-base font-semibold">Custom Environment Variables</Label>
+                <div className="text-xs text-muted-foreground mt-1">Add any additional environment variables for your integrations</div>
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="gitToken">GitHub API Token</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="gitToken"
-                  type={showGitToken ? "text" : "password"}
-                  placeholder="ghp_... or glpat-..."
-                  value={gitToken}
-                  onChange={(e) => setGitToken(e.target.value)}
-                  className="flex-1"
-                />
-                <Button type="button" variant="ghost" onClick={() => setShowGitToken((v) => !v)} aria-label={showGitToken ? "Hide token" : "Show token"}>
-                  {showGitToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </Button>
-              </div>
-              <div className="text-xs text-muted-foreground">GitHub personal access token or fine-grained token for git operations and API access</div>
-            </div>
-            <div className="text-xs text-muted-foreground">Git credentials will be saved with keys: GIT_USER_NAME, GIT_USER_EMAIL, GIT_TOKEN</div>
-          </div>
-
-          <div className="pt-4 space-y-3 border-t">
-            <Label className="text-base font-semibold">Jira Integration (Optional)</Label>
-            <div className="text-xs text-muted-foreground mb-3">Configure Jira integration for issue management</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label htmlFor="jiraUrl">Jira Base URL</Label>
-                <Input id="jiraUrl" placeholder="https://your-domain.atlassian.net" value={jiraUrl} onChange={(e) => setJiraUrl(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="jiraProject">Jira Project Key</Label>
-                <Input id="jiraProject" placeholder="ABC" value={jiraProject} onChange={(e) => setJiraProject(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="jiraEmail">Jira Email/Username</Label>
-                <Input id="jiraEmail" placeholder="you@example.com" value={jiraEmail} onChange={(e) => setJiraEmail(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="jiraToken">Jira API Token</Label>
-                <div className="flex items-center gap-2">
-                  <Input id="jiraToken" type={showJiraToken ? "text" : "password"} placeholder="token" value={jiraToken} onChange={(e) => setJiraToken(e.target.value)} />
-                  <Button type="button" variant="ghost" onClick={() => setShowJiraToken((v) => !v)} aria-label={showJiraToken ? "Hide token" : "Show token"}>
-                    {showJiraToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {secrets.map((item, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <Input
+                    value={item.key}
+                    onChange={(e) =>
+                      setSecrets((prev) => prev.map((it, i) => (i === idx ? { ...it, key: e.target.value } : it)))
+                    }
+                    placeholder="KEY"
+                    className="w-1/3"
+                  />
+                  <div className="flex-1 flex items-center gap-2">
+                    <Input
+                      type={showValues[idx] ? "text" : "password"}
+                      value={item.value}
+                      onChange={(e) =>
+                        setSecrets((prev) => prev.map((it, i) => (i === idx ? { ...it, value: e.target.value } : it)))
+                      }
+                      placeholder="value"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowValues((prev) => ({ ...prev, [idx]: !prev[idx] }))}
+                      aria-label={showValues[idx] ? "Hide value" : "Show value"}
+                    >
+                      {showValues[idx] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => removeSecretRow(idx)} aria-label="Remove row">
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
-              </div>
+              ))}
             </div>
-            <div className="text-xs text-muted-foreground">Jira credentials will be saved with keys: JIRA_URL, JIRA_PROJECT, JIRA_EMAIL, JIRA_API_TOKEN</div>
+            <Button variant="outline" size="sm" onClick={addSecretRow}>
+              <Plus className="w-4 h-4 mr-2" /> Add Environment Variable
+            </Button>
           </div>
-          <div className="pt-2">
+
+          {/* Save Button */}
+          <div className="pt-4 border-t">
             <Button
               onClick={handleSaveSecrets}
               disabled={
                 updateSecretsConfigMutation.isPending ||
                 updateSecretsMutation.isPending ||
-                (mode === "existing" && ((secretsList?.items?.length ?? 0) === 0 || !secretName))
+                updateIntegrationSecretsMutation.isPending
               }
             >
-              {(updateSecretsConfigMutation.isPending || updateSecretsMutation.isPending) ? (
+              {(updateSecretsConfigMutation.isPending || updateSecretsMutation.isPending || updateIntegrationSecretsMutation.isPending) ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Saving Integrations
+                  Saving...
                 </>
               ) : (
                 <>
                   <Save className="w-4 h-4 mr-2" />
-                  Save Integrations
+                  Save Integration Secrets
                 </>
               )}
             </Button>

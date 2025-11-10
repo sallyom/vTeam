@@ -311,18 +311,9 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	temperature, _, _ := unstructured.NestedFloat64(llmSettings, "temperature")
 	maxTokens, _, _ := unstructured.NestedInt64(llmSettings, "maxTokens")
 
-	// Read runner secrets configuration from ProjectSettings in the session's namespace
-	runnerSecretsName := ""
-	{
-		psGvr := types.GetProjectSettingsResource()
-		if psObj, err := config.DynamicClient.Resource(psGvr).Namespace(sessionNamespace).Get(context.TODO(), "projectsettings", v1.GetOptions{}); err == nil {
-			if psSpec, ok := psObj.Object["spec"].(map[string]interface{}); ok {
-				if v, ok := psSpec["runnerSecretsName"].(string); ok {
-					runnerSecretsName = strings.TrimSpace(v)
-				}
-			}
-		}
-	}
+	// Hardcoded secret names (convention over configuration)
+	const runnerSecretsName = "ambient-runner-secrets"              // ANTHROPIC_API_KEY only (ignored when Vertex enabled)
+	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, custom keys (always injected)
 
 	// Extract input/output git configuration (support flat and nested forms)
 	inputRepo, _, _ := unstructured.NestedString(spec, "inputRepo")
@@ -583,18 +574,35 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 								return base
 							}(),
 
-							// If configured, import all keys from the runner Secret as environment variables
-							// Note: When Vertex is enabled, use ambient-vertex secret instead of runnerSecretsName
+							// Import secrets as environment variables
+							// - integrationSecretsName: Always injected (GIT_TOKEN, JIRA_*, custom keys)
+							// - runnerSecretsName: Only when Vertex disabled (ANTHROPIC_API_KEY)
 							EnvFrom: func() []corev1.EnvFromSource {
-								// Warn if both Vertex and runnerSecretsName are configured
-								if vertexEnabled && runnerSecretsName != "" {
-									log.Printf("Warning: Both Vertex AI and runnerSecretsName configured for session %s. Using Vertex (runnerSecretsName ignored)", name)
+								sources := []corev1.EnvFromSource{}
+
+								// Always inject integration secrets if configured (regardless of Vertex)
+								if integrationSecretsName != "" {
+									sources = append(sources, corev1.EnvFromSource{
+										SecretRef: &corev1.SecretEnvSource{
+											LocalObjectReference: corev1.LocalObjectReference{Name: integrationSecretsName},
+										},
+									})
+									log.Printf("Injecting integration secrets from '%s' for session %s", integrationSecretsName, name)
 								}
-								// Only use runnerSecretsName when Vertex is disabled
+
+								// Only inject runner secrets (ANTHROPIC_API_KEY) when Vertex is disabled
 								if !vertexEnabled && runnerSecretsName != "" {
-									return []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: runnerSecretsName}}}}
+									sources = append(sources, corev1.EnvFromSource{
+										SecretRef: &corev1.SecretEnvSource{
+											LocalObjectReference: corev1.LocalObjectReference{Name: runnerSecretsName},
+										},
+									})
+									log.Printf("Injecting runner secrets from '%s' for session %s (Vertex disabled)", runnerSecretsName, name)
+								} else if vertexEnabled && runnerSecretsName != "" {
+									log.Printf("Skipping runner secrets '%s' for session %s (Vertex enabled)", runnerSecretsName, name)
 								}
-								return []corev1.EnvFromSource{}
+
+								return sources
 							}(),
 
 							Resources: corev1.ResourceRequirements{},
@@ -605,26 +613,8 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		},
 	}
 
-	// If a runner secret is configured, mount it as a volume in addition to EnvFrom
-	// Only use runnerSecretsName when Vertex AI is disabled (mutually exclusive with Vertex)
-	if !vertexEnabled && strings.TrimSpace(runnerSecretsName) != "" {
-		job.Spec.Template.Spec.Volumes = append(job.Spec.Template.Spec.Volumes, corev1.Volume{
-			Name:         "runner-secrets",
-			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: runnerSecretsName}},
-		})
-		// Mount to the ambient-content container by name
-		for i := range job.Spec.Template.Spec.Containers {
-			if job.Spec.Template.Spec.Containers[i].Name == "ambient-content" {
-				job.Spec.Template.Spec.Containers[i].VolumeMounts = append(job.Spec.Template.Spec.Containers[i].VolumeMounts, corev1.VolumeMount{
-					Name:      "runner-secrets",
-					MountPath: "/var/run/runner-secrets",
-					ReadOnly:  true,
-				})
-				break
-			}
-		}
-		log.Printf("Mounted runnerSecretsName '%s' to /var/run/runner-secrets for session %s", runnerSecretsName, name)
-	}
+	// Note: No volume mounts needed for runner/integration secrets
+	// All keys are injected as environment variables via EnvFrom above
 
 	// If ambient-vertex secret was successfully copied, mount it as a volume
 	if ambientVertexSecretCopied {
