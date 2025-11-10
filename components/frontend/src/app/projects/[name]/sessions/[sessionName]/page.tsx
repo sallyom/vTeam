@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 // Custom components
 import MessagesTab from "@/components/session/MessagesTab";
 import { FileTree, type FileTreeNode } from "@/components/file-tree";
+import { EmptyState } from "@/components/empty-state";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -1203,6 +1204,14 @@ export default function ProjectSessionDetailPage({
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="pt-2 pb-3">
+                  {(session?.status?.phase === 'Stopped' || session?.status?.phase === 'Error' || session?.status?.phase === 'Completed') ? (
+                    <EmptyState
+                      icon={Play}
+                      title="Session not running"
+                      description="You need to restart this session to use agents, commands, or switch workflows."
+                      className="py-8"
+                    />
+                  ) : (
                   <div className="space-y-3">
                     
                     {/* Show active workflow info */}
@@ -1409,6 +1418,7 @@ export default function ProjectSessionDetailPage({
                     )}
                     
                   </div>
+                  )}
                 </AccordionContent>
               </AccordionItem>
 

@@ -247,8 +247,18 @@ func ContentGitConfigureRemote(c *gin.Context) {
 		log.Printf("Initialized git repository at %s", abs)
 	}
 
-	// Configure remote
-	if err := git.ConfigureRemote(c.Request.Context(), abs, "origin", body.RemoteURL); err != nil {
+	// Get GitHub token and inject into URL for authentication
+	remoteURL := body.RemoteURL
+	gitHubToken := strings.TrimSpace(c.GetHeader("X-GitHub-Token"))
+	if gitHubToken != "" {
+		if authenticatedURL, err := git.InjectGitHubToken(remoteURL, gitHubToken); err == nil {
+			remoteURL = authenticatedURL
+			log.Printf("Injected GitHub token into remote URL")
+		}
+	}
+
+	// Configure remote with authenticated URL
+	if err := git.ConfigureRemote(c.Request.Context(), abs, "origin", remoteURL); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to configure remote"})
 		return
 	}

@@ -3120,6 +3120,14 @@ func ConfigureGitRemote(c *gin.Context) {
 		req.Header.Set("Authorization", v)
 	}
 
+	// Get and forward GitHub token for authenticated remote URL
+	if reqK8s != nil && reqDyn != nil && GetGitHubToken != nil {
+		if token, err := GetGitHubToken(c.Request.Context(), reqK8s, reqDyn, project, ""); err == nil && token != "" {
+			req.Header.Set("X-GitHub-Token", token)
+			log.Printf("Forwarding GitHub token for remote configuration")
+		}
+	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "content service unavailable"})
