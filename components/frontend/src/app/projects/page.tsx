@@ -70,20 +70,22 @@ export default function ProjectsPage() {
   // Loading state
   if (isLoading) {
     return (
-      <div className="container mx-auto p-6">
-        <div className="flex items-center justify-center h-64">
-          <RefreshCw className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading projects...</span>
+      <div className="min-h-screen bg-[#f8fafc]">
+        <div className="container mx-auto p-6">
+          <div className="flex items-center justify-center h-64">
+            <RefreshCw className="h-8 w-8 animate-spin" />
+            <span className="ml-2">Loading workspaces...</span>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container mx-auto p-0">
+    <div className="min-h-screen bg-[#f8fafc]">
       {/* Sticky header */}
       <div className="sticky top-0 z-20 bg-white border-b">
-        <div className="container mx-auto px-6 py-6">
+        <div className="container mx-auto px-6 py-4">
           <PageHeader
             title="Workspaces"
             description="Select or create a workspace to get started"

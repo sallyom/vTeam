@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, Download } from "lucide-react";
+import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, Download, Workflow, ChevronDown, ChevronRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // Custom components
@@ -63,6 +63,8 @@ export default function ProjectSessionDetailPage({
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const [contextUrl, setContextUrl] = useState("");
   const [contextBranch, setContextBranch] = useState("main");
+  const [commandsScrollTop, setCommandsScrollTop] = useState(false);
+  const [commandsScrollBottom, setCommandsScrollBottom] = useState(true);
   const [customWorkflowDialogOpen, setCustomWorkflowDialogOpen] = useState(false);
   const [customWorkflowUrl, setCustomWorkflowUrl] = useState("");
   const [customWorkflowBranch, setCustomWorkflowBranch] = useState("main");
@@ -71,7 +73,9 @@ export default function ProjectSessionDetailPage({
   const [activeWorkflow, setActiveWorkflow] = useState<string | null>(null);
   const [workflowActivating, setWorkflowActivating] = useState(false);
   const [repoChanging, setRepoChanging] = useState(false);
-  const [autoSelectAgents, setAutoSelectAgents] = useState(false);
+  const [autoSelectAgents, setAutoSelectAgents] = useState(true);
+  const [showAgentsList, setShowAgentsList] = useState(false);
+  const [showCommandsList, setShowCommandsList] = useState(false);
   
   // Directory browser state (unified for artifacts, repos, and workflow)
   const [selectedDirectory, setSelectedDirectory] = useState<{
@@ -276,8 +280,13 @@ export default function ProjectSessionDetailPage({
   
   // Load active workflow from session spec if present
   useEffect(() => {
-    // Only initialize once from session data
+    // Only initialize once from session data, but wait for both session and ootbWorkflows to be ready
     if (initializedFromSessionRef.current || !session) return;
+    
+    // If session has an active workflow, wait for ootbWorkflows to load before initializing
+    if (session.spec?.activeWorkflow && ootbWorkflows.length === 0) {
+      return; // Wait for ootbWorkflows to load
+    }
     
     if (session.spec?.activeWorkflow) {
       // Derive workflow ID from gitUrl if possible
@@ -285,8 +294,10 @@ export default function ProjectSessionDetailPage({
       const matchingWorkflow = ootbWorkflows.find(w => w.gitUrl === gitUrl);
       if (matchingWorkflow) {
         setActiveWorkflow(matchingWorkflow.id);
+        setSelectedWorkflow(matchingWorkflow.id);
       } else {
         setActiveWorkflow("custom");
+        setSelectedWorkflow("custom");
       }
     }
     
@@ -1238,8 +1249,9 @@ export default function ProjectSessionDetailPage({
               <AccordionItem value="workflows" className="border rounded-lg px-3 bg-white">
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
                   <div className="flex items-center gap-2">
-                  Workflows
-                    {activeWorkflow && (
+                    <Workflow className="h-4 w-4" />
+                    <span>Workflows</span>
+                    {activeWorkflow && !openAccordionItems.includes("workflows") && (
                       <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
                         {ootbWorkflows.find(w => w.id === activeWorkflow)?.name || "Custom Workflow"}
                       </Badge>
@@ -1257,43 +1269,166 @@ export default function ProjectSessionDetailPage({
                   ) : (
                   <div className="space-y-3">
                     
+                    {/* Workflow selector - always visible except when activating */}
+                    {!workflowActivating && (
+                      <>
+                        <p className="text-sm text-muted-foreground">
+                          Workflows provide agents with pre-defined context and structured steps to follow.
+                        </p>
+                        
+                        <div>
+                          {/*
+                          <label className="text-sm font-medium mb-1.5 block">
+                            Workflows
+                          </label>
+                          */}
+                          <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
+                            <SelectTrigger className="w-full h-auto py-8">
+                              <SelectValue placeholder="Generic chat" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">
+                                <div className="flex flex-col items-start gap-0.5 py-1">
+                                  <span>General chat</span>
+                                  <span className="text-xs text-muted-foreground font-normal">
+                                      A general chat session with no structured workflow.
+                                    </span>
+                                </div>
+                              </SelectItem>
+                              {ootbWorkflows.map((workflow) => (
+                                <SelectItem 
+                                  key={workflow.id} 
+                                  value={workflow.id}
+                                  disabled={!workflow.enabled}
+                                >
+                                  <div className="flex flex-col items-start gap-0.5 py-1">
+                                    <span>{workflow.name}</span>
+                                    <span className="text-xs text-muted-foreground font-normal">
+                                      {workflow.description}
+                                    </span>
+                                  </div>
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="custom">
+                                <div className="flex flex-col items-start gap-0.5 py-1">
+                                  <span>Custom Workflow...</span>
+                                  <span className="text-xs text-muted-foreground font-normal">
+                                    Load a workflow from a custom Git repository
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        
+                        {/* Show workflow preview and activate/switch button */}
+                        {pendingWorkflow && (
+                          <Alert className="bg-blue-50 border-blue-200">
+                            <AlertCircle className="h-4 w-4 text-blue-600" />
+                            <AlertTitle className="text-blue-900">
+                              Reload required
+                            </AlertTitle>
+                            <AlertDescription className="text-blue-800">
+                              <div className="space-y-2 mt-2">
+                                <p className="text-sm">
+                                  Claude will {activeWorkflow ? 'restart and switch to' : 'pause briefly to load'} the workflow. Your chat history will be preserved.
+                                </p>
+                                <Button 
+                                  onClick={handleActivateWorkflow}
+                                  className="w-full mt-3"
+                                  size="sm"
+                                >
+                                  <Play className="mr-2 h-4 w-4" />
+                                  Load new workflow
+                                </Button>
+                              </div>
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                      </>
+                    )}
+                    
                     {/* Show active workflow info */}
                     {activeWorkflow && !workflowActivating && (
                       <>
+                      
+                    {/* Commands Section */}
+                    {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
+                      <div className="space-y-2">
+                        {/* View commands expandable section */}
+                        <div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-full justify-between h-8 px-2"
+                            onClick={() => setShowCommandsList(!showCommandsList)}
+                          >
+                            <span className="text-xs font-medium">
+                              {showCommandsList ? 'Hide' : 'Show'} {workflowMetadata.commands.length} available command{workflowMetadata.commands.length !== 1 ? 's' : ''}
+                            </span>
+                            {showCommandsList ? (
+                              <ChevronDown className="h-3 w-3" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3" />
+                            )}
+                          </Button>
 
-                        {/* Commands Section */}
-                        {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium">Slash Commands</div>
-                            <TooltipProvider>
-                              <div className="grid grid-cols-2 gap-2">
-                                {workflowMetadata.commands.map((cmd) => (
-                                  <Tooltip key={cmd.id}>
-                                    <TooltipTrigger asChild>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="justify-start h-auto py-2 px-3 text-left"
-                                        onClick={() => handleCommandClick(cmd.slashCommand)}
-                                      >
-                                        <div className="flex items-center gap-2 w-full min-w-0">
-                                          <Badge variant="secondary" className="text-xs flex-shrink-0">
-                                            {cmd.slashCommand}
-                                          </Badge>
-                                          <span className="font-medium text-xs truncate">{cmd.name}</span>
-                                        </div>
-                                      </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" className="max-w-xs">
-                                      <p className="font-medium text-xs mb-1">{cmd.name}</p>
-                                      <p className="text-xs">{cmd.description}</p>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ))}
+                          {showCommandsList && (
+                            <div className="relative mt-2">
+                              {commandsScrollTop && (
+                                <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-white to-transparent pointer-events-none z-10" />
+                              )}
+                              <div 
+                                className="max-h-[400px] overflow-y-auto space-y-2 pr-1"
+                                onScroll={(e) => {
+                                  const target = e.currentTarget;
+                                  const isScrolledFromTop = target.scrollTop > 10;
+                                  const isScrolledToBottom = target.scrollHeight - target.scrollTop <= target.clientHeight + 10;
+                                  setCommandsScrollTop(isScrolledFromTop);
+                                  setCommandsScrollBottom(!isScrolledToBottom);
+                                }}
+                              >
+                                {workflowMetadata.commands.map((cmd) => {
+                                  // Extract command name after last dot and capitalize
+                                  const commandTitle = cmd.name.includes('.') 
+                                    ? cmd.name.split('.').pop() 
+                                    : cmd.name;
+                                  
+                                  return (
+                                    <div
+                                      key={cmd.id}
+                                      className="p-3 rounded-md border bg-muted/30"
+                                    >
+                                      <div className="flex items-center justify-between mb-1">
+                                        <h3 className="text-sm font-bold capitalize">
+                                          {commandTitle}
+                                        </h3>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="flex-shrink-0 h-7 text-xs"
+                                          onClick={() => handleCommandClick(cmd.slashCommand)}
+                                        >
+                                          Run {cmd.slashCommand.replace(/^\/speckit\./, '/')}
+                                        </Button>
+                                      </div>
+                                      {cmd.description && (
+                                        <p className="text-xs text-muted-foreground">
+                                          {cmd.description}
+                                        </p>
+                                      )}
+                                    </div>
+                                  );
+                                })}
                               </div>
-                            </TooltipProvider>
-                          </div>
-                        )}
+                              {commandsScrollBottom && (
+                                <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none z-10" />
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                         {workflowMetadata?.commands?.length === 0 && (
                           <p className="text-xs text-muted-foreground text-center py-2">
@@ -1304,65 +1439,86 @@ export default function ProjectSessionDetailPage({
                         {/* Agents Section */}
                         {workflowMetadata?.agents && workflowMetadata.agents.length > 0 && (
                           <div className="space-y-2">
-                            <div className="text-sm font-medium">Agents</div>
+                            {/* View agents expandable section */}
+                            <div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="w-full justify-between h-8 px-2"
+                                onClick={() => setShowAgentsList(!showAgentsList)}
+                              >
+                                <span className="text-xs font-medium">
+                                  {showAgentsList ? 'Hide' : 'Show'} {workflowMetadata.agents.length} available agent{workflowMetadata.agents.length !== 1 ? 's' : ''}
+                                </span>
+                                {showAgentsList ? (
+                                  <ChevronDown className="h-3 w-3" />
+                                ) : (
+                                  <ChevronRight className="h-3 w-3" />
+                                )}
+                              </Button>
 
-                            <div className="flex items-center space-x-2 pb-2 border-b">
-                              <Checkbox
-                                id="auto-select-agents"
-                                checked={autoSelectAgents}
-                                onCheckedChange={(checked) => {
-                                  setAutoSelectAgents(!!checked);
-                                  if (checked) setSelectedAgents([]);
-                                }}
-                              />
-                              <Sparkles className="h-3 w-3 text-purple-500" />
-                              <Label htmlFor="auto-select-agents" className="text-sm font-normal cursor-pointer">
-                                Claude picks best agents for each task
-                              </Label>
+                              {showAgentsList && (
+                                <TooltipProvider>
+                                  <div className="space-y-2 max-h-48 overflow-y-auto mt-2 pt-2 m-3">
+                                    <div className="flex items-center space-x-2 pb-2">
+                                      <Checkbox
+                                        id="auto-select-agents"
+                                        checked={autoSelectAgents}
+                                        onCheckedChange={(checked) => {
+                                          setAutoSelectAgents(!!checked);
+                                          if (checked) setSelectedAgents([]);
+                                        }}
+                                      />
+                                      <Sparkles className="h-3 w-3 text-purple-500" />
+                                      <Label htmlFor="auto-select-agents" className="text-sm font-normal cursor-pointer">
+                                        Automatically select recommended agents for each task
+                                      </Label>
+                                    </div>
+                                    <div className="space-y-1 space-x-6">
+                                      {workflowMetadata.agents.map((agent) => (
+                                        <Tooltip key={agent.id}>
+                                          <TooltipTrigger asChild>
+                                            <div className="flex items-center space-x-2">
+                                              <Checkbox
+                                                id={`agent-${agent.id}`}
+                                                checked={selectedAgents.includes(agent.id)}
+                                                disabled={autoSelectAgents}
+                                                onCheckedChange={(checked) => {
+                                                  if (checked) {
+                                                    setSelectedAgents([...selectedAgents, agent.id]);
+                                                  } else {
+                                                    setSelectedAgents(selectedAgents.filter(id => id !== agent.id));
+                                                  }
+                                                }}
+                                              />
+                                              <Label
+                                                htmlFor={`agent-${agent.id}`}
+                                                className="text-sm font-normal cursor-pointer flex-1"
+                                              >
+                                                {agent.name}
+                                              </Label>
+                                            </div>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p className="max-w-xs">{agent.description}</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </TooltipProvider>
+                              )}
                             </div>
 
-                            <TooltipProvider>
-                              <div className="space-y-1 max-h-48 overflow-y-auto">
-                                {workflowMetadata.agents.map((agent) => (
-                                  <Tooltip key={agent.id}>
-                                    <TooltipTrigger asChild>
-                                      <div className="flex items-center space-x-2">
-                                        <Checkbox
-                                          id={`agent-${agent.id}`}
-                                          checked={selectedAgents.includes(agent.id)}
-                                          disabled={autoSelectAgents}
-                                          onCheckedChange={(checked) => {
-                                            if (checked) {
-                                              setSelectedAgents([...selectedAgents, agent.id]);
-                                            } else {
-                                              setSelectedAgents(selectedAgents.filter(id => id !== agent.id));
-                                            }
-                                          }}
-                                        />
-                                        <Label
-                                          htmlFor={`agent-${agent.id}`}
-                                          className="text-sm font-normal cursor-pointer flex-1"
-                                        >
-                                          {agent.name}
-                                        </Label>
-                                      </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                      <p className="max-w-xs">{agent.description}</p>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                ))}
-                              </div>
-                            </TooltipProvider>
-
-                            {(selectedAgents.length > 0 || autoSelectAgents) && (
+                            {/* Temporarily disabled */}
+                            {/* {(selectedAgents.length > 0 || autoSelectAgents) && (
                               <div className="bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 flex items-center gap-2">
                                 <Info className="h-3 w-3 text-blue-600 flex-shrink-0" />
                                 <span className="text-xs text-blue-800">
                                   Next message will include agent instructions
                                 </span>
                               </div>
-                            )}
+                            )} */}
                           </div>
                         )}
 
@@ -1370,71 +1526,6 @@ export default function ProjectSessionDetailPage({
                           <p className="text-xs text-muted-foreground text-center py-2">
                             No agents found in this workflow
                           </p>
-                        )}
-
-                        {/* Divider when workflow is active */}
-                        <div className="border-t pt-3" />
-                      </>
-                    )}
-                    
-                    {/* Workflow selector - always visible except when activating */}
-                    {!workflowActivating && (
-                      <>
-                    <div>
-                      <label className="text-sm font-medium mb-1.5 block">
-                        {activeWorkflow ? "Switch Workflow" : "Select a Workflow"}
-                      </label>
-                          <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="None selected" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">None selected</SelectItem>
-                              {ootbWorkflows.map((workflow) => (
-                                <SelectItem 
-                                  key={workflow.id} 
-                                  value={workflow.id}
-                                  disabled={!workflow.enabled}
-                                >
-                                  {workflow.name}
-                                </SelectItem>
-                              ))}
-                              <SelectItem value="custom">Custom Workflow...</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                        
-                        {!pendingWorkflow && (
-                    <p className="text-sm text-muted-foreground">
-                            Workflows provide Ambient agents with structured steps to follow toward more complex goals.
-                          </p>
-                        )}
-                        
-                        {/* Show workflow preview and activate/switch button */}
-                        {pendingWorkflow && (
-                          <Alert className="bg-blue-50 border-blue-200">
-                            <AlertCircle className="h-4 w-4 text-blue-600" />
-                            <AlertTitle className="text-blue-900">
-                              {activeWorkflow ? 'Ready to Switch' : 'Ready to Activate'}
-                            </AlertTitle>
-                            <AlertDescription className="text-blue-800">
-                              <div className="space-y-2 mt-2">
-                                <p className="font-medium">{pendingWorkflow.name}</p>
-                                <p className="text-sm">{pendingWorkflow.description}</p>
-                                <p className="text-xs text-blue-600 mt-2">
-                                  Claude will {activeWorkflow ? 'restart and switch to' : 'pause briefly to load'} the workflow. Your chat history will be preserved.
-                                </p>
-                                <Button 
-                                  onClick={handleActivateWorkflow}
-                                  className="w-full mt-3"
-                                  size="sm"
-                                >
-                                  <Play className="mr-2 h-4 w-4" />
-                                  {activeWorkflow ? 'Switch Workflow' : 'Activate Workflow'}
-                                </Button>
-                              </div>
-                            </AlertDescription>
-                          </Alert>
                         )}
                       </>
                     )}
@@ -1465,12 +1556,86 @@ export default function ProjectSessionDetailPage({
                 </AccordionContent>
               </AccordionItem>
 
-              {/* Directory Browser (unified for artifacts, repos, and workflow) */}
+              {/* Context - Add/Remove Repositories and other context sources */}
+              <AccordionItem value="context" className="border rounded-lg px-3 bg-white">
+                <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
+                  <div className="flex items-center gap-2">
+                    <Link className="h-4 w-4" />
+                    <span>Context</span>
+                    {session?.spec?.repos && session.spec.repos.length > 0 && (
+                      <Badge variant="secondary" className="ml-auto mr-2">
+                        {session.spec.repos.length}
+                      </Badge>
+                    )}
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="pt-2 pb-3">
+                    <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">
+                      Add additional context to enhance the AI's understanding
+                    </p>
+                    
+                    {/* Repository List */}
+                    {!session?.spec?.repos || session.spec.repos.length === 0 ? (
+                      <div className="text-center py-6">
+                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-2">
+                          <GitBranch className="h-5 w-5 text-gray-400" />
+                        </div>
+                        <p className="text-sm text-muted-foreground mb-3">No repositories added</p>
+                        <Button size="sm" variant="outline" onClick={() => setContextModalOpen(true)}>
+                          <GitBranch className="mr-2 h-3 w-3" />
+                          Add Repository
+                          </Button>
+                        </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {session.spec.repos.map((repo, idx) => {
+                          const repoName = repo.input.url.split('/').pop()?.replace('.git', '') || `repo-${idx}`;
+                          return (
+                            <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-muted/30 hover:bg-muted/50 transition-colors">
+                              <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <div className="text-sm font-medium truncate">{repoName}</div>
+                                <div className="text-xs text-muted-foreground truncate">{repo.input.url}</div>
+                          </div>
+                          <Button 
+                                variant="ghost"
+                            size="sm" 
+                                className="h-7 w-7 p-0 flex-shrink-0"
+                                onClick={() => {
+                                  if (confirm(`Remove repository ${repoName}?`)) {
+                                    removeRepoMutation.mutate(repoName);
+                                  }
+                                }}
+                              >
+                                <X className="h-3 w-3" />
+                          </Button>
+                                  </div>
+                                );
+                              })}
+                        <Button onClick={() => setContextModalOpen(true)} variant="outline" className="w-full" size="sm">
+                          <GitBranch className="mr-2 h-3 w-3" />
+                        Add Repository
+                      </Button>
+                                </div>
+                              )}
+                    
+                    {/* Future: Files and URLs would go here */}
+                    <div className="border-t pt-3">
+                      <p className="text-xs text-muted-foreground text-center">
+                        Additional context types (file imports, Jira, Google drive) coming soon
+                      </p>
+                            </div>
+                          </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* File Explorer (unified for artifacts, repos, and workflow) */}
               <AccordionItem value="directories" className="border rounded-lg px-3 bg-white">
                 <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
                   <div className="flex items-center gap-2 w-full">
                     <Folder className="h-4 w-4" />
-                    <span>Directory Browser</span>
+                    <span>File Explorer</span>
                     {gitStatus?.hasChanges && (
                       <div className="flex gap-1 ml-auto mr-2">
                         {gitStatus.totalAdded > 0 && (
@@ -1489,6 +1654,10 @@ export default function ProjectSessionDetailPage({
                 </AccordionTrigger>
                 <AccordionContent className="pt-2 pb-3">
                   <div className="space-y-3">
+                    {/* Panel Description */}
+                    <p className="text-sm text-muted-foreground">
+                      Browse, view, and manage files in your workspace directories. Track changes and sync with Git for version control.
+                    </p>
                     
                     {/* Directory Selector */}
                     <div className="flex items-center justify-between gap-2">
@@ -1764,80 +1933,6 @@ export default function ProjectSessionDetailPage({
                   </div>
                 </AccordionContent>
               </AccordionItem>
-
-              {/* Context - Add/Remove Repositories and other context sources */}
-              <AccordionItem value="context" className="border rounded-lg px-3 bg-white">
-                <AccordionTrigger className="text-base font-semibold hover:no-underline py-3">
-                  <div className="flex items-center gap-2">
-                    <Link className="h-4 w-4" />
-                    <span>Context Sources</span>
-                    {session?.spec?.repos && session.spec.repos.length > 0 && (
-                      <Badge variant="secondary" className="ml-auto mr-2">
-                        {session.spec.repos.length}
-                      </Badge>
-                    )}
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent className="pt-2 pb-3">
-                    <div className="space-y-3">
-                    <p className="text-xs text-muted-foreground">
-                      Add external context sources to enhance Claude&apos;s understanding
-                    </p>
-                    
-                    {/* Repository List */}
-                    {!session?.spec?.repos || session.spec.repos.length === 0 ? (
-                      <div className="text-center py-6">
-                        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 mb-2">
-                          <GitBranch className="h-5 w-5 text-gray-400" />
-                        </div>
-                        <p className="text-sm text-muted-foreground mb-3">No repositories added</p>
-                        <Button size="sm" variant="outline" onClick={() => setContextModalOpen(true)}>
-                          <GitBranch className="mr-2 h-3 w-3" />
-                          Add Repository
-                          </Button>
-                        </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {session.spec.repos.map((repo, idx) => {
-                          const repoName = repo.input.url.split('/').pop()?.replace('.git', '') || `repo-${idx}`;
-                          return (
-                            <div key={idx} className="flex items-center gap-2 p-2 border rounded bg-muted/30 hover:bg-muted/50 transition-colors">
-                              <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                              <div className="flex-1 min-w-0">
-                                <div className="text-sm font-medium truncate">{repoName}</div>
-                                <div className="text-xs text-muted-foreground truncate">{repo.input.url}</div>
-                          </div>
-                          <Button 
-                                variant="ghost"
-                            size="sm" 
-                                className="h-7 w-7 p-0 flex-shrink-0"
-                                onClick={() => {
-                                  if (confirm(`Remove repository ${repoName}?`)) {
-                                    removeRepoMutation.mutate(repoName);
-                                  }
-                                }}
-                              >
-                                <X className="h-3 w-3" />
-                          </Button>
-                                  </div>
-                                );
-                              })}
-                        <Button onClick={() => setContextModalOpen(true)} variant="outline" className="w-full" size="sm">
-                          <GitBranch className="mr-2 h-3 w-3" />
-                        Add Repository
-                      </Button>
-                                </div>
-                              )}
-                    
-                    {/* Future: Files and URLs would go here */}
-                    <div className="border-t pt-3">
-                      <p className="text-xs text-muted-foreground text-center">
-                        Additional context types (file imports, Jira, Google drive) coming soon
-                      </p>
-                            </div>
-                          </div>
-                </AccordionContent>
-              </AccordionItem>
             </Accordion>
           </div>
 
@@ -1911,7 +2006,7 @@ export default function ProjectSessionDetailPage({
         <DialogHeader>
           <DialogTitle>Add Context</DialogTitle>
           <DialogDescription>
-            Add external context sources to enhance agent understanding
+            Add additional context to enhance the AI's understanding
           </DialogDescription>
         </DialogHeader>
         

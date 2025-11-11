@@ -79,7 +79,7 @@ export function SessionsSection({ projectName }: SessionsSectionProps) {
       <CardHeader>
         <div className="flex items-start justify-between">
           <div>
-            <CardTitle>Agentic Sessions</CardTitle>
+            <CardTitle>Sessions</CardTitle>
             <CardDescription>
               Sessions scoped to this workspace
             </CardDescription>

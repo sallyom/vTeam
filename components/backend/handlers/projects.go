@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -129,12 +130,15 @@ func isOpenShiftCluster() bool {
 
 // GetClusterInfo handles GET /cluster-info
 // Returns information about the cluster type (OpenShift vs vanilla Kubernetes)
+// and whether Vertex AI is enabled
 // This endpoint does not require authentication as it's public cluster information
 func GetClusterInfo(c *gin.Context) {
 	isOpenShift := isOpenShiftCluster()
+	vertexEnabled := os.Getenv("CLAUDE_CODE_USE_VERTEX") == "1"
 
 	c.JSON(http.StatusOK, gin.H{
-		"isOpenShift": isOpenShift,
+		"isOpenShift":   isOpenShift,
+		"vertexEnabled": vertexEnabled,
 	})
 }
 

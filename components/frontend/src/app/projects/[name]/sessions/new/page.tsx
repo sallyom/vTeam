@@ -108,7 +108,7 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
     if (!projectName) return;
 
     const promptToSend = values.interactive && !values.prompt.trim()
-      ? "Greet the user and briefly explain the workspace capabilities: they can select workflows, add code repositories for context, use slash commands, and you'll help with software engineering tasks. Keep it friendly and concise."
+      ? "Greet the user and briefly explain the workspace capabilities: they can select workflows, add code repositories for context, use commands, and you'll help with software engineering tasks. Keep it friendly and concise."
       : values.prompt;
     const request: CreateAgenticSessionRequest = {
       prompt: promptToSend,

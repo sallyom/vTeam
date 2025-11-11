@@ -27,6 +27,7 @@ export type WorkflowCommand = {
   name: string;
   description: string;
   slashCommand: string;
+  icon?: string;
 };
 
 export type WorkflowAgent = {
