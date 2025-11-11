@@ -1281,15 +1281,15 @@ export default function ProjectSessionDetailPage({
                             Workflows
                           </label>
                           <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
-                            <SelectTrigger className="w-full h-auto py-4">
+                            <SelectTrigger className="w-full h-auto py-8">
                               <SelectValue placeholder="Generic chat" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">
-                                <div className="flex flex-col items-start gap-1 py-2">
+                                <div className="flex flex-col items-start gap-0.5 py-1">
                                   <span>General chat</span>
                                   <span className="text-xs text-muted-foreground font-normal">
-                                      A general chat session with no specific workflow.
+                                      A general chat session with no structured workflow.
                                     </span>
                                 </div>
                               </SelectItem>
@@ -1299,7 +1299,7 @@ export default function ProjectSessionDetailPage({
                                   value={workflow.id}
                                   disabled={!workflow.enabled}
                                 >
-                                  <div className="flex flex-col items-start gap-1 py-2">
+                                  <div className="flex flex-col items-start gap-0.5 py-1">
                                     <span>{workflow.name}</span>
                                     <span className="text-xs text-muted-foreground font-normal">
                                       {workflow.description}
@@ -1308,7 +1308,7 @@ export default function ProjectSessionDetailPage({
                                 </SelectItem>
                               ))}
                               <SelectItem value="custom">
-                                <div className="flex flex-col items-start gap-1 py-2">
+                                <div className="flex flex-col items-start gap-0.5 py-1">
                                   <span>Custom Workflow...</span>
                                   <span className="text-xs text-muted-foreground font-normal">
                                     Load a workflow from a custom Git repository
