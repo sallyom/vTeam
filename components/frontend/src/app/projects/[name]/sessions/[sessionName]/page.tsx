@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, Download, Workflow, ChevronDown, ChevronUp } from "lucide-react";
+import { Play, Loader2, FolderTree, AlertCircle, GitBranch, Edit, RefreshCw, Folder, Info, Sparkles, X, CloudUpload, CloudDownload, MoreVertical, Link, Cloud, FolderSync, Download, Workflow, ChevronDown, ChevronRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 // Custom components
@@ -1273,7 +1273,7 @@ export default function ProjectSessionDetailPage({
                     {!workflowActivating && (
                       <>
                         <p className="text-sm text-muted-foreground">
-                          Workflows provide Ambient agents with structured steps to follow toward more complex goals.
+                          Workflows provide agents with pre-defined context and structured steps to follow.
                         </p>
                         
                         <div>
@@ -1281,13 +1281,16 @@ export default function ProjectSessionDetailPage({
                             Workflows
                           </label>
                           <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
-                            <SelectTrigger className="w-full h-auto py-3">
+                            <SelectTrigger className="w-full h-auto py-4">
                               <SelectValue placeholder="Generic chat" />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectItem value="none">
-                                <div className="flex flex-col items-start gap-0.5 py-1">
-                                  <span>Generic chat</span>
+                                <div className="flex flex-col items-start gap-1 py-2">
+                                  <span>General chat</span>
+                                  <span className="text-xs text-muted-foreground font-normal">
+                                      A general chat session with no specific workflow.
+                                    </span>
                                 </div>
                               </SelectItem>
                               {ootbWorkflows.map((workflow) => (
@@ -1296,7 +1299,7 @@ export default function ProjectSessionDetailPage({
                                   value={workflow.id}
                                   disabled={!workflow.enabled}
                                 >
-                                  <div className="flex flex-col items-start gap-0.5 py-1">
+                                  <div className="flex flex-col items-start gap-1 py-2">
                                     <span>{workflow.name}</span>
                                     <span className="text-xs text-muted-foreground font-normal">
                                       {workflow.description}
@@ -1305,7 +1308,7 @@ export default function ProjectSessionDetailPage({
                                 </SelectItem>
                               ))}
                               <SelectItem value="custom">
-                                <div className="flex flex-col items-start gap-0.5 py-1">
+                                <div className="flex flex-col items-start gap-1 py-2">
                                   <span>Custom Workflow...</span>
                                   <span className="text-xs text-muted-foreground font-normal">
                                     Load a workflow from a custom Git repository
@@ -1346,14 +1349,10 @@ export default function ProjectSessionDetailPage({
                     {/* Show active workflow info */}
                     {activeWorkflow && !workflowActivating && (
                       <>
-                        {/* Divider when workflow is active */}
-                        <div className="border-t pt-3" />
-
+                      
                     {/* Commands Section */}
                     {workflowMetadata?.commands && workflowMetadata.commands.length > 0 && (
                       <div className="space-y-2">
-                        <div className="text-sm font-medium">Commands</div>
-                        
                         {/* View commands expandable section */}
                         <div>
                           <Button
@@ -1363,12 +1362,12 @@ export default function ProjectSessionDetailPage({
                             onClick={() => setShowCommandsList(!showCommandsList)}
                           >
                             <span className="text-xs font-medium">
-                              View {workflowMetadata.commands.length} available command{workflowMetadata.commands.length !== 1 ? 's' : ''}
+                              {showCommandsList ? 'Hide' : 'Show'} {workflowMetadata.commands.length} available command{workflowMetadata.commands.length !== 1 ? 's' : ''}
                             </span>
                             {showCommandsList ? (
-                              <ChevronUp className="h-3 w-3" />
-                            ) : (
                               <ChevronDown className="h-3 w-3" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3" />
                             )}
                           </Button>
 
@@ -1438,23 +1437,6 @@ export default function ProjectSessionDetailPage({
                         {/* Agents Section */}
                         {workflowMetadata?.agents && workflowMetadata.agents.length > 0 && (
                           <div className="space-y-2">
-                            <div className="text-sm font-medium">Agents</div>
-
-                            <div className="flex items-center space-x-2 pb-2">
-                              <Checkbox
-                                id="auto-select-agents"
-                                checked={autoSelectAgents}
-                                onCheckedChange={(checked) => {
-                                  setAutoSelectAgents(!!checked);
-                                  if (checked) setSelectedAgents([]);
-                                }}
-                              />
-                              <Sparkles className="h-3 w-3 text-purple-500" />
-                              <Label htmlFor="auto-select-agents" className="text-sm font-normal cursor-pointer">
-                                Claude picks best agents for each task
-                              </Label>
-                            </div>
-
                             {/* View agents expandable section */}
                             <div>
                               <Button
@@ -1463,59 +1445,78 @@ export default function ProjectSessionDetailPage({
                                 className="w-full justify-between h-8 px-2"
                                 onClick={() => setShowAgentsList(!showAgentsList)}
                               >
-                                <span className="text-xs font-medium">View agents</span>
+                                <span className="text-xs font-medium">
+                                  {showAgentsList ? 'Hide' : 'Show'} {workflowMetadata.agents.length} available agent{workflowMetadata.agents.length !== 1 ? 's' : ''}
+                                </span>
                                 {showAgentsList ? (
-                                  <ChevronUp className="h-3 w-3" />
-                                ) : (
                                   <ChevronDown className="h-3 w-3" />
+                                ) : (
+                                  <ChevronRight className="h-3 w-3" />
                                 )}
                               </Button>
 
                               {showAgentsList && (
                                 <TooltipProvider>
-                                  <div className="space-y-1 max-h-48 overflow-y-auto mt-2 pt-2">
-                                    {workflowMetadata.agents.map((agent) => (
-                                      <Tooltip key={agent.id}>
-                                        <TooltipTrigger asChild>
-                                          <div className="flex items-center space-x-2">
-                                            <Checkbox
-                                              id={`agent-${agent.id}`}
-                                              checked={selectedAgents.includes(agent.id)}
-                                              disabled={autoSelectAgents}
-                                              onCheckedChange={(checked) => {
-                                                if (checked) {
-                                                  setSelectedAgents([...selectedAgents, agent.id]);
-                                                } else {
-                                                  setSelectedAgents(selectedAgents.filter(id => id !== agent.id));
-                                                }
-                                              }}
-                                            />
-                                            <Label
-                                              htmlFor={`agent-${agent.id}`}
-                                              className="text-sm font-normal cursor-pointer flex-1"
-                                            >
-                                              {agent.name}
-                                            </Label>
-                                          </div>
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                          <p className="max-w-xs">{agent.description}</p>
-                                        </TooltipContent>
-                                      </Tooltip>
-                                    ))}
+                                  <div className="space-y-2 max-h-48 overflow-y-auto mt-2 pt-2 m-3">
+                                    <div className="flex items-center space-x-2 pb-2">
+                                      <Checkbox
+                                        id="auto-select-agents"
+                                        checked={autoSelectAgents}
+                                        onCheckedChange={(checked) => {
+                                          setAutoSelectAgents(!!checked);
+                                          if (checked) setSelectedAgents([]);
+                                        }}
+                                      />
+                                      <Sparkles className="h-3 w-3 text-purple-500" />
+                                      <Label htmlFor="auto-select-agents" className="text-sm font-normal cursor-pointer">
+                                        Automatically select recommended agents for each task
+                                      </Label>
+                                    </div>
+                                    <div className="space-y-1 space-x-6">
+                                      {workflowMetadata.agents.map((agent) => (
+                                        <Tooltip key={agent.id}>
+                                          <TooltipTrigger asChild>
+                                            <div className="flex items-center space-x-2">
+                                              <Checkbox
+                                                id={`agent-${agent.id}`}
+                                                checked={selectedAgents.includes(agent.id)}
+                                                disabled={autoSelectAgents}
+                                                onCheckedChange={(checked) => {
+                                                  if (checked) {
+                                                    setSelectedAgents([...selectedAgents, agent.id]);
+                                                  } else {
+                                                    setSelectedAgents(selectedAgents.filter(id => id !== agent.id));
+                                                  }
+                                                }}
+                                              />
+                                              <Label
+                                                htmlFor={`agent-${agent.id}`}
+                                                className="text-sm font-normal cursor-pointer flex-1"
+                                              >
+                                                {agent.name}
+                                              </Label>
+                                            </div>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p className="max-w-xs">{agent.description}</p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      ))}
+                                    </div>
                                   </div>
                                 </TooltipProvider>
                               )}
                             </div>
 
-                            {(selectedAgents.length > 0 || autoSelectAgents) && (
+                            {/* Temporarily disabled */}
+                            {/* {(selectedAgents.length > 0 || autoSelectAgents) && (
                               <div className="bg-blue-50 border border-blue-200 rounded-md px-3 py-1.5 flex items-center gap-2">
                                 <Info className="h-3 w-3 text-blue-600 flex-shrink-0" />
                                 <span className="text-xs text-blue-800">
                                   Next message will include agent instructions
                                 </span>
                               </div>
-                            )}
+                            )} */}
                           </div>
                         )}
 
