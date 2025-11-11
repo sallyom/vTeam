@@ -1402,12 +1402,12 @@ export default function ProjectSessionDetailPage({
                                           {commandTitle}
                                         </h3>
                                         <Button
-                                          variant="secondary"
+                                          variant="outline"
                                           size="sm"
                                           className="flex-shrink-0 h-7 text-xs"
                                           onClick={() => handleCommandClick(cmd.slashCommand)}
                                         >
-                                          Run {cmd.slashCommand}
+                                          Run {cmd.slashCommand.replace(/^\/speckit\./, '/')}
                                         </Button>
                                       </div>
                                       {cmd.description && (
