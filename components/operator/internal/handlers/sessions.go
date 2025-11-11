@@ -312,7 +312,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	maxTokens, _, _ := unstructured.NestedInt64(llmSettings, "maxTokens")
 
 	// Hardcoded secret names (convention over configuration)
-	const runnerSecretsName = "ambient-runner-secrets"              // ANTHROPIC_API_KEY only (ignored when Vertex enabled)
+	const runnerSecretsName = "ambient-runner-secrets"               // ANTHROPIC_API_KEY only (ignored when Vertex enabled)
 	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, custom keys (optional)
 
 	// Check if integration secrets exist (optional)

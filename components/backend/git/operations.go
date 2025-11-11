@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -43,37 +42,6 @@ type DiffSummary struct {
 	TotalRemoved int `json:"total_removed"`
 	FilesAdded   int `json:"files_added"`
 	FilesRemoved int `json:"files_removed"`
-}
-
-// getProjectSettings retrieves the ProjectSettings CR for a project using the provided dynamic client
-func getProjectSettings(ctx context.Context, dynClient dynamic.Interface, projectName string) (*ProjectSettings, error) {
-	if dynClient == nil {
-		return &ProjectSettings{}, nil
-	}
-
-	if GetProjectSettingsResource == nil {
-		return &ProjectSettings{}, nil
-	}
-
-	gvr := GetProjectSettingsResource()
-	obj, err := dynClient.Resource(gvr).Namespace(projectName).Get(ctx, "projectsettings", v1.GetOptions{})
-	if err != nil {
-		if errors.IsNotFound(err) {
-			return &ProjectSettings{}, nil
-		}
-		return nil, fmt.Errorf("failed to get ProjectSettings: %w", err)
-	}
-
-	settings := &ProjectSettings{}
-	if obj != nil {
-		if spec, ok := obj.Object["spec"].(map[string]interface{}); ok {
-			if v, ok := spec["runnerSecretsName"].(string); ok {
-				settings.RunnerSecret = strings.TrimSpace(v)
-			}
-		}
-	}
-
-	return settings, nil
 }
 
 // GetGitHubToken tries to get a GitHub token from GitHub App first, then falls back to project runner secret
