@@ -1277,9 +1277,11 @@ export default function ProjectSessionDetailPage({
                         </p>
                         
                         <div>
+                          {/*
                           <label className="text-sm font-medium mb-1.5 block">
                             Workflows
                           </label>
+                          */}
                           <Select value={selectedWorkflow} onValueChange={handleWorkflowChange} disabled={workflowActivating}>
                             <SelectTrigger className="w-full h-auto py-8">
                               <SelectValue placeholder="Generic chat" />
