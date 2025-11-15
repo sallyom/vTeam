@@ -10,6 +10,8 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	authnv1 "k8s.io/api/authentication/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // RouterFunc is a function that can register routes on a Gin router
@@ -63,9 +65,11 @@ func Run(registerRoutes RouterFunc) error {
 	return nil
 }
 
-// forwardedIdentityMiddleware populates Gin context from common OAuth proxy headers
+// forwardedIdentityMiddleware populates Gin context from common OAuth proxy headers.
+// Fallback: if OAuth headers are not present, performs TokenReview on Authorization Bearer token.
 func forwardedIdentityMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Try OAuth proxy headers first (production with oauth-proxy)
 		if v := c.GetHeader("X-Forwarded-User"); v != "" {
 			c.Set("userID", v)
 		}
@@ -83,6 +87,49 @@ func forwardedIdentityMiddleware() gin.HandlerFunc {
 		if v := c.GetHeader("X-Forwarded-Groups"); v != "" {
 			c.Set("userGroups", strings.Split(v, ","))
 		}
+
+		// Fallback: if no OAuth headers, try TokenReview on Authorization token
+		// This enables development/testing without oauth-proxy and service account auth
+		if c.GetString("userID") == "" {
+			if auth := c.GetHeader("Authorization"); auth != "" {
+				parts := strings.SplitN(auth, " ", 2)
+				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+					token := strings.TrimSpace(parts[1])
+					if token != "" {
+						// Perform TokenReview to validate and extract user identity
+						tr := &authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: token}}
+						rv, err := K8sClient.AuthenticationV1().TokenReviews().Create(c.Request.Context(), tr, v1.CreateOptions{})
+						if err == nil && rv.Status.Authenticated && rv.Status.Error == "" {
+							username := strings.TrimSpace(rv.Status.User.Username)
+							if username != "" {
+								// Parse username: "system:serviceaccount:namespace:sa-name" or regular username
+								if strings.HasPrefix(username, "system:serviceaccount:") {
+									// ServiceAccount: extract namespace and SA name
+									parts := strings.Split(username, ":")
+									if len(parts) >= 4 {
+										namespace := parts[2]
+										saName := parts[3]
+										// Use namespace/sa-name as userID for uniqueness
+										c.Set("userID", fmt.Sprintf("%s/%s", namespace, saName))
+										c.Set("userName", saName)
+									}
+								} else {
+									// Regular user from OAuth/OIDC
+									c.Set("userID", username)
+									c.Set("userName", username)
+								}
+
+								// Extract groups if available
+								if len(rv.Status.User.Groups) > 0 {
+									c.Set("userGroups", rv.Status.User.Groups)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		// Also expose access token if present
 		auth := c.GetHeader("Authorization")
 		if auth != "" {
