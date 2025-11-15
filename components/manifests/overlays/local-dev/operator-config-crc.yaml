@@ -11,3 +11,12 @@ data:
   CLOUD_ML_REGION: ""
   ANTHROPIC_VERTEX_PROJECT_ID: ""
   GOOGLE_APPLICATION_CREDENTIALS: ""
+
+  # Platform-wide Langfuse observability configuration
+  # Set to "false" for local development (optional)
+  LANGFUSE_ENABLED: "false"
+  # Langfuse instance URL (not used when disabled)
+  LANGFUSE_HOST: ""
+
+  # Note: If you want to enable Langfuse for local dev, set LANGFUSE_ENABLED=true above
+  # and create the ambient-langfuse-keys Secret with your Langfuse API keys

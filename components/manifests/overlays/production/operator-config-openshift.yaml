@@ -11,3 +11,16 @@ data:
   CLOUD_ML_REGION: "global"
   ANTHROPIC_VERTEX_PROJECT_ID: "ambient-code-platform"
   GOOGLE_APPLICATION_CREDENTIALS: "/app/vertex/ambient-code-key.json"
+
+  # Platform-wide Langfuse observability configuration
+  # Set to "true" to enable (default: auto-enabled if keys are configured)
+  LANGFUSE_ENABLED: "true"
+  # Langfuse instance URL (update to match your deployment)
+  LANGFUSE_HOST: "http://langfuse-web.langfuse.svc.cluster.local:3000"
+
+  # Note: Sensitive Langfuse API keys (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY)
+  # are stored in the 'ambient-langfuse-keys' Secret in the ambient-code namespace
+  # Create the secret with: kubectl create secret generic ambient-langfuse-keys \
+  #   --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-... \
+  #   --from-literal=LANGFUSE_SECRET_KEY=sk-lf-... \
+  #   -n ambient-code
