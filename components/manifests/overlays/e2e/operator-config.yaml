@@ -11,3 +11,8 @@ data:
   CLOUD_ML_REGION: ""
   ANTHROPIC_VERTEX_PROJECT_ID: ""
   GOOGLE_APPLICATION_CREDENTIALS: ""
+
+  # Platform-wide Langfuse observability configuration
+  # Disabled for e2e testing by default
+  LANGFUSE_ENABLED: "false"
+  LANGFUSE_HOST: ""

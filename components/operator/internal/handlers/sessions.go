@@ -503,6 +503,32 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									base = append(base, corev1.EnvVar{Name: "USER_NAME", Value: userName})
 								}
 
+								// Inject platform-wide Langfuse observability configuration from operator's environment
+								if langfusePublicKey := os.Getenv("LANGFUSE_PUBLIC_KEY"); langfusePublicKey != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_PUBLIC_KEY", Value: langfusePublicKey})
+								}
+								if langfuseSecretKey := os.Getenv("LANGFUSE_SECRET_KEY"); langfuseSecretKey != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_SECRET_KEY", Value: langfuseSecretKey})
+								}
+								if langfuseHost := os.Getenv("LANGFUSE_HOST"); langfuseHost != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_HOST", Value: langfuseHost})
+								}
+								// Enable Langfuse by default if keys are configured
+								if langfuseEnabled := os.Getenv("LANGFUSE_ENABLED"); langfuseEnabled != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_ENABLED", Value: langfuseEnabled})
+								} else if os.Getenv("LANGFUSE_PUBLIC_KEY") != "" && os.Getenv("LANGFUSE_SECRET_KEY") != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_ENABLED", Value: "true"})
+									log.Printf("Auto-enabled Langfuse for session %s (keys configured at platform level)", name)
+								}
+
+								// Inject OpenTelemetry configuration from operator's environment (if configured)
+								if otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); otelEndpoint != "" {
+									base = append(base, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: otelEndpoint})
+								}
+								if otelServiceName := os.Getenv("OTEL_SERVICE_NAME"); otelServiceName != "" {
+									base = append(base, corev1.EnvVar{Name: "OTEL_SERVICE_NAME", Value: otelServiceName})
+								}
+
 								// Add Vertex AI configuration only if enabled
 								if vertexEnabled {
 									base = append(base,
