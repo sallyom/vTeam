@@ -347,6 +347,19 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	// Read autoPushOnComplete flag
 	autoPushOnComplete, _, _ := unstructured.NestedBool(spec, "autoPushOnComplete")
 
+	// Extract userContext for observability and auditing
+	userId := ""
+	userName := ""
+	if userContext, found, _ := unstructured.NestedMap(spec, "userContext"); found {
+		if v, ok := userContext["userId"].(string); ok {
+			userId = strings.TrimSpace(v)
+		}
+		if v, ok := userContext["displayName"].(string); ok {
+			userName = strings.TrimSpace(v)
+		}
+	}
+	log.Printf("Session %s initiated by user: %s (userId: %s)", name, userName, userId)
+
 	// Create the Job
 	job := &batchv1.Job{
 		ObjectMeta: v1.ObjectMeta{
@@ -480,6 +493,14 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									// WebSocket URL used by runner-shell to connect back to backend
 									{Name: "WEBSOCKET_URL", Value: fmt.Sprintf("ws://backend-service.%s.svc.cluster.local:8080/api/projects/%s/sessions/%s/ws", appConfig.BackendNamespace, sessionNamespace, name)},
 									// S3 disabled; backend persists messages
+								}
+
+								// Add user context for observability and auditing (Langfuse userId, logs, etc.)
+								if userId != "" {
+									base = append(base, corev1.EnvVar{Name: "USER_ID", Value: userId})
+								}
+								if userName != "" {
+									base = append(base, corev1.EnvVar{Name: "USER_NAME", Value: userName})
 								}
 
 								// Add Vertex AI configuration only if enabled

@@ -202,16 +202,30 @@ class ClaudeCodeAdapter:
                             secret_key=os.getenv('LANGFUSE_SECRET_KEY'),
                             host=os.getenv('LANGFUSE_HOST')
                         )
+
+                        # Extract user context for observability
+                        user_id = os.getenv('USER_ID', '').strip()
+                        user_name = os.getenv('USER_NAME', '').strip()
+
                         # Start a span for this session (Langfuse SDK 3.x)
-                        # Note: user_id is not a valid parameter for start_as_current_span
                         langfuse_session_span = langfuse_client.start_as_current_span(
                             name="claude_agent_session",
                             input={"prompt": prompt},
                             metadata={
                                 "session_id": self.context.session_id,
                                 "namespace": self.context.get_env('AGENTIC_SESSION_NAMESPACE', 'unknown'),
+                                "user_name": user_name if user_name else None,
                             },
                         )
+
+                        # Set userId on the trace (trace-level attribute, not span-level)
+                        if user_id:
+                            try:
+                                langfuse_session_span.update_trace(user_id=user_id)
+                                logging.info(f"Langfuse: Tracking session for user {user_name} ({user_id})")
+                            except Exception as e:
+                                logging.warning(f"Failed to set user_id on trace: {e}")
+
                         logging.info(f"Langfuse tracing enabled for session")
                     except Exception as e:
                         logging.warning(f"Failed to initialize Langfuse: {e}")
@@ -578,20 +592,44 @@ class ClaudeCodeAdapter:
                         # Create Langfuse generation for assistant messages
                         if isinstance(message, AssistantMessage) and langfuse_client and langfuse_session_span:
                             try:
-                                # Extract text content for generation
+                                # Extract text content and usage data for generation
                                 text_content = []
                                 for blk in getattr(message, 'content', []) or []:
                                     if isinstance(blk, TextBlock):
                                         text_content.append(getattr(blk, 'text', ''))
 
                                 if text_content:
-                                    generation = langfuse_client.start_generation(
-                                        name="claude_response",
-                                        input={"turn": self._turn_count},
-                                        output={"text": "\n".join(text_content)[:1000]},  # Limit size
-                                        model="claude-3-5-sonnet",  # TODO: get from options
-                                        metadata={"turn": self._turn_count}
-                                    )
+                                    # Get model from options or env var
+                                    model_name = getattr(options, 'model', None) or os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
+
+                                    # Check if message has usage data (it might not on every AssistantMessage)
+                                    usage_data = getattr(message, 'usage', None)
+
+                                    generation_kwargs = {
+                                        "name": "claude_response",
+                                        "input": {"turn": self._turn_count},
+                                        "output": {"text": "\n".join(text_content)[:1000]},  # Limit size
+                                        "model": model_name,
+                                        "metadata": {"turn": self._turn_count}
+                                    }
+
+                                    # Add usage_details if available (for Langfuse cost tracking)
+                                    if usage_data and hasattr(usage_data, '__dict__'):
+                                        usage_dict = {}
+                                        if hasattr(usage_data, 'input_tokens'):
+                                            usage_dict["input"] = usage_data.input_tokens
+                                        if hasattr(usage_data, 'output_tokens'):
+                                            usage_dict["output"] = usage_data.output_tokens
+                                        if hasattr(usage_data, 'cache_read_input_tokens'):
+                                            usage_dict["cache_read_input_tokens"] = usage_data.cache_read_input_tokens
+                                        if hasattr(usage_data, 'cache_creation_input_tokens'):
+                                            usage_dict["cache_creation_input_tokens"] = usage_data.cache_creation_input_tokens
+
+                                        if usage_dict:
+                                            generation_kwargs["usage_details"] = usage_dict
+                                            logging.info(f"Langfuse: Tracking generation with usage: {usage_dict}")
+
+                                    generation = langfuse_client.start_generation(**generation_kwargs)
                                     generation.end()
                             except Exception as e:
                                 logging.debug(f"Failed to create Langfuse generation: {e}")
@@ -704,6 +742,37 @@ class ClaudeCodeAdapter:
                             "usage": getattr(message, 'usage', None),
                             "result": getattr(message, 'result', None),
                         }
+
+                        # Track session-level cost and usage in Langfuse
+                        if langfuse_client and langfuse_session_span:
+                            try:
+                                usage = result_payload.get("usage")
+                                total_cost = result_payload.get("total_cost_usd")
+
+                                # Update trace metadata with session totals
+                                metadata_update = {}
+                                if usage and hasattr(usage, '__dict__'):
+                                    total_tokens = getattr(usage, 'total_tokens', None)
+                                    input_tokens = getattr(usage, 'input_tokens', None)
+                                    output_tokens = getattr(usage, 'output_tokens', None)
+
+                                    if total_tokens:
+                                        metadata_update["total_tokens"] = total_tokens
+                                    if input_tokens:
+                                        metadata_update["input_tokens"] = input_tokens
+                                    if output_tokens:
+                                        metadata_update["output_tokens"] = output_tokens
+
+                                if total_cost is not None:
+                                    metadata_update["total_cost_usd"] = total_cost
+
+                                if metadata_update:
+                                    # Update span metadata (this will show in Langfuse UI)
+                                    langfuse_session_span.update(metadata=metadata_update)
+                                    logging.info(f"Langfuse: Session totals - {metadata_update}")
+                            except Exception as e:
+                                logging.debug(f"Failed to update Langfuse with session totals: {e}")
+
                         if not interactive:
                             await self.shell._send_message(
                                 MessageType.AGENT_MESSAGE,
