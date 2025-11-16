@@ -35,7 +35,7 @@ try:
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
     from opentelemetry.sdk.resources import Resource, SERVICE_NAME
     OTEL_AVAILABLE = True
 except ImportError:
@@ -53,6 +53,7 @@ class ClaudeCodeAdapter:
         self._incoming_queue: "asyncio.Queue[dict]" = asyncio.Queue()
         self._restart_requested = False
         self._first_run = True  # Track if this is the first SDK run or a mid-session restart
+        self._otel_initialized = False  # Track if OpenTelemetry has been initialized
 
     async def initialize(self, context: RunnerContext):
         """Initialize the adapter with context."""
@@ -280,7 +281,8 @@ class ClaudeCodeAdapter:
                                 # Base64 encode "public_key:secret_key"
                                 auth_string = f"{public_key}:{secret_key}"
                                 encoded = base64.b64encode(auth_string.encode()).decode()
-                                exporter_kwargs["headers"] = {"Authorization": f"Basic {encoded}"}
+                                # HTTP headers (lowercase is canonical form)
+                                exporter_kwargs["headers"] = {"authorization": f"Basic {encoded}"}
                                 logging.info("Added Langfuse Basic Auth to OTLP exporter")
 
                         otlp_exporter = OTLPSpanExporter(**exporter_kwargs)
@@ -288,10 +290,16 @@ class ClaudeCodeAdapter:
                         # Add span processor
                         otel_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
 
-                        # Set as global tracer provider
-                        trace.set_tracer_provider(otel_provider)
+                        # Set as global tracer provider (only on first run)
+                        # This prevents "Overriding of current TracerProvider" warnings on restarts
+                        if not self._otel_initialized:
+                            trace.set_tracer_provider(otel_provider)
+                            self._otel_initialized = True
+                            logging.info("Initialized OpenTelemetry TracerProvider")
+                        else:
+                            logging.debug("Reusing existing OpenTelemetry TracerProvider from previous run")
 
-                        # Get tracer
+                        # Get tracer (works whether we just set it or it was already set)
                         otel_tracer = trace.get_tracer(__name__)
 
                         # Start session span
