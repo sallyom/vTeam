@@ -84,9 +84,9 @@ class ObservabilityManager:
                 host=os.getenv('LANGFUSE_HOST')
             )
 
-            # Create a ROOT trace for this session (not a child span!)
-            # Use trace() instead of start_as_current_span() to create top-level trace
-            self.langfuse_span = self.langfuse_client.trace(
+            # Create a ROOT span for this session using start_span()
+            # (Same API as tool spans - child spans/generations attach automatically)
+            self.langfuse_span = self.langfuse_client.start_span(
                 name="claude_agent_session",
                 input={"prompt": prompt},
                 metadata={
@@ -269,10 +269,9 @@ class ObservabilityManager:
         # Complete Langfuse session span with final results
         if self.langfuse_span and self.langfuse_client:
             try:
-                # Update trace with final output/metadata
-                # Trace objects use update(), not end() + __exit__()
+                # End the span with final output/metadata
                 if result_payload:
-                    self.langfuse_span.update(
+                    self.langfuse_span.end(
                         output=result_payload,
                         metadata={
                             "num_turns": result_payload.get("num_turns", 0),
@@ -281,10 +280,11 @@ class ObservabilityManager:
                             "subtype": result_payload.get("subtype")
                         }
                     )
-                    logging.info("Langfuse trace updated with result payload")
+                    logging.info("Langfuse span ended with result payload")
                 else:
-                    # No result payload (e.g., git push operations)
-                    logging.info("Langfuse trace finalized without result payload")
+                    # No result payload (e.g., git push operations), but still end span
+                    self.langfuse_span.end()
+                    logging.info("Langfuse span ended without result payload")
 
                 # CRITICAL: Always flush, even if no result payload
                 # Otherwise traces never appear in Langfuse UI!
@@ -306,11 +306,11 @@ class ObservabilityManager:
         Args:
             error: Exception that caused the failure
         """
-        # 1. Update Langfuse trace with error if available
+        # 1. End Langfuse span with error if available
         if self.langfuse_span and self.langfuse_client:
             try:
-                # Update trace with error status (trace objects don't use end())
-                self.langfuse_span.update(
+                # End span with error status
+                self.langfuse_span.end(
                     level="ERROR",
                     status_message=str(error)
                 )
