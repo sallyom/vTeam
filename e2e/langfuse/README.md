@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Unified Observability** means both Langfuse SDK spans AND OpenTelemetry spans are sent to Langfuse and appear in the same trace hierarchy:
+**Langfuse** is the observability platform for the vTeam/Ambient Code Platform. All traces are sent to Langfuse and appear in a unified trace hierarchy:
 
 - **Langfuse SDK spans**: LLM-specific observability (prompts, responses, generations, tool executions with full I/O)
 - **OpenTelemetry spans**: System-level distributed tracing (session lifecycle, performance metrics, costs)
@@ -39,13 +39,9 @@ Both span types automatically nest together in Langfuse because **Langfuse SDK v
    - `LANGFUSE_PUBLIC_KEY`: Add your `pk-lf-...` key
    - `LANGFUSE_SECRET_KEY`: Add your `sk-lf-...` key
 
-3. **OpenTelemetry (Optional - Advanced Users Only)**:
-   - `OTEL_EXPORTER_OTLP_ENDPOINT`: **Leave empty** (traces auto-sent to Langfuse)
-   - `OTEL_SERVICE_NAME`: `claude-code-runner` (dynamically set to `claude-{session-id}`)
+3. **Save Integration Secrets** - All keys saved to `ambient-non-vertex-integrations`
 
-4. **Save Integration Secrets** - All keys saved to `ambient-non-vertex-integrations`
-
-## How Unified Observability Works
+## How Langfuse Observability Works
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -85,9 +81,9 @@ Both span types automatically nest together in Langfuse because **Langfuse SDK v
 
 ### Key Points
 
-1. **Auto-derivation**: If `OTEL_EXPORTER_OTLP_ENDPOINT` is empty, runner derives endpoint from `LANGFUSE_HOST`
+1. **Auto-configuration**: Runner automatically derives OTLP endpoint from `LANGFUSE_HOST`
 2. **Basic Auth**: Runner automatically adds `Authorization: Basic {base64(public_key:secret_key)}` header
-3. **Protocol**: HTTP/protobuf (gRPC not supported by Langfuse)
+3. **Protocol**: HTTP/protobuf (Langfuse's OTLP ingestion endpoint)
 4. **Context propagation**: OpenTelemetry automatically nests spans within same trace
 
 ## Trace Structure
@@ -148,12 +144,6 @@ LANGFUSE_HOST: "http://langfuse-web.langfuse.svc.cluster.local:3000"
 OTEL_SERVICE_NAME: "claude-code-runner"  # Dynamically set to claude-{session-id}
 ```
 
-### Advanced (Usually Empty)
-
-```yaml
-OTEL_EXPORTER_OTLP_ENDPOINT: ""  # Leave empty to use Langfuse
-```
-
 ## Updating Configuration
 
 To update your observability settings:
@@ -163,33 +153,20 @@ To update your observability settings:
 3. Click "Save Integration Secrets"
 4. New sessions use updated config immediately
 
-## Alternative Backends (Tempo/Grafana/Jaeger)
-
-**Important Limitation**: Langfuse SDK spans **cannot** be exported to Tempo/Grafana/Jaeger. The Langfuse SDK always sends traces to the Langfuse API endpoint, even though it's "OTEL-native".
-
-**What you CAN do** (advanced users only):
-- Set `OTEL_EXPORTER_OTLP_ENDPOINT` to send **OpenTelemetry SDK spans** to Tempo/Jaeger/Grafana
-- This creates **two separate trace systems**:
-  - Langfuse SDK spans → Langfuse UI (LLM-specific: tool I/O, generations, prompts)
-  - OTEL SDK spans → Tempo/Grafana (system metrics: duration, tokens, cost)
-- Manual correlation required via session ID or timestamps
-
-**Recommendation**: Use unified Langfuse approach (default) for best experience. Only use separate backends if you have existing observability infrastructure that requires it.
-
 ## Multi-Project Setup
 
 Each project namespace can have its own `ambient-non-vertex-integrations` secret with different Langfuse keys for per-project isolation and cost tracking.
 
-## Why Unified Observability?
+## Why Langfuse?
 
-**Benefits over separate systems:**
+**Benefits of Langfuse for AI observability:**
 
-✅ **Single source of truth**: All traces in one place
-✅ **Automatic correlation**: Spans auto-nest via OTEL context propagation
-✅ **Simpler setup**: Only Langfuse keys needed
-✅ **Better UX**: Langfuse UI designed for LLM observability
-✅ **Cost efficiency**: No separate OTEL Collector infrastructure
-✅ **Richer insights**: Combine LLM-specific + system-level observability
+✅ **Single source of truth**: All traces in one unified platform
+✅ **Automatic correlation**: Langfuse SDK and OTEL spans auto-nest via context propagation
+✅ **Simple setup**: Only Langfuse keys needed, no additional infrastructure
+✅ **LLM-optimized UI**: Designed specifically for LLM observability with prompt/response tracking
+✅ **Cost efficiency**: Built-in OTLP ingestion, no separate collector needed
+✅ **Rich insights**: Combines LLM-specific data (prompts, tokens, costs) with system-level tracing
 
 ## References
 

@@ -313,9 +313,9 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 
 	// Hardcoded secret names (convention over configuration)
 	const runnerSecretsName = "ambient-runner-secrets"               // ANTHROPIC_API_KEY only (ignored when Vertex enabled)
-	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, LANGFUSE_*, OTEL_*, custom keys (optional)
+	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, LANGFUSE_*, custom keys (optional)
 
-	// Check if integration secrets exist (includes observability keys: LANGFUSE_*, OTEL_*)
+	// Check if integration secrets exist (includes observability keys: LANGFUSE_*)
 	integrationSecretsExist := false
 	if _, err := config.K8sClient.CoreV1().Secrets(sessionNamespace).Get(context.TODO(), integrationSecretsName, v1.GetOptions{}); err == nil {
 		integrationSecretsExist = true
@@ -656,7 +656,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									log.Printf("Skipping runner secrets '%s' for session %s (Vertex enabled)", runnerSecretsName, name)
 								}
 
-								// Note: Observability keys (LANGFUSE_*, OTEL_*) are now in ambient-non-vertex-integrations
+								// Note: Observability keys (LANGFUSE_*) are now in ambient-non-vertex-integrations
 								// No separate secrets/configmaps needed
 
 								return sources
