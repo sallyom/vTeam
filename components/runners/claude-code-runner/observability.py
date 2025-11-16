@@ -84,10 +84,9 @@ class ObservabilityManager:
                 host=os.getenv('LANGFUSE_HOST')
             )
 
-            # Start a span for this session (Langfuse SDK 3.x)
-            # Note: User tracking is done via OTLP span attributes (enduser.id, user.name)
-            # Langfuse SDK context managers don't support update_trace()
-            self.langfuse_span = self.langfuse_client.start_as_current_span(
+            # Create a ROOT span for this session using start_span()
+            # (Same API as tool spans - child spans/generations attach automatically)
+            self.langfuse_span = self.langfuse_client.start_span(
                 name="claude_agent_session",
                 input={"prompt": prompt},
                 metadata={
@@ -97,8 +96,6 @@ class ObservabilityManager:
                     "user_name": self.user_name if self.user_name else None,
                 },
             )
-            # Enter the span context to make it current
-            self.langfuse_span.__enter__()
 
             if self.user_id:
                 logging.info(f"Langfuse: Tracking session for user {self.user_name} ({self.user_id})")
@@ -270,27 +267,34 @@ class ObservabilityManager:
             result_payload: ResultMessage payload with final metrics (may be None)
         """
         # Complete Langfuse session span with final results
-        if self.langfuse_span and self.langfuse_client and result_payload:
+        if self.langfuse_span and self.langfuse_client:
             try:
-                # Exit span context before ending
-                self.langfuse_span.__exit__(None, None, None)
-                self.langfuse_span.end(
-                    output=result_payload,
-                    metadata={
-                        "num_turns": result_payload.get("num_turns", 0),
-                        "total_cost_usd": result_payload.get("total_cost_usd"),
-                        "duration_ms": result_payload.get("duration_ms"),
-                        "subtype": result_payload.get("subtype")
-                    }
-                )
-                # Flush to ensure data is sent before pod exits (with 5s timeout)
+                # End the span with final output/metadata
+                if result_payload:
+                    self.langfuse_span.end(
+                        output=result_payload,
+                        metadata={
+                            "num_turns": result_payload.get("num_turns", 0),
+                            "total_cost_usd": result_payload.get("total_cost_usd"),
+                            "duration_ms": result_payload.get("duration_ms"),
+                            "subtype": result_payload.get("subtype")
+                        }
+                    )
+                    logging.info("Langfuse span ended with result payload")
+                else:
+                    # No result payload (e.g., git push operations), but still end span
+                    self.langfuse_span.end()
+                    logging.info("Langfuse span ended without result payload")
+
+                # CRITICAL: Always flush, even if no result payload
+                # Otherwise traces never appear in Langfuse UI!
                 success, _ = await with_sync_timeout(
                     self.langfuse_client.flush,
                     5.0,
                     "Langfuse flush"
                 )
                 if success:
-                    logging.info("Langfuse session span completed with final results")
+                    logging.info("Langfuse flush completed successfully")
                 else:
                     logging.warning("Langfuse flush timed out, data may not be sent")
             except Exception as e:
@@ -302,11 +306,10 @@ class ObservabilityManager:
         Args:
             error: Exception that caused the failure
         """
-        # 1. End Langfuse session span with error if available
+        # 1. End Langfuse span with error if available
         if self.langfuse_span and self.langfuse_client:
             try:
-                # Exit span context before ending
-                self.langfuse_span.__exit__(None, None, None)
+                # End span with error status
                 self.langfuse_span.end(
                     level="ERROR",
                     status_message=str(error)
