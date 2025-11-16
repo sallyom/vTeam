@@ -99,6 +99,17 @@ func forwardedIdentityMiddleware() gin.HandlerFunc {
 						// Perform TokenReview to validate and extract user identity
 						tr := &authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: token}}
 						rv, err := K8sClient.AuthenticationV1().TokenReviews().Create(c.Request.Context(), tr, v1.CreateOptions{})
+						if err != nil {
+							// Log TokenReview API error with context for debugging
+							log.Printf("TokenReview API call failed (token len=%d): %v", len(token), err)
+						} else if !rv.Status.Authenticated {
+							// Log authentication failure with reason
+							log.Printf("TokenReview authentication failed: authenticated=false, error=%q, audiences=%v",
+								rv.Status.Error, rv.Status.Audiences)
+						} else if rv.Status.Error != "" {
+							// Log authentication error from Kubernetes
+							log.Printf("TokenReview returned error: %q (authenticated=%v)", rv.Status.Error, rv.Status.Authenticated)
+						}
 						if err == nil && rv.Status.Authenticated && rv.Status.Error == "" {
 							username := strings.TrimSpace(rv.Status.User.Username)
 							if username != "" {

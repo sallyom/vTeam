@@ -18,29 +18,20 @@ from urllib import request as _urllib_request, error as _urllib_error
 # Add runner-shell to Python path
 sys.path.insert(0, '/app/runner-shell')
 
+# Import security utilities
+from security_utils import (
+    sanitize_exception_message,
+    with_timeout,
+    with_sync_timeout,
+    validate_and_sanitize_for_logging
+)
+
 from runner_shell.core.shell import RunnerShell
 from runner_shell.core.protocol import MessageType, SessionStatus, PartialInfo
 from runner_shell.core.context import RunnerContext
 
-# Langfuse for LLM observability (optional)
-try:
-    from langfuse import Langfuse
-    LANGFUSE_AVAILABLE = True
-except ImportError:
-    LANGFUSE_AVAILABLE = False
-    logging.debug("Langfuse not available - continuing without observability")
-
-# OpenTelemetry for distributed tracing (optional)
-try:
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    from opentelemetry.sdk.resources import Resource, SERVICE_NAME
-    OTEL_AVAILABLE = True
-except ImportError:
-    OTEL_AVAILABLE = False
-    logging.debug("OpenTelemetry not available - continuing without distributed tracing")
+# Import observability manager
+from observability import ObservabilityManager
 
 
 class ClaudeCodeAdapter:
@@ -53,7 +44,6 @@ class ClaudeCodeAdapter:
         self._incoming_queue: "asyncio.Queue[dict]" = asyncio.Queue()
         self._restart_requested = False
         self._first_run = True  # Track if this is the first SDK run or a mid-session restart
-        self._otel_initialized = False  # Track if OpenTelemetry has been initialized
 
     async def initialize(self, context: RunnerContext):
         """Initialize the adapter with context."""
@@ -65,6 +55,43 @@ class ClaudeCodeAdapter:
         await self._initialize_workflow_if_set()
         # Validate prerequisite files exist for phase-based commands
         await self._validate_prerequisites()
+
+    @staticmethod
+    def _sanitize_user_context(user_id: str, user_name: str) -> tuple[str, str]:
+        """Validate and sanitize user context fields to prevent injection attacks.
+
+        Returns:
+            Tuple of (sanitized_user_id, sanitized_user_name)
+        """
+        # Validate user_id: alphanumeric, dash, underscore, at sign only
+        # Max 255 characters (email addresses can be up to 254 chars)
+        if user_id:
+            user_id = str(user_id).strip()
+            if len(user_id) > 255:
+                logging.warning(f"User ID exceeds max length (255), truncating: {len(user_id)} chars")
+                user_id = user_id[:255]
+            # Remove any characters that could cause injection issues
+            import re
+            sanitized_id = re.sub(r'[^a-zA-Z0-9@._-]', '', user_id)
+            if sanitized_id != user_id:
+                logging.warning(f"User ID contained invalid characters, sanitized from {len(user_id)} to {len(sanitized_id)} chars")
+            user_id = sanitized_id
+
+        # Validate user_name: printable ASCII, no control characters
+        # Max 255 characters
+        if user_name:
+            user_name = str(user_name).strip()
+            if len(user_name) > 255:
+                logging.warning(f"User name exceeds max length (255), truncating: {len(user_name)} chars")
+                user_name = user_name[:255]
+            # Remove control characters and non-printable characters
+            import re
+            sanitized_name = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', user_name)
+            if sanitized_name != user_name:
+                logging.warning(f"User name contained control characters, sanitized from {len(user_name)} to {len(sanitized_name)} chars")
+            user_name = sanitized_name
+
+        return user_id, user_name
 
     async def run(self):
         """Run the Claude Code CLI session."""
@@ -191,134 +218,22 @@ class ClaudeCodeAdapter:
     async def _run_claude_agent_sdk(self, prompt: str):
         """Execute the Claude Code SDK with the given prompt."""
         try:
-            # Initialize Langfuse for observability if configured
-            langfuse_client = None
-            langfuse_session_span = None
-            if LANGFUSE_AVAILABLE:
-                langfuse_enabled = os.getenv('LANGFUSE_ENABLED', '').strip().lower() in ('1', 'true', 'yes')
-                if langfuse_enabled:
-                    try:
-                        langfuse_client = Langfuse(
-                            public_key=os.getenv('LANGFUSE_PUBLIC_KEY'),
-                            secret_key=os.getenv('LANGFUSE_SECRET_KEY'),
-                            host=os.getenv('LANGFUSE_HOST')
-                        )
+            # Extract and sanitize user context for observability (used by both Langfuse and OTLP)
+            # This prevents trace poisoning, log injection, and other security issues
+            raw_user_id = os.getenv('USER_ID', '').strip()
+            raw_user_name = os.getenv('USER_NAME', '').strip()
+            user_id, user_name = self._sanitize_user_context(raw_user_id, raw_user_name)
 
-                        # Extract user context for observability
-                        user_id = os.getenv('USER_ID', '').strip()
-                        user_name = os.getenv('USER_NAME', '').strip()
-
-                        # Start a span for this session (Langfuse SDK 3.x)
-                        langfuse_session_span = langfuse_client.start_as_current_span(
-                            name="claude_agent_session",
-                            input={"prompt": prompt},
-                            metadata={
-                                "session_id": self.context.session_id,
-                                "namespace": self.context.get_env('AGENTIC_SESSION_NAMESPACE', 'unknown'),
-                                "user_name": user_name if user_name else None,
-                            },
-                        )
-
-                        # Set userId on the trace (trace-level attribute, not span-level)
-                        if user_id:
-                            try:
-                                langfuse_session_span.update_trace(user_id=user_id)
-                                logging.info(f"Langfuse: Tracking session for user {user_name} ({user_id})")
-                            except Exception as e:
-                                logging.warning(f"Failed to set user_id on trace: {e}")
-
-                        logging.info(f"Langfuse tracing enabled for session")
-                    except Exception as e:
-                        logging.warning(f"Failed to initialize Langfuse: {e}")
-                        import traceback
-                        logging.warning(traceback.format_exc())
-                        langfuse_client = None
-                        langfuse_session_span = None
-
-            # Initialize OpenTelemetry for distributed tracing
-            # Can send to Langfuse OTLP endpoint OR separate OTEL Collector
-            otel_tracer = None
-            otel_span = None
-            otel_provider = None
-            if OTEL_AVAILABLE:
-                # Determine OTLP endpoint (prefer explicit, fallback to Langfuse)
-                otel_endpoint = os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', '').strip()
-                use_langfuse_otlp = False
-
-                if not otel_endpoint and langfuse_enabled:
-                    # Derive Langfuse OTLP endpoint from LANGFUSE_HOST
-                    langfuse_host = os.getenv('LANGFUSE_HOST', '').strip()
-                    if langfuse_host:
-                        # Langfuse OTLP endpoint: <host>/api/public/otel/v1/traces
-                        otel_endpoint = f"{langfuse_host.rstrip('/')}/api/public/otel/v1/traces"
-                        use_langfuse_otlp = True
-                        logging.info(f"Using Langfuse OTLP endpoint (unified observability): {otel_endpoint}")
-
-                # Use dynamic service name: claude-<session-id> or fallback to env var
-                base_service_name = os.getenv('OTEL_SERVICE_NAME', 'claude-code-runner').strip()
-                # Override with session-specific name for better trace isolation
-                otel_service_name = f"claude-{self.context.session_id}" if self.context.session_id else base_service_name
-
-                if otel_endpoint:
-                    try:
-                        # Create resource with service name
-                        resource = Resource(attributes={
-                            SERVICE_NAME: otel_service_name
-                        })
-
-                        # Create tracer provider (store for later flush)
-                        otel_provider = TracerProvider(resource=resource)
-
-                        # Create OTLP exporter with optional auth for Langfuse
-                        exporter_kwargs = {"endpoint": otel_endpoint}
-
-                        if use_langfuse_otlp:
-                            # Add Basic Auth header for Langfuse
-                            import base64
-                            public_key = os.getenv('LANGFUSE_PUBLIC_KEY', '').strip()
-                            secret_key = os.getenv('LANGFUSE_SECRET_KEY', '').strip()
-                            if public_key and secret_key:
-                                # Base64 encode "public_key:secret_key"
-                                auth_string = f"{public_key}:{secret_key}"
-                                encoded = base64.b64encode(auth_string.encode()).decode()
-                                # HTTP headers (lowercase is canonical form)
-                                exporter_kwargs["headers"] = {"authorization": f"Basic {encoded}"}
-                                logging.info("Added Langfuse Basic Auth to OTLP exporter")
-
-                        otlp_exporter = OTLPSpanExporter(**exporter_kwargs)
-
-                        # Add span processor
-                        otel_provider.add_span_processor(BatchSpanProcessor(otlp_exporter))
-
-                        # Set as global tracer provider (only on first run)
-                        # This prevents "Overriding of current TracerProvider" warnings on restarts
-                        if not self._otel_initialized:
-                            trace.set_tracer_provider(otel_provider)
-                            self._otel_initialized = True
-                            logging.info("Initialized OpenTelemetry TracerProvider")
-                        else:
-                            logging.debug("Reusing existing OpenTelemetry TracerProvider from previous run")
-
-                        # Get tracer (works whether we just set it or it was already set)
-                        otel_tracer = trace.get_tracer(__name__)
-
-                        # Start session span
-                        otel_span = otel_tracer.start_span(
-                            "claude_agent_session",
-                            attributes={
-                                "session.id": self.context.session_id,
-                                "namespace": self.context.get_env('AGENTIC_SESSION_NAMESPACE', 'unknown'),
-                                "prompt.length": len(prompt),
-                            }
-                        )
-
-                        logging.info(f"OpenTelemetry tracing enabled (endpoint: {otel_endpoint})")
-                    except Exception as e:
-                        logging.warning(f"Failed to initialize OpenTelemetry: {e}")
-                        import traceback
-                        logging.warning(traceback.format_exc())
-                        otel_tracer = None
-                        otel_span = None
+            # Initialize observability (Langfuse + OpenTelemetry)
+            obs = ObservabilityManager(
+                session_id=self.context.session_id,
+                user_id=user_id,
+                user_name=user_name
+            )
+            await obs.initialize(
+                prompt=prompt,
+                namespace=self.context.get_env('AGENTIC_SESSION_NAMESPACE', 'unknown')
+            )
 
             # Check for authentication method: API key or service account
             # IMPORTANT: Must check and set env vars BEFORE importing SDK
@@ -597,50 +512,10 @@ class ClaudeCodeAdapter:
                                 logging.warning(f"Failed to store SDK session ID in CR annotations: {e}")
 
                     if isinstance(message, (AssistantMessage, UserMessage)):
-                        # Create Langfuse generation for assistant messages
-                        if isinstance(message, AssistantMessage) and langfuse_client and langfuse_session_span:
-                            try:
-                                # Extract text content and usage data for generation
-                                text_content = []
-                                for blk in getattr(message, 'content', []) or []:
-                                    if isinstance(blk, TextBlock):
-                                        text_content.append(getattr(blk, 'text', ''))
-
-                                if text_content:
-                                    # Get model from options or env var
-                                    model_name = getattr(options, 'model', None) or os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
-
-                                    # Check if message has usage data (it might not on every AssistantMessage)
-                                    usage_data = getattr(message, 'usage', None)
-
-                                    generation_kwargs = {
-                                        "name": "claude_response",
-                                        "input": {"turn": self._turn_count},
-                                        "output": {"text": "\n".join(text_content)[:1000]},  # Limit size
-                                        "model": model_name,
-                                        "metadata": {"turn": self._turn_count}
-                                    }
-
-                                    # Add usage_details if available (for Langfuse cost tracking)
-                                    if usage_data and hasattr(usage_data, '__dict__'):
-                                        usage_dict = {}
-                                        if hasattr(usage_data, 'input_tokens'):
-                                            usage_dict["input"] = usage_data.input_tokens
-                                        if hasattr(usage_data, 'output_tokens'):
-                                            usage_dict["output"] = usage_data.output_tokens
-                                        if hasattr(usage_data, 'cache_read_input_tokens'):
-                                            usage_dict["cache_read_input_tokens"] = usage_data.cache_read_input_tokens
-                                        if hasattr(usage_data, 'cache_creation_input_tokens'):
-                                            usage_dict["cache_creation_input_tokens"] = usage_data.cache_creation_input_tokens
-
-                                        if usage_dict:
-                                            generation_kwargs["usage_details"] = usage_dict
-                                            logging.info(f"Langfuse: Tracking generation with usage: {usage_dict}")
-
-                                    generation = langfuse_client.start_generation(**generation_kwargs)
-                                    generation.end()
-                            except Exception as e:
-                                logging.debug(f"Failed to create Langfuse generation: {e}")
+                        # Track Claude generation in Langfuse
+                        if isinstance(message, AssistantMessage):
+                            model_name = getattr(options, 'model', None) or os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
+                            obs.track_generation(message, model_name, self._turn_count)
 
                         for block in getattr(message, 'content', []) or []:
                             if isinstance(block, TextBlock):
@@ -660,34 +535,8 @@ class ClaudeCodeAdapter:
                                 )
                                 self._turn_count += 1
 
-                                # Add OTEL event for tool decision
-                                if otel_span:
-                                    otel_span.add_event(
-                                        "claude_code.tool_decision",
-                                        attributes={
-                                            "tool.name": tool_name,
-                                            "tool.id": tool_id,
-                                        }
-                                    )
-
-                                # Add Langfuse span for tool decision
-                                if langfuse_client and langfuse_session_span:
-                                    try:
-                                        tool_span = langfuse_client.start_span(
-                                            name=f"tool_{tool_name}",
-                                            input=tool_input,
-                                            metadata={
-                                                "tool_id": tool_id,
-                                                "tool_name": tool_name,
-                                                "turn": self._turn_count,
-                                            }
-                                        )
-                                        # Store tool span to update with result later
-                                        if not hasattr(self, '_langfuse_tool_spans'):
-                                            self._langfuse_tool_spans = {}
-                                        self._langfuse_tool_spans[tool_id] = tool_span
-                                    except Exception as e:
-                                        logging.debug(f"Failed to create Langfuse tool span: {e}")
+                                # Track tool use in observability
+                                obs.track_tool_use(tool_name, tool_id, tool_input)
                             elif isinstance(block, ToolResultBlock):
                                 tool_use_id = getattr(block, 'tool_use_id', None)
                                 content = getattr(block, 'content', None)
@@ -705,29 +554,12 @@ class ClaudeCodeAdapter:
                                     },
                                 )
 
-                                # Add OTEL event for tool result
-                                if otel_span:
-                                    otel_span.add_event(
-                                        "claude_code.tool_result",
-                                        attributes={
-                                            "tool.use_id": tool_use_id,
-                                            "tool.is_error": is_error or False,
-                                        }
-                                    )
-
-                                # Update Langfuse tool span with result
-                                if hasattr(self, '_langfuse_tool_spans') and tool_use_id in self._langfuse_tool_spans:
-                                    try:
-                                        tool_span = self._langfuse_tool_spans[tool_use_id]
-                                        result_text = content if content is not None else result_text
-                                        tool_span.end(
-                                            output={"result": str(result_text)[:500] if result_text else "No output"},  # Limit output size
-                                            level="ERROR" if is_error else "DEFAULT",
-                                            metadata={"is_error": is_error or False}
-                                        )
-                                        del self._langfuse_tool_spans[tool_use_id]
-                                    except Exception as e:
-                                        logging.debug(f"Failed to update Langfuse tool span: {e}")
+                                # Track tool result in observability
+                                obs.track_tool_result(
+                                    tool_use_id,
+                                    content if content is not None else result_text,
+                                    is_error or False
+                                )
                                 if interactive:
                                     await self.shell._send_message(MessageType.WAITING_FOR_INPUT, {})
                                 self._turn_count += 1
@@ -751,35 +583,8 @@ class ClaudeCodeAdapter:
                             "result": getattr(message, 'result', None),
                         }
 
-                        # Track session-level cost and usage in Langfuse
-                        if langfuse_client and langfuse_session_span:
-                            try:
-                                usage = result_payload.get("usage")
-                                total_cost = result_payload.get("total_cost_usd")
-
-                                # Update trace metadata with session totals
-                                metadata_update = {}
-                                if usage and hasattr(usage, '__dict__'):
-                                    total_tokens = getattr(usage, 'total_tokens', None)
-                                    input_tokens = getattr(usage, 'input_tokens', None)
-                                    output_tokens = getattr(usage, 'output_tokens', None)
-
-                                    if total_tokens:
-                                        metadata_update["total_tokens"] = total_tokens
-                                    if input_tokens:
-                                        metadata_update["input_tokens"] = input_tokens
-                                    if output_tokens:
-                                        metadata_update["output_tokens"] = output_tokens
-
-                                if total_cost is not None:
-                                    metadata_update["total_cost_usd"] = total_cost
-
-                                if metadata_update:
-                                    # Update span metadata (this will show in Langfuse UI)
-                                    langfuse_session_span.update(metadata=metadata_update)
-                                    logging.info(f"Langfuse: Session totals - {metadata_update}")
-                            except Exception as e:
-                                logging.debug(f"Failed to update Langfuse with session totals: {e}")
+                        # Track session-level cost and usage
+                        obs.track_session_totals(result_payload)
 
                         if not interactive:
                             await self.shell._send_message(
@@ -868,50 +673,8 @@ class ClaudeCodeAdapter:
             # Note: All output is streamed via WebSocket, not collected here
             await self._check_pr_intent("")
 
-            # Complete Langfuse session span with final results
-            if langfuse_session_span and langfuse_client and result_payload:
-                try:
-                    langfuse_session_span.end(
-                        output=result_payload,
-                        metadata={
-                            "num_turns": result_payload.get("num_turns", 0),
-                            "total_cost_usd": result_payload.get("total_cost_usd"),
-                            "duration_ms": result_payload.get("duration_ms"),
-                            "subtype": result_payload.get("subtype")
-                        }
-                    )
-                    # Flush to ensure data is sent before pod exits
-                    langfuse_client.flush()
-                    logging.info("Langfuse session span completed with final results")
-                except Exception as e:
-                    logging.warning(f"Failed to complete Langfuse session span: {e}")
-
-            # Complete OTEL span with final metrics
-            if otel_span and result_payload:
-                try:
-                    # Add final attributes matching Claude Code monitoring format
-                    usage = result_payload.get("usage", {}) or {}
-                    otel_span.set_attributes({
-                        "claude_code.cost.usage": result_payload.get("total_cost_usd", 0.0),
-                        "claude_code.token.usage": usage.get("total_tokens", 0),
-                        "claude_code.session.turns": result_payload.get("num_turns", 0),
-                        "claude_code.session.duration_ms": result_payload.get("duration_ms", 0),
-                        "claude_code.session.subtype": result_payload.get("subtype", "unknown"),
-                    })
-
-                    # End the span
-                    otel_span.end()
-                    logging.info("OpenTelemetry span completed with final metrics")
-                except Exception as e:
-                    logging.warning(f"Failed to complete OTEL span: {e}")
-
-            # Force flush to ensure spans are sent before pod exits
-            if otel_provider:
-                try:
-                    otel_provider.force_flush(timeout_millis=5000)
-                    logging.info("OpenTelemetry spans flushed to collector")
-                except Exception as e:
-                    logging.warning(f"Failed to flush OTEL spans: {e}")
+            # Finalize observability (end spans and flush)
+            await obs.finalize(result_payload)
 
             # Return success - result_payload may be None if SDK didn't send ResultMessage
             # (which can happen legitimately for some operations like git push)
@@ -924,16 +687,11 @@ class ClaudeCodeAdapter:
             }
         except Exception as e:
             logging.error(f"Failed to run Claude Code SDK: {e}")
-            # End Langfuse session span with error if available
-            if 'langfuse_session_span' in locals() and langfuse_session_span and 'langfuse_client' in locals() and langfuse_client:
-                try:
-                    langfuse_session_span.end(
-                        level="ERROR",
-                        status_message=str(e)
-                    )
-                    langfuse_client.flush()
-                except Exception:
-                    pass
+
+            # Clean up observability spans on error path
+            if 'obs' in locals():
+                await obs.cleanup_on_error(e)
+
             return {
                 "success": False,
                 "error": str(e)

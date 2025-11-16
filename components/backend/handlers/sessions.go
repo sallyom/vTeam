@@ -770,10 +770,14 @@ func MintSessionGitHubToken(c *gin.Context) {
 	tr := &authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: token}}
 	rv, err := K8sClient.AuthenticationV1().TokenReviews().Create(c.Request.Context(), tr, v1.CreateOptions{})
 	if err != nil {
+		log.Printf("GitHub token mint: TokenReview API call failed for session %s/%s (token len=%d): %v",
+			project, sessionName, len(token), err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "token review failed"})
 		return
 	}
 	if rv.Status.Error != "" || !rv.Status.Authenticated {
+		log.Printf("GitHub token mint: TokenReview authentication failed for session %s/%s: authenticated=%v, error=%q",
+			project, sessionName, rv.Status.Authenticated, rv.Status.Error)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthenticated"})
 		return
 	}

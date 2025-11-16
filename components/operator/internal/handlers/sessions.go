@@ -521,14 +521,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									log.Printf("Auto-enabled Langfuse for session %s (keys configured at platform level)", name)
 								}
 
-								// Inject OpenTelemetry configuration from operator's environment (if configured)
-								if otelEndpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"); otelEndpoint != "" {
-									base = append(base, corev1.EnvVar{Name: "OTEL_EXPORTER_OTLP_ENDPOINT", Value: otelEndpoint})
-								}
-								if otelServiceName := os.Getenv("OTEL_SERVICE_NAME"); otelServiceName != "" {
-									base = append(base, corev1.EnvVar{Name: "OTEL_SERVICE_NAME", Value: otelServiceName})
-								}
-
 								// Add Vertex AI configuration only if enabled
 								if vertexEnabled {
 									base = append(base,
@@ -637,7 +629,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 							// - runnerSecretsName: Only when Vertex disabled (ANTHROPIC_API_KEY)
 							// - langfuseKeysSecretName: Only if exists (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY)
 							// - langfuseConfigMapName: Only if exists (LANGFUSE_HOST, LANGFUSE_ENABLED)
-							// - otelConfigMapName: Only if exists (OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_SERVICE_NAME, etc.)
 							EnvFrom: func() []corev1.EnvFromSource {
 								sources := []corev1.EnvFromSource{}
 
