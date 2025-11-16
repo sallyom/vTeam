@@ -313,13 +313,13 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 
 	// Hardcoded secret names (convention over configuration)
 	const runnerSecretsName = "ambient-runner-secrets"               // ANTHROPIC_API_KEY only (ignored when Vertex enabled)
-	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, LANGFUSE_*, OTEL_*, custom keys (optional)
+	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, custom keys (optional, NO Langfuse keys)
 
-	// Check if integration secrets exist (includes observability keys: LANGFUSE_*, OTEL_*)
+	// Check if integration secrets exist (user-provided integrations like GIT_TOKEN, JIRA_*)
 	integrationSecretsExist := false
 	if _, err := config.K8sClient.CoreV1().Secrets(sessionNamespace).Get(context.TODO(), integrationSecretsName, v1.GetOptions{}); err == nil {
 		integrationSecretsExist = true
-		log.Printf("Found %s secret in %s, will inject as env vars (includes observability keys)", integrationSecretsName, sessionNamespace)
+		log.Printf("Found %s secret in %s, will inject as env vars", integrationSecretsName, sessionNamespace)
 	} else if !errors.IsNotFound(err) {
 		log.Printf("Error checking for %s secret in %s: %v", integrationSecretsName, sessionNamespace, err)
 	} else {
@@ -503,23 +503,8 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									base = append(base, corev1.EnvVar{Name: "USER_NAME", Value: userName})
 								}
 
-								// Inject platform-wide Langfuse observability configuration from operator's environment
-								if langfusePublicKey := os.Getenv("LANGFUSE_PUBLIC_KEY"); langfusePublicKey != "" {
-									base = append(base, corev1.EnvVar{Name: "LANGFUSE_PUBLIC_KEY", Value: langfusePublicKey})
-								}
-								if langfuseSecretKey := os.Getenv("LANGFUSE_SECRET_KEY"); langfuseSecretKey != "" {
-									base = append(base, corev1.EnvVar{Name: "LANGFUSE_SECRET_KEY", Value: langfuseSecretKey})
-								}
-								if langfuseHost := os.Getenv("LANGFUSE_HOST"); langfuseHost != "" {
-									base = append(base, corev1.EnvVar{Name: "LANGFUSE_HOST", Value: langfuseHost})
-								}
-								// Enable Langfuse by default if keys are configured
-								if langfuseEnabled := os.Getenv("LANGFUSE_ENABLED"); langfuseEnabled != "" {
-									base = append(base, corev1.EnvVar{Name: "LANGFUSE_ENABLED", Value: langfuseEnabled})
-								} else if os.Getenv("LANGFUSE_PUBLIC_KEY") != "" && os.Getenv("LANGFUSE_SECRET_KEY") != "" {
-									base = append(base, corev1.EnvVar{Name: "LANGFUSE_ENABLED", Value: "true"})
-									log.Printf("Auto-enabled Langfuse for session %s (keys configured at platform level)", name)
-								}
+								// Note: Platform-wide Langfuse observability is configured via ambient-langfuse-keys secret
+								// injected below in EnvFrom. LANGFUSE_* env vars should NOT be set here.
 
 								// Add Vertex AI configuration only if enabled
 								if vertexEnabled {
@@ -625,10 +610,9 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 							}(),
 
 							// Import secrets as environment variables
-							// - integrationSecretsName: Only if exists (GIT_TOKEN, JIRA_*, custom keys)
+							// - integrationSecretsName: Only if exists (GIT_TOKEN, JIRA_*, custom keys - NO Langfuse keys)
 							// - runnerSecretsName: Only when Vertex disabled (ANTHROPIC_API_KEY)
-							// - langfuseKeysSecretName: Only if exists (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY)
-							// - langfuseConfigMapName: Only if exists (LANGFUSE_HOST, LANGFUSE_ENABLED)
+							// - ambient-langfuse-keys: Platform-wide Langfuse observability (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, LANGFUSE_ENABLED)
 							EnvFrom: func() []corev1.EnvFromSource {
 								sources := []corev1.EnvFromSource{}
 
@@ -656,8 +640,15 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									log.Printf("Skipping runner secrets '%s' for session %s (Vertex enabled)", runnerSecretsName, name)
 								}
 
-								// Note: Observability keys (LANGFUSE_*, OTEL_*) are now in ambient-non-vertex-integrations
-								// No separate secrets/configmaps needed
+								// Inject platform-wide Langfuse observability keys (optional, marked as optional in secret)
+								// This secret is created at deployment time in the operator's namespace
+								sources = append(sources, corev1.EnvFromSource{
+									SecretRef: &corev1.SecretEnvSource{
+										LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-langfuse-keys"},
+										Optional:             boolPtr(true), // Optional: only needed if Langfuse enabled
+									},
+								})
+								log.Printf("Injecting Langfuse observability keys from 'ambient-langfuse-keys' for session %s (optional)", name)
 
 								return sources
 							}(),

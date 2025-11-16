@@ -2,12 +2,11 @@
 
 ## Overview
 
-**Unified Observability** means both Langfuse SDK spans AND OpenTelemetry spans are sent to Langfuse and appear in the same trace hierarchy:
+**Langfuse** is the observability platform for the vTeam/Ambient Code Platform. All traces are sent to Langfuse for LLM-specific observability:
 
-- **Langfuse SDK spans**: LLM-specific observability (prompts, responses, generations, tool executions with full I/O)
-- **OpenTelemetry spans**: System-level distributed tracing (session lifecycle, performance metrics, costs)
-
-Both span types automatically nest together in Langfuse because **Langfuse SDK v3 is OpenTelemetry-native**.
+- **Session spans**: Full Claude session lifecycle with cost and token metrics
+- **Generation spans**: Claude's text responses with prompt/completion tracking
+- **Tool spans**: Tool executions (Read, Write, Bash, etc.) with full I/O capture
 
 ## Prerequisites
 
@@ -24,176 +23,207 @@ Both span types automatically nest together in Langfuse because **Langfuse SDK v
 
 ## Quick Start
 
-### Using WorkspaceSettings UI (Recommended)
+### Platform-Wide Configuration (Recommended)
 
-**All observability configuration is managed via the WorkspaceSettings UI.**
+**Langfuse keys are configured once at deployment time for the entire platform.**
+
+1. **Create the `ambient-langfuse-keys` secret** in the `ambient-code` namespace (or your operator namespace):
+
+```bash
+kubectl create secret generic ambient-langfuse-keys \
+  --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-... \
+  --from-literal=LANGFUSE_SECRET_KEY=sk-lf-... \
+  --from-literal=LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000 \
+  --from-literal=LANGFUSE_ENABLED=true \
+  -n ambient-code
+```
+
+2. **Restart the operator** to pick up the new secret:
+
+```bash
+kubectl rollout restart deployment ambient-operator -n ambient-code
+```
+
+3. **All new sessions** will automatically have Langfuse observability enabled!
+
+### Alternative: Per-Project Configuration
+
+If you need per-project Langfuse keys for cost isolation:
 
 1. **Access WorkspaceSettings** for your project:
    - Navigate to your workspace
    - Go to Settings tab
-   - Expand "Observability (Langfuse + OpenTelemetry)" section
+   - Expand "Observability" section
 
-2. **Configure Langfuse** (pre-populated with defaults):
-   - `LANGFUSE_ENABLED`: `true` (already set)
-   - `LANGFUSE_HOST`: `http://langfuse-web.langfuse.svc.cluster.local:3000` (already set)
+2. **Configure Langfuse keys** in the `ambient-non-vertex-integrations` secret:
    - `LANGFUSE_PUBLIC_KEY`: Add your `pk-lf-...` key
    - `LANGFUSE_SECRET_KEY`: Add your `sk-lf-...` key
 
-3. **OpenTelemetry (Optional - Advanced Users Only)**:
-   - `OTEL_EXPORTER_OTLP_ENDPOINT`: **Leave empty** (traces auto-sent to Langfuse)
-   - `OTEL_SERVICE_NAME`: `claude-code-runner` (dynamically set to `claude-{session-id}`)
+Note: Per-project keys override platform-wide keys for that project only.
 
-4. **Save Integration Secrets** - All keys saved to `ambient-non-vertex-integrations`
-
-## How Unified Observability Works
+## How Langfuse Observability Works
 
 ```
 ┌─────────────────────────────────────────────────┐
 │  Runner Pod                                     │
 ├─────────────────────────────────────────────────┤
-│  Langfuse SDK v3 (OTEL-native)                 │
+│  Langfuse SDK v3                                │
 │       ↓ creates                                 │
-│  • Session span (Langfuse API)                  │
+│  • Session span (claude_agent_session)          │
 │  • Tool spans (Read, Write, Bash...)           │
 │  • Generation spans (Claude responses)          │
 │                                                 │
-│  OpenTelemetry SDK                              │
-│       ↓ creates                                 │
-│  • Session span (system-level)                  │
-│  • Tool decision events                         │
-│  • Performance metrics                          │
-│                                                 │
-│  Both span sources ──────────────────────────┐ │
-└──────────────────────────────────────────────┼─┘
-                                               ↓
-                    Langfuse OTLP Endpoint
-                /api/public/otel/v1/traces
-                (HTTP/protobuf + Basic Auth)
-                                               ↓
-                         Langfuse Backend
-                                               ↓
-                    ┌─────────────────────────┐
-                    │  Unified Trace View     │
-                    ├─────────────────────────┤
-                    │ claude_agent_session    │ ← Main span
-                    │   ├─ tool_Read         │ ← Langfuse SDK
-                    │   ├─ tool_Write        │ ← Langfuse SDK
-                    │   ├─ claude_response   │ ← Langfuse SDK
-                    │   └─ Performance data  │ ← OTEL SDK
-                    └─────────────────────────┘
+│  All spans ────────────────────────────────────┐│
+└─────────────────────────────────────────────────┼┘
+                                                  ↓
+                        Langfuse HTTP API
+                    /api/public/ingestion
+                    (HTTP/JSON with API keys)
+                                                  ↓
+                       Langfuse Backend
+                                                  ↓
+                  ┌─────────────────────────┐
+                  │  Unified Trace View     │
+                  ├─────────────────────────┤
+                  │ claude_agent_session    │ ← Session span
+                  │   ├─ tool_Read         │ ← Tool execution
+                  │   ├─ tool_Write        │ ← Tool execution
+                  │   ├─ claude_response   │ ← Claude generation
+                  │   └─ Cost & tokens     │ ← Final metrics
+                  └─────────────────────────┘
 ```
 
 ### Key Points
 
-1. **Auto-derivation**: If `OTEL_EXPORTER_OTLP_ENDPOINT` is empty, runner derives endpoint from `LANGFUSE_HOST`
-2. **Basic Auth**: Runner automatically adds `Authorization: Basic {base64(public_key:secret_key)}` header
-3. **Protocol**: HTTP/protobuf (gRPC not supported by Langfuse)
-4. **Context propagation**: OpenTelemetry automatically nests spans within same trace
+1. **Simple integration**: Runner uses Langfuse Python SDK (v3+) for direct HTTP API calls
+2. **API Key auth**: Runner automatically adds API keys from `ambient-langfuse-keys` secret
+3. **Automatic nesting**: Child spans (tools, generations) attach to parent session span via SDK context
 
 ## Trace Structure
 
-### Langfuse SDK Spans
+### Session Span (Root)
 
-1. **Session Span** - Main span for entire Claude session
-   - Input: Original prompt
-   - Output: Final results with cost/token metrics
-   - Metadata: session ID, namespace
+**Name**: `claude_agent_session`
 
-2. **Tool Spans** - Child spans for each tool execution
-   - Input: Tool parameters (full detail)
-   - Output: Tool results (truncated to 500 chars)
-   - Metadata: tool name, ID, turn number
+- **Input**: Original prompt from user
+- **Output**: Final results with cost/token metrics
+- **Metadata**:
+  - `session_id`: Kubernetes session name
+  - `namespace`: Project namespace
+  - `user_id`: User identifier (for multi-user tracking)
+  - `user_name`: User display name
 
-3. **Generation Spans** - Claude's text responses
-   - Input: Turn number
-   - Output: Claude text (truncated to 1000 chars)
-   - Metadata: Model, turn number
+### Tool Spans (Children)
 
-### OpenTelemetry Spans
+**Name**: `tool_{ToolName}` (e.g., `tool_Read`, `tool_Write`, `tool_Bash`)
 
-1. **Session Span** - System-level span matching session
-   - Attributes: session ID, namespace, prompt length
-   - Final attributes: cost, tokens, turns, duration, subtype
+- **Input**: Tool parameters (full detail)
+- **Output**: Tool results (truncated to 500 chars)
+- **Metadata**:
+  - `tool_id`: Unique ID for this tool use
+  - `tool_name`: Tool name (Read, Write, etc.)
 
-2. **Tool Events** - Events on session span
-   - `claude_code.tool_decision`: tool name, tool ID
-   - `claude_code.tool_result`: tool use ID, error status
+### Generation Spans (Children)
+
+**Name**: `claude_response`
+
+- **Input**: Turn number
+- **Output**: Claude's text response (truncated to 1000 chars)
+- **Metadata**:
+  - `model`: Model name (e.g., `claude-3-5-sonnet-20241022`)
+  - `turn`: Turn number in conversation
+- **Usage**: Token counts for cost tracking
+  - `input`: Input tokens
+  - `output`: Output tokens
+  - `cache_read_input_tokens`: Cache hits (if applicable)
+  - `cache_creation_input_tokens`: Cache writes (if applicable)
 
 ## Viewing Traces
 
 1. Open Langfuse UI: https://langfuse-langfuse.apps.<your-cluster>
 2. Navigate to your project
-3. View traces by session ID
+3. View traces by session ID or timestamp
 4. Drill down to see:
-   - **Langfuse spans**: Full tool I/O, generation content
-   - **OTEL spans**: Performance metrics, costs, tokens
-   - All in one unified hierarchy!
+   - **Full tool I/O**: Complete input/output for each tool execution
+   - **Generation content**: Claude's responses with token breakdown
+   - **Cost tracking**: Total cost and per-generation costs
+   - **Session metrics**: Total tokens, turns, duration
 
 ## Configuration Details
 
-All environment variables are stored in the `ambient-non-vertex-integrations` secret:
+### Platform-Wide Secret (`ambient-langfuse-keys`)
 
-### Required Keys
+Created at deployment time in the operator's namespace:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ambient-langfuse-keys
+  namespace: ambient-code
+type: Opaque
+stringData:
+  LANGFUSE_PUBLIC_KEY: "pk-lf-..."
+  LANGFUSE_SECRET_KEY: "sk-lf-..."
+  LANGFUSE_HOST: "http://langfuse-web.langfuse.svc.cluster.local:3000"
+  LANGFUSE_ENABLED: "true"
+```
+
+### Per-Project Secret (Optional, `ambient-non-vertex-integrations`)
+
+For project-specific Langfuse keys:
 
 ```yaml
 LANGFUSE_PUBLIC_KEY: "pk-lf-..."
 LANGFUSE_SECRET_KEY: "sk-lf-..."
 ```
 
-### Pre-configured (Optional to Override)
-
-```yaml
-LANGFUSE_ENABLED: "true"
-LANGFUSE_HOST: "http://langfuse-web.langfuse.svc.cluster.local:3000"
-OTEL_SERVICE_NAME: "claude-code-runner"  # Dynamically set to claude-{session-id}
-```
-
-### Advanced (Usually Empty)
-
-```yaml
-OTEL_EXPORTER_OTLP_ENDPOINT: ""  # Leave empty to use Langfuse
-```
+Note: `LANGFUSE_HOST` and `LANGFUSE_ENABLED` are configured platform-wide and cannot be overridden per-project.
 
 ## Updating Configuration
 
-To update your observability settings:
+### Platform-Wide Update
+
+```bash
+# Update the secret
+kubectl create secret generic ambient-langfuse-keys \
+  --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-new-key \
+  --from-literal=LANGFUSE_SECRET_KEY=sk-lf-new-key \
+  --from-literal=LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000 \
+  --from-literal=LANGFUSE_ENABLED=true \
+  -n ambient-code \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Restart operator to pick up changes
+kubectl rollout restart deployment ambient-operator -n ambient-code
+```
+
+### Per-Project Update
 
 1. Go to WorkspaceSettings → Settings → Observability
-2. Update Langfuse keys or other settings
+2. Update Langfuse keys
 3. Click "Save Integration Secrets"
 4. New sessions use updated config immediately
 
-## Alternative Backends (Tempo/Grafana/Jaeger)
-
-**Important Limitation**: Langfuse SDK spans **cannot** be exported to Tempo/Grafana/Jaeger. The Langfuse SDK always sends traces to the Langfuse API endpoint, even though it's "OTEL-native".
-
-**What you CAN do** (advanced users only):
-- Set `OTEL_EXPORTER_OTLP_ENDPOINT` to send **OpenTelemetry SDK spans** to Tempo/Jaeger/Grafana
-- This creates **two separate trace systems**:
-  - Langfuse SDK spans → Langfuse UI (LLM-specific: tool I/O, generations, prompts)
-  - OTEL SDK spans → Tempo/Grafana (system metrics: duration, tokens, cost)
-- Manual correlation required via session ID or timestamps
-
-**Recommendation**: Use unified Langfuse approach (default) for best experience. Only use separate backends if you have existing observability infrastructure that requires it.
-
 ## Multi-Project Setup
 
-Each project namespace can have its own `ambient-non-vertex-integrations` secret with different Langfuse keys for per-project isolation and cost tracking.
+**Platform-wide configuration**: All projects share the same Langfuse instance and keys.
 
-## Why Unified Observability?
+**Per-project configuration**: Each project namespace can have its own `ambient-non-vertex-integrations` secret with different Langfuse keys for per-project isolation and cost tracking.
 
-**Benefits over separate systems:**
+## Why Langfuse?
 
-✅ **Single source of truth**: All traces in one place
-✅ **Automatic correlation**: Spans auto-nest via OTEL context propagation
-✅ **Simpler setup**: Only Langfuse keys needed
-✅ **Better UX**: Langfuse UI designed for LLM observability
-✅ **Cost efficiency**: No separate OTEL Collector infrastructure
-✅ **Richer insights**: Combine LLM-specific + system-level observability
+**Benefits of Langfuse for AI observability:**
+
+✅ **LLM-optimized**: Designed specifically for LLM observability with prompt/response tracking
+✅ **Simple setup**: Only Langfuse keys needed, no additional infrastructure
+✅ **Cost tracking**: Built-in token and cost calculation for Claude API usage
+✅ **Rich insights**: Full tool I/O, generation content, and performance metrics
+✅ **Easy debugging**: Trace view shows exact sequence of tool calls and responses
+✅ **Multi-user support**: Track usage by user_id for cost allocation
 
 ## References
 
 - Langfuse Documentation: https://langfuse.com/docs
-- Langfuse OTLP Integration: https://langfuse.com/integrations/native/opentelemetry
-- Langfuse Python SDK v3: https://langfuse.com/changelog/2025-05-23-otel-based-python-sdk
-- Ambient Code Observability: See `components/runners/claude-code-runner/wrapper.py`
+- Langfuse Python SDK v3: https://langfuse.com/docs/sdk/python
+- Ambient Code Observability: See `components/runners/claude-code-runner/observability.py`
