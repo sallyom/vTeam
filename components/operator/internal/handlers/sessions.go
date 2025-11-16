@@ -348,17 +348,17 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	autoPushOnComplete, _, _ := unstructured.NestedBool(spec, "autoPushOnComplete")
 
 	// Extract userContext for observability and auditing
-	userId := ""
+	userID := ""
 	userName := ""
 	if userContext, found, _ := unstructured.NestedMap(spec, "userContext"); found {
 		if v, ok := userContext["userId"].(string); ok {
-			userId = strings.TrimSpace(v)
+			userID = strings.TrimSpace(v)
 		}
 		if v, ok := userContext["displayName"].(string); ok {
 			userName = strings.TrimSpace(v)
 		}
 	}
-	log.Printf("Session %s initiated by user: %s (userId: %s)", name, userName, userId)
+	log.Printf("Session %s initiated by user: %s (userId: %s)", name, userName, userID)
 
 	// Create the Job
 	job := &batchv1.Job{
@@ -496,8 +496,8 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 								}
 
 								// Add user context for observability and auditing (Langfuse userId, logs, etc.)
-								if userId != "" {
-									base = append(base, corev1.EnvVar{Name: "USER_ID", Value: userId})
+								if userID != "" {
+									base = append(base, corev1.EnvVar{Name: "USER_ID", Value: userID})
 								}
 								if userName != "" {
 									base = append(base, corev1.EnvVar{Name: "USER_NAME", Value: userName})
