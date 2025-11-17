@@ -11,6 +11,3 @@ data:
   CLOUD_ML_REGION: ""
   ANTHROPIC_VERTEX_PROJECT_ID: ""
   GOOGLE_APPLICATION_CREDENTIALS: ""
-
-  # Note: Langfuse observability configuration is stored in the 'ambient-admin-langfuse-secret'
-  # Secret (platform-admin managed). For e2e testing, Langfuse is typically disabled.
