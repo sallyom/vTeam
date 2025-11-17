@@ -6,18 +6,15 @@ including security features (secret sanitization, timeouts).
 """
 
 import os
-import asyncio
 import logging
 from typing import Any
 
-from security_utils import (
-    sanitize_exception_message,
-    with_sync_timeout
-)
+from security_utils import sanitize_exception_message, with_sync_timeout
 
 # Langfuse for LLM observability (optional)
 try:
     from langfuse import Langfuse
+
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
@@ -73,14 +70,18 @@ class ObservabilityManager:
         if not LANGFUSE_AVAILABLE:
             return False
 
-        langfuse_enabled = os.getenv('LANGFUSE_ENABLED', '').strip().lower() in ('1', 'true', 'yes')
+        langfuse_enabled = os.getenv("LANGFUSE_ENABLED", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
         if not langfuse_enabled:
             return False
 
         # Check if required Langfuse keys are present
-        public_key = os.getenv('LANGFUSE_PUBLIC_KEY', '').strip()
-        secret_key = os.getenv('LANGFUSE_SECRET_KEY', '').strip()
-        host = os.getenv('LANGFUSE_HOST', '').strip()
+        public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "").strip()
+        secret_key = os.getenv("LANGFUSE_SECRET_KEY", "").strip()
+        host = os.getenv("LANGFUSE_HOST", "").strip()
 
         if not public_key or not secret_key:
             logging.warning(
@@ -101,9 +102,7 @@ class ObservabilityManager:
 
         try:
             self.langfuse_client = Langfuse(
-                public_key=public_key,
-                secret_key=secret_key,
-                host=host
+                public_key=public_key, secret_key=secret_key, host=host
             )
 
             # Create a ROOT span for this session using start_span()
@@ -120,7 +119,9 @@ class ObservabilityManager:
             )
 
             if self.user_id:
-                logging.info(f"Langfuse: Tracking session for user {self.user_name} ({self.user_id})")
+                logging.info(
+                    f"Langfuse: Tracking session for user {self.user_name} ({self.user_id})"
+                )
 
             logging.info("Langfuse tracing enabled for session")
             return True
@@ -164,39 +165,45 @@ class ObservabilityManager:
 
             # Extract text content and usage data for generation
             text_content = []
-            for blk in getattr(message, 'content', []) or []:
+            for blk in getattr(message, "content", []) or []:
                 if isinstance(blk, TextBlock):
-                    text_content.append(getattr(blk, 'text', ''))
+                    text_content.append(getattr(blk, "text", ""))
 
             if not text_content:
                 return
 
             # Check if message has usage data (it might not on every AssistantMessage)
-            usage_data = getattr(message, 'usage', None)
+            usage_data = getattr(message, "usage", None)
 
             generation_kwargs = {
                 "name": "claude_response",
                 "input": {"turn": turn_count},
                 "output": {"text": "\n".join(text_content)[:1000]},  # Limit size
                 "model": model,
-                "metadata": {"turn": turn_count}
+                "metadata": {"turn": turn_count},
             }
 
             # Add usage_details if available (for Langfuse cost tracking)
-            if usage_data and hasattr(usage_data, '__dict__'):
+            if usage_data and hasattr(usage_data, "__dict__"):
                 usage_dict = {}
-                if hasattr(usage_data, 'input_tokens'):
+                if hasattr(usage_data, "input_tokens"):
                     usage_dict["input"] = usage_data.input_tokens
-                if hasattr(usage_data, 'output_tokens'):
+                if hasattr(usage_data, "output_tokens"):
                     usage_dict["output"] = usage_data.output_tokens
-                if hasattr(usage_data, 'cache_read_input_tokens'):
-                    usage_dict["cache_read_input_tokens"] = usage_data.cache_read_input_tokens
-                if hasattr(usage_data, 'cache_creation_input_tokens'):
-                    usage_dict["cache_creation_input_tokens"] = usage_data.cache_creation_input_tokens
+                if hasattr(usage_data, "cache_read_input_tokens"):
+                    usage_dict["cache_read_input_tokens"] = (
+                        usage_data.cache_read_input_tokens
+                    )
+                if hasattr(usage_data, "cache_creation_input_tokens"):
+                    usage_dict["cache_creation_input_tokens"] = (
+                        usage_data.cache_creation_input_tokens
+                    )
 
                 if usage_dict:
                     generation_kwargs["usage_details"] = usage_dict
-                    logging.info(f"Langfuse: Tracking generation with usage: {usage_dict}")
+                    logging.info(
+                        f"Langfuse: Tracking generation with usage: {usage_dict}"
+                    )
 
             generation = self.langfuse_client.start_generation(**generation_kwargs)
             generation.end()
@@ -220,7 +227,7 @@ class ObservabilityManager:
                     metadata={
                         "tool_id": tool_id,
                         "tool_name": tool_name,
-                    }
+                    },
                 )
                 # Store tool span to update with result later
                 self._langfuse_tool_spans[tool_id] = tool_span
@@ -243,7 +250,7 @@ class ObservabilityManager:
                 tool_span.end(
                     output={"result": result_text},
                     level="ERROR" if is_error else "DEFAULT",
-                    metadata={"is_error": is_error or False}
+                    metadata={"is_error": is_error or False},
                 )
                 del self._langfuse_tool_spans[tool_use_id]
             except Exception as e:
@@ -264,10 +271,10 @@ class ObservabilityManager:
 
             # Update trace metadata with session totals
             metadata_update = {}
-            if usage and hasattr(usage, '__dict__'):
-                total_tokens = getattr(usage, 'total_tokens', None)
-                input_tokens = getattr(usage, 'input_tokens', None)
-                output_tokens = getattr(usage, 'output_tokens', None)
+            if usage and hasattr(usage, "__dict__"):
+                total_tokens = getattr(usage, "total_tokens", None)
+                input_tokens = getattr(usage, "input_tokens", None)
+                output_tokens = getattr(usage, "output_tokens", None)
 
                 if total_tokens:
                     metadata_update["total_tokens"] = total_tokens
@@ -303,8 +310,8 @@ class ObservabilityManager:
                             "num_turns": result_payload.get("num_turns", 0),
                             "total_cost_usd": result_payload.get("total_cost_usd"),
                             "duration_ms": result_payload.get("duration_ms"),
-                            "subtype": result_payload.get("subtype")
-                        }
+                            "subtype": result_payload.get("subtype"),
+                        },
                     )
                     logging.info("Langfuse span ended with result payload")
                 else:
@@ -315,9 +322,7 @@ class ObservabilityManager:
                 # CRITICAL: Always flush, even if no result payload
                 # Otherwise traces never appear in Langfuse UI!
                 success, _ = await with_sync_timeout(
-                    self.langfuse_client.flush,
-                    5.0,
-                    "Langfuse flush"
+                    self.langfuse_client.flush, 5.0, "Langfuse flush"
                 )
                 if success:
                     logging.info("Langfuse flush completed successfully")
@@ -336,15 +341,10 @@ class ObservabilityManager:
         if self.langfuse_span and self.langfuse_client:
             try:
                 # End span with error status
-                self.langfuse_span.end(
-                    level="ERROR",
-                    status_message=str(error)
-                )
+                self.langfuse_span.end(level="ERROR", status_message=str(error))
                 # Flush with 5s timeout to prevent hanging on error path
                 success, _ = await with_sync_timeout(
-                    self.langfuse_client.flush,
-                    5.0,
-                    "Langfuse error cleanup flush"
+                    self.langfuse_client.flush, 5.0, "Langfuse error cleanup flush"
                 )
                 if not success:
                     logging.debug("Langfuse error cleanup flush timed out")

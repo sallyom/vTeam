@@ -7,7 +7,7 @@ from security_utils import (
     sanitize_exception_message,
     with_timeout,
     with_sync_timeout,
-    validate_and_sanitize_for_logging
+    validate_and_sanitize_for_logging,
 )
 
 
@@ -27,10 +27,7 @@ class TestSanitizeExceptionMessage:
     def test_sanitize_multiple_secrets(self):
         """Test that multiple secrets are redacted."""
         exception = ValueError("Auth failed: pk-lf-12345 and sk-lf-secret")
-        secrets = {
-            "public_key": "pk-lf-12345",
-            "secret_key": "sk-lf-secret"
-        }
+        secrets = {"public_key": "pk-lf-12345", "secret_key": "sk-lf-secret"}
 
         result = sanitize_exception_message(exception, secrets)
 
@@ -42,10 +39,7 @@ class TestSanitizeExceptionMessage:
     def test_sanitize_empty_secrets(self):
         """Test that empty secrets are ignored."""
         exception = ValueError("Some error message")
-        secrets = {
-            "public_key": "",
-            "secret_key": None
-        }
+        secrets = {"public_key": "", "secret_key": None}
 
         result = sanitize_exception_message(exception, secrets)
 
@@ -86,6 +80,7 @@ class TestWithTimeout:
     @pytest.mark.asyncio
     async def test_successful_operation(self):
         """Test successful async operation within timeout."""
+
         async def quick_operation():
             await asyncio.sleep(0.01)
             return "success"
@@ -98,6 +93,7 @@ class TestWithTimeout:
     @pytest.mark.asyncio
     async def test_timeout_exceeded(self):
         """Test operation that exceeds timeout."""
+
         async def slow_operation():
             await asyncio.sleep(2.0)
             return "should not reach"
@@ -110,6 +106,7 @@ class TestWithTimeout:
     @pytest.mark.asyncio
     async def test_operation_raises_exception(self):
         """Test operation that raises exception."""
+
         async def failing_operation():
             raise ValueError("Operation failed")
 
@@ -122,6 +119,7 @@ class TestWithTimeout:
     @pytest.mark.asyncio
     async def test_callable_with_arguments(self):
         """Test passing arguments to callable."""
+
         async def add_numbers(a, b):
             return a + b
 
@@ -133,6 +131,7 @@ class TestWithTimeout:
     @pytest.mark.asyncio
     async def test_callable_with_kwargs(self):
         """Test passing keyword arguments to callable."""
+
         async def greet(name, greeting="Hello"):
             return f"{greeting}, {name}"
 
@@ -150,6 +149,7 @@ class TestWithSyncTimeout:
     @pytest.mark.asyncio
     async def test_successful_sync_operation(self):
         """Test successful synchronous operation within timeout."""
+
         def sync_add(a, b):
             return a + b
 
@@ -167,9 +167,7 @@ class TestWithSyncTimeout:
             time.sleep(2.0)
             return "should not reach"
 
-        success, result = await with_sync_timeout(
-            slow_sync_operation, 0.1, "slow sync"
-        )
+        success, result = await with_sync_timeout(slow_sync_operation, 0.1, "slow sync")
 
         assert success is False
         assert result is None
@@ -177,6 +175,7 @@ class TestWithSyncTimeout:
     @pytest.mark.asyncio
     async def test_sync_operation_raises_exception(self):
         """Test sync operation that raises exception."""
+
         def failing_sync_operation():
             raise RuntimeError("Sync operation failed")
 
@@ -190,6 +189,7 @@ class TestWithSyncTimeout:
     @pytest.mark.asyncio
     async def test_sync_with_kwargs(self):
         """Test passing keyword arguments to sync function."""
+
         def format_string(prefix, suffix, separator="-"):
             return f"{prefix}{separator}{suffix}"
 
@@ -265,6 +265,7 @@ class TestLoggingBehavior:
     @pytest.mark.asyncio
     async def test_timeout_logs_warning(self, caplog):
         """Test that timeout logs appropriate warning."""
+
         async def slow_op():
             await asyncio.sleep(1.0)
 
@@ -278,6 +279,7 @@ class TestLoggingBehavior:
     @pytest.mark.asyncio
     async def test_exception_logs_error(self, caplog):
         """Test that exceptions log appropriate error."""
+
         async def failing_op():
             raise ValueError("Test error")
 

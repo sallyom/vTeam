@@ -10,11 +10,13 @@ import asyncio
 import logging
 from typing import Callable, Any, TypeVar, ParamSpec
 
-P = ParamSpec('P')
-T = TypeVar('T')
+P = ParamSpec("P")
+T = TypeVar("T")
 
 
-def sanitize_exception_message(exception: Exception, secrets_to_redact: dict[str, str]) -> str:
+def sanitize_exception_message(
+    exception: Exception, secrets_to_redact: dict[str, str]
+) -> str:
     """Sanitize exception message to prevent secret leakage.
 
     Replaces any occurrence of secret values with redacted placeholders.
@@ -43,7 +45,7 @@ async def with_timeout(
     timeout_seconds: float,
     operation_name: str,
     *args: P.args,
-    **kwargs: P.kwargs
+    **kwargs: P.kwargs,
 ) -> tuple[bool, Any]:
     """Execute async operation with timeout.
 
@@ -79,7 +81,7 @@ async def with_sync_timeout(
     timeout_seconds: float,
     operation_name: str,
     *args: P.args,
-    **kwargs: P.kwargs
+    **kwargs: P.kwargs,
 ) -> tuple[bool, T | None]:
     """Execute synchronous blocking operation with timeout in executor.
 
@@ -101,7 +103,7 @@ async def with_sync_timeout(
         # Run sync function in executor with timeout
         result = await asyncio.wait_for(
             loop.run_in_executor(None, lambda: func(*args, **kwargs)),
-            timeout=timeout_seconds
+            timeout=timeout_seconds,
         )
         return True, result
     except asyncio.TimeoutError:
@@ -128,7 +130,7 @@ def validate_and_sanitize_for_logging(value: str, max_length: int = 1000) -> str
         return ""
 
     # Remove control characters
-    sanitized = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', str(value))
+    sanitized = re.sub(r"[\x00-\x1f\x7f-\x9f]", "", str(value))
 
     # Truncate if too long
     if len(sanitized) > max_length:

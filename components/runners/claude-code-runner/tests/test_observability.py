@@ -3,8 +3,8 @@
 import pytest
 import os
 import logging
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from observability import ObservabilityManager, LANGFUSE_AVAILABLE
+from unittest.mock import Mock, patch
+from observability import ObservabilityManager
 
 
 @pytest.fixture
@@ -22,9 +22,7 @@ def mock_langfuse_client():
 def manager():
     """Create ObservabilityManager instance."""
     return ObservabilityManager(
-        session_id="test-session-123",
-        user_id="user-456",
-        user_name="Test User"
+        session_id="test-session-123", user_id="user-456", user_name="Test User"
     )
 
 
@@ -34,9 +32,7 @@ class TestObservabilityManagerInit:
     def test_init_sets_properties(self):
         """Test that __init__ sets all properties correctly."""
         manager = ObservabilityManager(
-            session_id="session-1",
-            user_id="user-1",
-            user_name="John Doe"
+            session_id="session-1", user_id="user-1", user_name="John Doe"
         )
 
         assert manager.session_id == "session-1"
@@ -51,7 +47,7 @@ class TestLangfuseInitialization:
     """Tests for Langfuse initialization."""
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', False)
+    @patch("observability.LANGFUSE_AVAILABLE", False)
     async def test_init_langfuse_unavailable(self, manager):
         """Test initialization when Langfuse SDK is not available."""
         result = await manager.initialize("test prompt", "test-namespace")
@@ -60,24 +56,24 @@ class TestLangfuseInitialization:
         assert manager.langfuse_client is None
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
+    @patch("observability.LANGFUSE_AVAILABLE", True)
     async def test_init_langfuse_disabled(self, manager):
         """Test initialization when LANGFUSE_ENABLED is false."""
-        with patch.dict(os.environ, {'LANGFUSE_ENABLED': 'false'}):
+        with patch.dict(os.environ, {"LANGFUSE_ENABLED": "false"}):
             result = await manager.initialize("test prompt", "test-namespace")
 
         assert result is False
         assert manager.langfuse_client is None
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
+    @patch("observability.LANGFUSE_AVAILABLE", True)
     async def test_init_missing_public_key(self, manager, caplog):
         """Test initialization with missing LANGFUSE_PUBLIC_KEY."""
         env_vars = {
-            'LANGFUSE_ENABLED': 'true',
-            'LANGFUSE_PUBLIC_KEY': '',
-            'LANGFUSE_SECRET_KEY': 'sk-lf-secret',
-            'LANGFUSE_HOST': 'http://localhost:3000'
+            "LANGFUSE_ENABLED": "true",
+            "LANGFUSE_PUBLIC_KEY": "",
+            "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+            "LANGFUSE_HOST": "http://localhost:3000",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -90,14 +86,14 @@ class TestLangfuseInitialization:
         assert "ambient-langfuse-keys" in caplog.text
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
+    @patch("observability.LANGFUSE_AVAILABLE", True)
     async def test_init_missing_secret_key(self, manager, caplog):
         """Test initialization with missing LANGFUSE_SECRET_KEY."""
         env_vars = {
-            'LANGFUSE_ENABLED': 'true',
-            'LANGFUSE_PUBLIC_KEY': 'pk-lf-public',
-            'LANGFUSE_SECRET_KEY': '',
-            'LANGFUSE_HOST': 'http://localhost:3000'
+            "LANGFUSE_ENABLED": "true",
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-public",
+            "LANGFUSE_SECRET_KEY": "",
+            "LANGFUSE_HOST": "http://localhost:3000",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -108,14 +104,14 @@ class TestLangfuseInitialization:
         assert "LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is missing" in caplog.text
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
+    @patch("observability.LANGFUSE_AVAILABLE", True)
     async def test_init_missing_host(self, manager, caplog):
         """Test initialization with missing LANGFUSE_HOST."""
         env_vars = {
-            'LANGFUSE_ENABLED': 'true',
-            'LANGFUSE_PUBLIC_KEY': 'pk-lf-public',
-            'LANGFUSE_SECRET_KEY': 'sk-lf-secret',
-            'LANGFUSE_HOST': ''
+            "LANGFUSE_ENABLED": "true",
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-public",
+            "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+            "LANGFUSE_HOST": "",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -126,8 +122,8 @@ class TestLangfuseInitialization:
         assert "LANGFUSE_HOST is missing" in caplog.text
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
-    @patch('observability.Langfuse')
+    @patch("observability.LANGFUSE_AVAILABLE", True)
+    @patch("observability.Langfuse")
     async def test_init_successful(self, mock_langfuse_class, manager, caplog):
         """Test successful Langfuse initialization."""
         mock_client = Mock()
@@ -136,10 +132,10 @@ class TestLangfuseInitialization:
         mock_langfuse_class.return_value = mock_client
 
         env_vars = {
-            'LANGFUSE_ENABLED': 'true',
-            'LANGFUSE_PUBLIC_KEY': 'pk-lf-public',
-            'LANGFUSE_SECRET_KEY': 'sk-lf-secret',
-            'LANGFUSE_HOST': 'http://localhost:3000'
+            "LANGFUSE_ENABLED": "true",
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-public",
+            "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+            "LANGFUSE_HOST": "http://localhost:3000",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -150,16 +146,16 @@ class TestLangfuseInitialization:
         assert manager.langfuse_client is not None
         assert manager.langfuse_span is not None
         mock_langfuse_class.assert_called_once_with(
-            public_key='pk-lf-public',
-            secret_key='sk-lf-secret',
-            host='http://localhost:3000'
+            public_key="pk-lf-public",
+            secret_key="sk-lf-secret",
+            host="http://localhost:3000",
         )
         mock_client.start_span.assert_called_once()
         assert "Langfuse tracing enabled" in caplog.text
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
-    @patch('observability.Langfuse')
+    @patch("observability.LANGFUSE_AVAILABLE", True)
+    @patch("observability.Langfuse")
     async def test_init_with_user_tracking(self, mock_langfuse_class, caplog):
         """Test Langfuse initialization with user tracking."""
         mock_client = Mock()
@@ -168,16 +164,14 @@ class TestLangfuseInitialization:
         mock_langfuse_class.return_value = mock_client
 
         manager = ObservabilityManager(
-            session_id="session-1",
-            user_id="user-123",
-            user_name="Jane Doe"
+            session_id="session-1", user_id="user-123", user_name="Jane Doe"
         )
 
         env_vars = {
-            'LANGFUSE_ENABLED': 'true',
-            'LANGFUSE_PUBLIC_KEY': 'pk-lf-public',
-            'LANGFUSE_SECRET_KEY': 'sk-lf-secret',
-            'LANGFUSE_HOST': 'http://localhost:3000'
+            "LANGFUSE_ENABLED": "true",
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-public",
+            "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+            "LANGFUSE_HOST": "http://localhost:3000",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -188,17 +182,17 @@ class TestLangfuseInitialization:
         assert "Tracking session for user Jane Doe (user-123)" in caplog.text
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
-    @patch('observability.Langfuse')
+    @patch("observability.LANGFUSE_AVAILABLE", True)
+    @patch("observability.Langfuse")
     async def test_init_langfuse_exception(self, mock_langfuse_class, manager, caplog):
         """Test Langfuse initialization when SDK raises exception."""
         mock_langfuse_class.side_effect = Exception("Connection failed")
 
         env_vars = {
-            'LANGFUSE_ENABLED': 'true',
-            'LANGFUSE_PUBLIC_KEY': 'pk-lf-public',
-            'LANGFUSE_SECRET_KEY': 'sk-lf-secret',
-            'LANGFUSE_HOST': 'http://localhost:3000'
+            "LANGFUSE_ENABLED": "true",
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-public",
+            "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+            "LANGFUSE_HOST": "http://localhost:3000",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -212,17 +206,19 @@ class TestLangfuseInitialization:
         assert "Observability will be disabled" in caplog.text
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
-    @patch('observability.Langfuse')
-    async def test_init_sanitizes_api_keys_in_error(self, mock_langfuse_class, manager, caplog):
+    @patch("observability.LANGFUSE_AVAILABLE", True)
+    @patch("observability.Langfuse")
+    async def test_init_sanitizes_api_keys_in_error(
+        self, mock_langfuse_class, manager, caplog
+    ):
         """Test that API keys are sanitized in error messages."""
         mock_langfuse_class.side_effect = Exception("Auth failed with key pk-lf-public")
 
         env_vars = {
-            'LANGFUSE_ENABLED': 'true',
-            'LANGFUSE_PUBLIC_KEY': 'pk-lf-public',
-            'LANGFUSE_SECRET_KEY': 'sk-lf-secret',
-            'LANGFUSE_HOST': 'http://localhost:3000'
+            "LANGFUSE_ENABLED": "true",
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-public",
+            "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+            "LANGFUSE_HOST": "http://localhost:3000",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -243,7 +239,7 @@ class TestTrackGeneration:
         # Should not raise exception
         manager.track_generation(Mock(), "claude-3-5-sonnet", 1)
 
-    @patch('observability.Langfuse')
+    @patch("observability.Langfuse")
     def test_track_generation_with_usage(self, mock_langfuse_class):
         """Test track_generation with usage data."""
         from claude_agent_sdk import TextBlock, Usage
@@ -264,18 +260,18 @@ class TestTrackGeneration:
             input_tokens=100,
             output_tokens=50,
             cache_read_input_tokens=10,
-            cache_creation_input_tokens=5
+            cache_creation_input_tokens=5,
         )
 
         manager.track_generation(message, "claude-3-5-sonnet", 1)
 
         mock_client.start_generation.assert_called_once()
         call_kwargs = mock_client.start_generation.call_args[1]
-        assert call_kwargs['name'] == 'claude_response'
-        assert call_kwargs['model'] == 'claude-3-5-sonnet'
-        assert 'usage_details' in call_kwargs
-        assert call_kwargs['usage_details']['input'] == 100
-        assert call_kwargs['usage_details']['output'] == 50
+        assert call_kwargs["name"] == "claude_response"
+        assert call_kwargs["model"] == "claude-3-5-sonnet"
+        assert "usage_details" in call_kwargs
+        assert call_kwargs["usage_details"]["input"] == 100
+        assert call_kwargs["usage_details"]["output"] == 50
         mock_generation.end.assert_called_once()
 
 
@@ -287,7 +283,7 @@ class TestTrackToolUse:
         # Should not raise exception
         manager.track_tool_use("Read", "tool-123", {"file": "test.txt"})
 
-    @patch('observability.Langfuse')
+    @patch("observability.Langfuse")
     def test_track_tool_use_creates_span(self, mock_langfuse_class):
         """Test track_tool_use creates tool span."""
         mock_client = Mock()
@@ -307,7 +303,7 @@ class TestTrackToolUse:
             metadata={
                 "tool_id": "tool-456",
                 "tool_name": "Read",
-            }
+            },
         )
         assert "tool-456" in manager._langfuse_tool_spans
         assert manager._langfuse_tool_spans["tool-456"] == mock_tool_span
@@ -321,7 +317,7 @@ class TestTrackToolResult:
         # Should not raise exception
         manager.track_tool_result("tool-999", "result", False)
 
-    @patch('observability.Langfuse')
+    @patch("observability.Langfuse")
     def test_track_tool_result_success(self, mock_langfuse_class):
         """Test track_tool_result for successful tool execution."""
         mock_client = Mock()
@@ -335,12 +331,12 @@ class TestTrackToolResult:
 
         mock_tool_span.end.assert_called_once()
         call_kwargs = mock_tool_span.end.call_args[1]
-        assert call_kwargs['level'] == 'DEFAULT'
-        assert 'File contents' in call_kwargs['output']['result']
-        assert call_kwargs['metadata']['is_error'] is False
+        assert call_kwargs["level"] == "DEFAULT"
+        assert "File contents" in call_kwargs["output"]["result"]
+        assert call_kwargs["metadata"]["is_error"] is False
         assert "tool-123" not in manager._langfuse_tool_spans
 
-    @patch('observability.Langfuse')
+    @patch("observability.Langfuse")
     def test_track_tool_result_error(self, mock_langfuse_class):
         """Test track_tool_result for failed tool execution."""
         mock_client = Mock()
@@ -354,8 +350,8 @@ class TestTrackToolResult:
 
         mock_tool_span.end.assert_called_once()
         call_kwargs = mock_tool_span.end.call_args[1]
-        assert call_kwargs['level'] == 'ERROR'
-        assert call_kwargs['metadata']['is_error'] is True
+        assert call_kwargs["level"] == "ERROR"
+        assert call_kwargs["metadata"]["is_error"] is True
 
 
 class TestFinalize:
@@ -368,7 +364,7 @@ class TestFinalize:
         await manager.finalize(None)
 
     @pytest.mark.asyncio
-    @patch('observability.with_sync_timeout')
+    @patch("observability.with_sync_timeout")
     async def test_finalize_with_result_payload(self, mock_timeout):
         """Test finalize with result payload."""
         mock_timeout.return_value = (True, None)
@@ -384,22 +380,22 @@ class TestFinalize:
             "num_turns": 5,
             "total_cost_usd": 0.01234,
             "duration_ms": 15000,
-            "subtype": "completion"
+            "subtype": "completion",
         }
 
         await manager.finalize(result_payload)
 
         mock_span.end.assert_called_once()
         call_kwargs = mock_span.end.call_args[1]
-        assert call_kwargs['output'] == result_payload
-        assert call_kwargs['metadata']['num_turns'] == 5
-        assert call_kwargs['metadata']['total_cost_usd'] == 0.01234
+        assert call_kwargs["output"] == result_payload
+        assert call_kwargs["metadata"]["num_turns"] == 5
+        assert call_kwargs["metadata"]["total_cost_usd"] == 0.01234
 
         # Verify flush was called
         mock_timeout.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('observability.with_sync_timeout')
+    @patch("observability.with_sync_timeout")
     async def test_finalize_without_result_payload(self, mock_timeout, caplog):
         """Test finalize without result payload (e.g., git push)."""
         mock_timeout.return_value = (True, None)
@@ -421,7 +417,7 @@ class TestFinalize:
         mock_timeout.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('observability.with_sync_timeout')
+    @patch("observability.with_sync_timeout")
     async def test_finalize_flush_timeout(self, mock_timeout, caplog):
         """Test finalize when flush times out."""
         mock_timeout.return_value = (False, None)  # Timeout
@@ -449,7 +445,7 @@ class TestCleanupOnError:
         await manager.cleanup_on_error(ValueError("test error"))
 
     @pytest.mark.asyncio
-    @patch('observability.with_sync_timeout')
+    @patch("observability.with_sync_timeout")
     async def test_cleanup_on_error(self, mock_timeout):
         """Test cleanup_on_error ends span with error."""
         mock_timeout.return_value = (True, None)
@@ -466,14 +462,14 @@ class TestCleanupOnError:
 
         mock_span.end.assert_called_once()
         call_kwargs = mock_span.end.call_args[1]
-        assert call_kwargs['level'] == 'ERROR'
-        assert call_kwargs['status_message'] == 'Session failed'
+        assert call_kwargs["level"] == "ERROR"
+        assert call_kwargs["status_message"] == "Session failed"
 
         # Verify flush was called
         mock_timeout.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch('observability.with_sync_timeout')
+    @patch("observability.with_sync_timeout")
     async def test_cleanup_flush_timeout(self, mock_timeout, caplog):
         """Test cleanup when flush times out."""
         mock_timeout.return_value = (False, None)  # Timeout
@@ -495,15 +491,17 @@ class TestEnvironmentVariableCombinations:
     """Tests for various environment variable combinations."""
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
-    @pytest.mark.parametrize("enabled_value", ["1", "true", "True", "TRUE", "yes", "YES"])
+    @patch("observability.LANGFUSE_AVAILABLE", True)
+    @pytest.mark.parametrize(
+        "enabled_value", ["1", "true", "True", "TRUE", "yes", "YES"]
+    )
     async def test_langfuse_enabled_variations(self, enabled_value, manager):
         """Test that various truthy values for LANGFUSE_ENABLED work."""
         env_vars = {
-            'LANGFUSE_ENABLED': enabled_value,
-            'LANGFUSE_PUBLIC_KEY': '',  # Missing key should still return False
-            'LANGFUSE_SECRET_KEY': 'sk-lf-secret',
-            'LANGFUSE_HOST': 'http://localhost:3000'
+            "LANGFUSE_ENABLED": enabled_value,
+            "LANGFUSE_PUBLIC_KEY": "",  # Missing key should still return False
+            "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+            "LANGFUSE_HOST": "http://localhost:3000",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -513,15 +511,15 @@ class TestEnvironmentVariableCombinations:
         assert result is False
 
     @pytest.mark.asyncio
-    @patch('observability.LANGFUSE_AVAILABLE', True)
+    @patch("observability.LANGFUSE_AVAILABLE", True)
     @pytest.mark.parametrize("enabled_value", ["0", "false", "False", "no", "NO", ""])
     async def test_langfuse_disabled_variations(self, enabled_value, manager):
         """Test that various falsy values for LANGFUSE_ENABLED work."""
         env_vars = {
-            'LANGFUSE_ENABLED': enabled_value,
-            'LANGFUSE_PUBLIC_KEY': 'pk-lf-public',
-            'LANGFUSE_SECRET_KEY': 'sk-lf-secret',
-            'LANGFUSE_HOST': 'http://localhost:3000'
+            "LANGFUSE_ENABLED": enabled_value,
+            "LANGFUSE_PUBLIC_KEY": "pk-lf-public",
+            "LANGFUSE_SECRET_KEY": "sk-lf-secret",
+            "LANGFUSE_HOST": "http://localhost:3000",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
