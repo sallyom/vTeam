@@ -106,11 +106,13 @@ If you need workspace-specific tracking, use Langfuse's built-in tagging and fil
 
 - **Input**: Original prompt from user
 - **Output**: Final results with cost/token metrics
-- **Metadata**:
+- **Trace-level attributes** (filterable):
+  - `user_id`: User identifier (for cost allocation, may be `None`)
   - `session_id`: Kubernetes session name
+  - `tags`: `["ambient-code", "agentic-session:{session_id}"]`
+- **Metadata** (contextual):
   - `namespace`: Project namespace
-  - `user_id`: User identifier (for multi-user tracking)
-  - `user_name`: User display name
+  - `user_name`: User display name (if available)
 
 ### Tool Spans (Children)
 
@@ -136,6 +138,149 @@ If you need workspace-specific tracking, use Langfuse's built-in tagging and fil
   - `output`: Output tokens
   - `cache_read_input_tokens`: Cache hits (if applicable)
   - `cache_creation_input_tokens`: Cache writes (if applicable)
+
+## User Tracking
+
+### Overview
+
+Langfuse 3.0 SDK automatically tracks user context for **cost allocation** and **usage analytics** across multi-user environments. User tracking is **optional** and gracefully degrades when user information is unavailable.
+
+### How User ID is Added to Traces
+
+User information flows through the platform as follows:
+
+```
+OAuth Proxy (OpenShift)
+    ↓ X-Forwarded-User header
+Backend Middleware
+    ↓ Extracts to Gin context
+Session Creation Handler
+    ↓ Adds to spec.userContext.userId
+Operator
+    ↓ Sets USER_ID env var in runner pod
+Runner Pod (wrapper.py)
+    ↓ Sanitizes and validates
+ObservabilityManager
+    ↓ Sets trace-level user_id
+Langfuse Trace (filterable by user)
+```
+
+### Trace-Level User Attributes
+
+The implementation uses **Langfuse 3.0 SDK patterns** for proper user tracking:
+
+```python
+# observability.py:147
+langfuse = get_client()
+langfuse.update_current_trace(
+    user_id=self.user_id if self.user_id else None,  # Trace-level (filterable)
+    session_id=self.session_id,                      # Trace-level (filterable)
+    tags=["ambient-code", f"agentic-session:{self.session_id}"],
+    metadata={
+        "namespace": namespace,                       # Contextual only
+        "user_name": self.user_name if self.user_name else None,
+    },
+)
+```
+
+**Key Features:**
+- ✅ **Trace-level attributes**: `user_id` and `session_id` are set at trace level for filtering
+- ✅ **Automatic inheritance**: All child spans/generations inherit user context
+- ✅ **Tags for filtering**: `ambient-code` and `agentic-session:{session_id}` tags
+- ✅ **Graceful degradation**: Passes `None` when user_id is unavailable (no errors)
+
+### When User ID is Available
+
+**Scenario 1: OpenShift with OAuth Proxy**
+- ✅ `X-Forwarded-User` header present (e.g., `user@example.com`)
+- ✅ Backend extracts to `c.Set("userID", ...)`
+- ✅ Operator sets `USER_ID` env var in runner pod
+- ✅ **Result**: Full user tracking in Langfuse UI
+
+**Scenario 2: Direct API Access (Token-based)**
+- ✅ User ID extracted from JWT token claims
+- ✅ Backend sets user context from token
+- ✅ **Result**: Full user tracking in Langfuse UI
+
+### When User ID is NOT Available
+
+**Scenario 1: Direct API calls (no OAuth proxy)**
+- ❌ No `X-Forwarded-User` header
+- ❌ `USER_ID` env var not set in pod
+- ✅ **Result**: Trace created with `user_id=None`, session still tracked by `session_id`
+
+**Scenario 2: ServiceAccount/Bot access**
+- ❌ ServiceAccount tokens don't contain user identity
+- ❌ `USER_ID` env var not set
+- ✅ **Result**: Trace created with `user_id=None`, session still tracked by `session_id`
+
+**Scenario 3: Non-OpenShift deployments**
+- ❌ No OAuth proxy infrastructure
+- ❌ `USER_ID` env var not set
+- ✅ **Result**: Trace created with `user_id=None`, session still tracked by `session_id`
+
+### Security & Validation
+
+User input is **sanitized** before being added to traces:
+
+```python
+# wrapper.py:58
+def _sanitize_user_context(user_id: str, user_name: str) -> tuple[str, str]:
+    # Validate user_id: alphanumeric, dash, underscore, at sign only
+    # Max 255 characters (email addresses can be up to 254 chars)
+    sanitized_id = re.sub(r"[^a-zA-Z0-9@._-]", "", user_id)
+    # ... removes control characters from user_name
+    return sanitized_id, sanitized_name
+```
+
+**Protection against:**
+- ✅ Trace poisoning attacks
+- ✅ Log injection
+- ✅ XSS via user input
+- ✅ Buffer overflow (255 char limit)
+
+### Filtering Traces by User
+
+In the Langfuse UI or API, you can filter traces by user:
+
+**By User ID:**
+```python
+traces = langfuse.api.trace.list(user_id="user@example.com")
+```
+
+**By Session ID:**
+```python
+traces = langfuse.api.trace.list(session_id="session-abc-123")
+```
+
+**By Tags:**
+```python
+# All ambient platform traces
+traces = langfuse.api.trace.list(tags=["ambient-code"])
+
+# Specific session
+traces = langfuse.api.trace.list(tags=["agentic-session:session-abc-123"])
+```
+
+### Cost Allocation
+
+With user tracking enabled, you can:
+
+1. **View per-user usage** in Langfuse User Explorer
+2. **Track token consumption** by user
+3. **Calculate costs** per user or team
+4. **Monitor activity** across users
+
+### Summary
+
+| Environment | USER_ID Value | Langfuse Behavior |
+|-------------|---------------|-------------------|
+| **OpenShift with OAuth** | `user@example.com` | ✅ Full user tracking |
+| **OpenShift without OAuth** | `""` (empty) | ✅ Trace created, `user_id=None` |
+| **Non-OpenShift** | Not set | ✅ Trace created, `user_id=None` |
+| **ServiceAccount** | `""` (empty) | ✅ Trace created, `user_id=None` |
+
+**All scenarios work correctly** - user tracking is an enhancement, not a requirement.
 
 ## Viewing Traces
 
