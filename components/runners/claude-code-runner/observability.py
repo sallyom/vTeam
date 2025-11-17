@@ -14,7 +14,7 @@ from security_utils import sanitize_exception_message, with_sync_timeout
 
 # Langfuse for LLM observability (optional)
 try:
-    from langfuse import Langfuse, get_client
+    from langfuse import Langfuse, get_client, propagate_attributes
 
     LANGFUSE_AVAILABLE = True
 except ImportError:
@@ -43,6 +43,7 @@ class ObservabilityManager:
 
         # Langfuse state
         self.langfuse_client = None
+        self._propagate_ctx = None
         self.langfuse_span = None
         self._langfuse_tool_spans: dict[str, Any] = {}
 
@@ -135,14 +136,27 @@ class ObservabilityManager:
                 public_key=public_key, secret_key=secret_key, host=host
             )
 
-            # Create a ROOT span for this session
+            # CRITICAL: Use propagate_attributes to ensure ALL child spans inherit user context
+            # This is the Langfuse 3.0 pattern for proper user tracking across all observations
+            self._propagate_ctx = propagate_attributes(
+                user_id=self.user_id if self.user_id else None,
+                session_id=self.session_id,
+                tags=["ambient-code", f"agentic-session:{self.session_id}"],
+                metadata={
+                    "namespace": namespace,
+                    "user_name": self.user_name if self.user_name else None,
+                },
+            )
+            # Enter the context to start propagation
+            self._propagate_ctx.__enter__()
+
+            # Create a ROOT span for this session (will inherit propagated attributes)
             self.langfuse_span = self.langfuse_client.start_span(
                 name="claude_agent_session",
                 input={"prompt": prompt},
             )
 
-            # Use get_client() to access singleton and set trace-level attributes
-            # This is the Langfuse 3.0 pattern for user tracking and filtering
+            # Also update trace-level attributes for backwards compatibility
             langfuse = get_client()
             langfuse.update_current_trace(
                 user_id=self.user_id if self.user_id else None,
@@ -386,6 +400,15 @@ class ObservabilityManager:
                     )
             except Exception as e:
                 logging.warning(f"Failed to complete Langfuse session span: {e}")
+            finally:
+                # Exit propagate_attributes context
+                if self._propagate_ctx:
+                    try:
+                        self._propagate_ctx.__exit__(None, None, None)
+                    except Exception as e:
+                        logging.debug(
+                            f"Failed to exit propagate_attributes context: {e}"
+                        )
 
     async def cleanup_on_error(self, error: Exception) -> None:
         """End spans and flush observability data (error path).
@@ -409,3 +432,12 @@ class ObservabilityManager:
                     )
             except Exception as cleanup_err:
                 logging.debug(f"Failed to cleanup Langfuse span: {cleanup_err}")
+            finally:
+                # Exit propagate_attributes context
+                if self._propagate_ctx:
+                    try:
+                        self._propagate_ctx.__exit__(None, None, None)
+                    except Exception as e:
+                        logging.debug(
+                            f"Failed to exit propagate_attributes context: {e}"
+                        )
