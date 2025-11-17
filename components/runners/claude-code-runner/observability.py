@@ -77,11 +77,33 @@ class ObservabilityManager:
         if not langfuse_enabled:
             return False
 
+        # Check if required Langfuse keys are present
+        public_key = os.getenv('LANGFUSE_PUBLIC_KEY', '').strip()
+        secret_key = os.getenv('LANGFUSE_SECRET_KEY', '').strip()
+        host = os.getenv('LANGFUSE_HOST', '').strip()
+
+        if not public_key or not secret_key:
+            logging.warning(
+                "LANGFUSE_ENABLED is true but LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is missing. "
+                "Langfuse observability will be disabled for this session. "
+                "To enable Langfuse, create the 'ambient-langfuse-keys' secret in the operator's namespace "
+                "with keys: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, LANGFUSE_ENABLED. "
+                "See e2e/langfuse/README.md for setup instructions."
+            )
+            return False
+
+        if not host:
+            logging.warning(
+                "LANGFUSE_HOST is missing. Langfuse observability will be disabled for this session. "
+                "Add LANGFUSE_HOST to the 'ambient-langfuse-keys' secret (e.g., http://langfuse-web.langfuse.svc.cluster.local:3000)."
+            )
+            return False
+
         try:
             self.langfuse_client = Langfuse(
-                public_key=os.getenv('LANGFUSE_PUBLIC_KEY'),
-                secret_key=os.getenv('LANGFUSE_SECRET_KEY'),
-                host=os.getenv('LANGFUSE_HOST')
+                public_key=public_key,
+                secret_key=secret_key,
+                host=host
             )
 
             # Create a ROOT span for this session using start_span()
@@ -107,13 +129,17 @@ class ObservabilityManager:
             # Sanitize error message to prevent API key leakage
             # NEVER log exception object - only sanitized message string
             secrets = {
-                "public_key": os.getenv('LANGFUSE_PUBLIC_KEY', ''),
-                "secret_key": os.getenv('LANGFUSE_SECRET_KEY', ''),
+                "public_key": public_key,
+                "secret_key": secret_key,
             }
             error_msg = sanitize_exception_message(e, secrets)
 
-            # Log sanitized error without exception object or traceback
-            logging.error(f"Failed to initialize Langfuse observability: {error_msg}")
+            # Log sanitized warning without exception object or traceback
+            logging.warning(
+                f"Langfuse initialization failed: {error_msg}. "
+                f"Observability will be disabled for this session. "
+                f"Check that your Langfuse keys are valid and the LANGFUSE_HOST is reachable."
+            )
             logging.debug(f"Langfuse initialization error type: {type(e).__name__}")
 
             # Continue without Langfuse - don't fail the session

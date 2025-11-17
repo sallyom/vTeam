@@ -1,0 +1,87 @@
+name: Claude Code Runner Tests
+
+on:
+  pull_request:
+    paths:
+      - 'components/runners/claude-code-runner/**'
+      - '.github/workflows/runner-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'components/runners/claude-code-runner/**'
+      - '.github/workflows/runner-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: components/runners/claude-code-runner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e ".[dev]"
+
+      - name: Run tests with pytest
+        run: |
+          python -m pytest tests/ -v --tb=short --color=yes
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest tests/ --cov=. --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./components/runners/claude-code-runner/coverage.xml
+          flags: runner
+          name: claude-code-runner
+          fail_ci_if_error: false
+
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: components/runners/claude-code-runner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -e ".[dev]"
+          uv pip install --system ruff black
+
+      - name: Check formatting with black
+        run: |
+          python -m black --check .
+
+      - name: Lint with ruff
+        run: |
+          python -m ruff check .
