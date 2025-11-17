@@ -240,10 +240,11 @@ class TestTrackGeneration:
         manager.track_generation(Mock(), "claude-3-5-sonnet", 1)
 
     @patch("observability.Langfuse")
-    def test_track_generation_with_usage(self, mock_langfuse_class):
+    @patch("claude_agent_sdk.TextBlock")
+    def test_track_generation_with_usage(
+        self, mock_textblock_class, mock_langfuse_class
+    ):
         """Test track_generation with usage data."""
-        from claude_agent_sdk import TextBlock, Usage
-
         mock_client = Mock()
         mock_generation = Mock()
         mock_client.start_generation.return_value = mock_generation
@@ -252,16 +253,20 @@ class TestTrackGeneration:
         manager.langfuse_client = mock_client
         manager.langfuse_span = Mock()
 
-        # Create mock message with TextBlock
+        # Create mock message with text content and usage data
         message = Mock()
-        text_block = TextBlock(text="Test response")
+        # Create a TextBlock instance from the mocked class (so isinstance works)
+        text_block = mock_textblock_class()
+        text_block.text = "Test response"
         message.content = [text_block]
-        message.usage = Usage(
-            input_tokens=100,
-            output_tokens=50,
-            cache_read_input_tokens=10,
-            cache_creation_input_tokens=5,
-        )
+
+        # Mock usage object with token attributes
+        usage = Mock()
+        usage.input_tokens = 100
+        usage.output_tokens = 50
+        usage.cache_read_input_tokens = 10
+        usage.cache_creation_input_tokens = 5
+        message.usage = usage
 
         manager.track_generation(message, "claude-3-5-sonnet", 1)
 
