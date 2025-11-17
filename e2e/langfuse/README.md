@@ -167,26 +167,31 @@ Langfuse Trace (filterable by user)
 
 ### Trace-Level User Attributes
 
-The implementation uses **Langfuse 3.0 SDK patterns** for proper user tracking:
+The implementation uses **Langfuse 3.0 SDK patterns** with `propagate_attributes()` for proper user tracking:
 
 ```python
-# observability.py:147
-langfuse = get_client()
-langfuse.update_current_trace(
-    user_id=self.user_id if self.user_id else None,  # Trace-level (filterable)
-    session_id=self.session_id,                      # Trace-level (filterable)
+# observability.py:140-150
+# CRITICAL: Use propagate_attributes to ensure ALL child spans inherit user context
+self._propagate_ctx = propagate_attributes(
+    user_id=self.user_id if self.user_id else None,
+    session_id=self.session_id,
     tags=["ambient-code", f"agentic-session:{self.session_id}"],
     metadata={
-        "namespace": namespace,                       # Contextual only
+        "namespace": namespace,
         "user_name": self.user_name if self.user_name else None,
     },
 )
+# Enter the context to start propagation
+self._propagate_ctx.__enter__()
+
+# All child spans created after this will automatically inherit these attributes
 ```
 
 **Key Features:**
-- ✅ **Trace-level attributes**: `user_id` and `session_id` are set at trace level for filtering
-- ✅ **Automatic inheritance**: All child spans/generations inherit user context
-- ✅ **Tags for filtering**: `ambient-code` and `agentic-session:{session_id}` tags
+- ✅ **Attribute propagation**: Uses `propagate_attributes()` context manager to ensure inheritance
+- ✅ **Automatic inheritance**: ALL child spans/generations inherit user_id, session_id, tags
+- ✅ **Observation-level filtering**: Individual spans are filterable by user_id and session_id
+- ✅ **Tags for filtering**: `ambient-code` and `agentic-session:{session_id}` tags on all spans
 - ✅ **Graceful degradation**: Passes `None` when user_id is unavailable (no errors)
 
 ### When User ID is Available
