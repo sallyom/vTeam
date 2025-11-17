@@ -14,7 +14,7 @@ from security_utils import sanitize_exception_message, with_sync_timeout
 
 # Langfuse for LLM observability (optional)
 try:
-    from langfuse import Langfuse
+    from langfuse import Langfuse, get_client
 
     LANGFUSE_AVAILABLE = True
 except ImportError:
@@ -130,19 +130,26 @@ class ObservabilityManager:
             return False
 
         try:
+            # Initialize Langfuse client
             self.langfuse_client = Langfuse(
                 public_key=public_key, secret_key=secret_key, host=host
             )
 
-            # Create a ROOT span for this session using start_span()
-            # (Same API as tool spans - child spans/generations attach automatically)
+            # Create a ROOT span for this session
             self.langfuse_span = self.langfuse_client.start_span(
                 name="claude_agent_session",
                 input={"prompt": prompt},
+            )
+
+            # Use get_client() to access singleton and set trace-level attributes
+            # This is the Langfuse 3.0 pattern for user tracking and filtering
+            langfuse = get_client()
+            langfuse.update_current_trace(
+                user_id=self.user_id if self.user_id else None,
+                session_id=self.session_id,
+                tags=["ambient-code", f"agentic-session:{self.session_id}"],
                 metadata={
-                    "session_id": self.session_id,
                     "namespace": namespace,
-                    "user_id": self.user_id if self.user_id else None,
                     "user_name": self.user_name if self.user_name else None,
                 },
             )

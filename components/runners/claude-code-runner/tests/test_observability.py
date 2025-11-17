@@ -123,13 +123,18 @@ class TestLangfuseInitialization:
 
     @pytest.mark.asyncio
     @patch("observability.LANGFUSE_AVAILABLE", True)
+    @patch("observability.get_client")
     @patch("observability.Langfuse")
-    async def test_init_successful(self, mock_langfuse_class, manager, caplog):
+    async def test_init_successful(self, mock_langfuse_class, mock_get_client, manager, caplog):
         """Test successful Langfuse initialization."""
         mock_client = Mock()
         mock_span = Mock()
         mock_client.start_span.return_value = mock_span
         mock_langfuse_class.return_value = mock_client
+
+        # Mock get_client() to return a mock with update_current_trace
+        mock_langfuse_singleton = Mock()
+        mock_get_client.return_value = mock_langfuse_singleton
 
         env_vars = {
             "LANGFUSE_ENABLED": "true",
@@ -151,17 +156,27 @@ class TestLangfuseInitialization:
             host="http://localhost:3000",
         )
         mock_client.start_span.assert_called_once()
+
+        # Verify get_client() was called and update_current_trace was called with correct args
+        mock_get_client.assert_called_once()
+        mock_langfuse_singleton.update_current_trace.assert_called_once()
+
         assert "Langfuse tracing enabled" in caplog.text
 
     @pytest.mark.asyncio
     @patch("observability.LANGFUSE_AVAILABLE", True)
+    @patch("observability.get_client")
     @patch("observability.Langfuse")
-    async def test_init_with_user_tracking(self, mock_langfuse_class, caplog):
+    async def test_init_with_user_tracking(self, mock_langfuse_class, mock_get_client, caplog):
         """Test Langfuse initialization with user tracking."""
         mock_client = Mock()
         mock_span = Mock()
         mock_client.start_span.return_value = mock_span
         mock_langfuse_class.return_value = mock_client
+
+        # Mock get_client() to return a mock with update_current_trace
+        mock_langfuse_singleton = Mock()
+        mock_get_client.return_value = mock_langfuse_singleton
 
         manager = ObservabilityManager(
             session_id="session-1", user_id="user-123", user_name="Jane Doe"
@@ -180,6 +195,13 @@ class TestLangfuseInitialization:
 
         assert result is True
         assert "Tracking session for user Jane Doe (user-123)" in caplog.text
+
+        # Verify update_current_trace was called with user_id
+        call_kwargs = mock_langfuse_singleton.update_current_trace.call_args[1]
+        assert call_kwargs["user_id"] == "user-123"
+        assert call_kwargs["session_id"] == "session-1"
+        assert "ambient-code" in call_kwargs["tags"]
+        assert "agentic-session:session-1" in call_kwargs["tags"]
 
     @pytest.mark.asyncio
     @patch("observability.LANGFUSE_AVAILABLE", True)
