@@ -125,7 +125,9 @@ class TestLangfuseInitialization:
     @patch("observability.LANGFUSE_AVAILABLE", True)
     @patch("observability.get_client")
     @patch("observability.Langfuse")
-    async def test_init_successful(self, mock_langfuse_class, mock_get_client, manager, caplog):
+    async def test_init_successful(
+        self, mock_langfuse_class, mock_get_client, manager, caplog
+    ):
         """Test successful Langfuse initialization."""
         mock_client = Mock()
         mock_span = Mock()
@@ -167,7 +169,9 @@ class TestLangfuseInitialization:
     @patch("observability.LANGFUSE_AVAILABLE", True)
     @patch("observability.get_client")
     @patch("observability.Langfuse")
-    async def test_init_with_user_tracking(self, mock_langfuse_class, mock_get_client, caplog):
+    async def test_init_with_user_tracking(
+        self, mock_langfuse_class, mock_get_client, caplog
+    ):
         """Test Langfuse initialization with user tracking."""
         mock_client = Mock()
         mock_span = Mock()
