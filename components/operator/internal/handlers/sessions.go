@@ -503,8 +503,21 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									base = append(base, corev1.EnvVar{Name: "USER_NAME", Value: userName})
 								}
 
-								// Note: Platform-wide Langfuse observability is configured via ambient-langfuse-keys secret
-								// injected below in EnvFrom. LANGFUSE_* env vars should NOT be set here.
+								// Platform-wide Langfuse observability configuration (injected from operator env)
+								// Uses explicit env vars instead of EnvFrom to prevent automatic exposure of future secret keys
+								// All LANGFUSE_* vars come from ambient-admin-observability Secret (platform-admin managed)
+								if os.Getenv("LANGFUSE_ENABLED") != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_ENABLED", Value: os.Getenv("LANGFUSE_ENABLED")})
+								}
+								if os.Getenv("LANGFUSE_HOST") != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_HOST", Value: os.Getenv("LANGFUSE_HOST")})
+								}
+								if os.Getenv("LANGFUSE_PUBLIC_KEY") != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_PUBLIC_KEY", Value: os.Getenv("LANGFUSE_PUBLIC_KEY")})
+								}
+								if os.Getenv("LANGFUSE_SECRET_KEY") != "" {
+									base = append(base, corev1.EnvVar{Name: "LANGFUSE_SECRET_KEY", Value: os.Getenv("LANGFUSE_SECRET_KEY")})
+								}
 
 								// Add Vertex AI configuration only if enabled
 								if vertexEnabled {
@@ -640,15 +653,9 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									log.Printf("Skipping runner secrets '%s' for session %s (Vertex enabled)", runnerSecretsName, name)
 								}
 
-								// Inject platform-wide Langfuse observability keys (optional, marked as optional in secret)
-								// This secret is created at deployment time in the operator's namespace
-								sources = append(sources, corev1.EnvFromSource{
-									SecretRef: &corev1.SecretEnvSource{
-										LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-langfuse-keys"},
-										Optional:             boolPtr(true), // Optional: only needed if Langfuse enabled
-									},
-								})
-								log.Printf("Injecting Langfuse observability keys from 'ambient-langfuse-keys' for session %s (optional)", name)
+								// Note: Platform-wide Langfuse observability keys are injected via explicit Env entries above
+								// (LANGFUSE_* env vars from ambient-admin-observability Secret, platform-admin managed)
+								// EnvFrom is intentionally NOT used here to prevent automatic exposure of future secret keys
 
 								return sources
 							}(),

@@ -103,7 +103,14 @@ func forwardedIdentityMiddleware() gin.HandlerFunc {
 							return
 						}
 
-						// Perform TokenReview to validate and extract user identity
+						// Perform TokenReview on every request (no caching)
+						// Rationale:
+						// - Security: Validates token hasn't been revoked or expired
+						// - Simplicity: Avoids complex cache invalidation logic
+						// - Performance: TokenReview is lightweight (~5-10ms) and runs only in fallback path
+						//   (production uses oauth-proxy with X-Forwarded-* headers, bypassing this code)
+						// - Short-lived tokens: ServiceAccount tokens can be rotated frequently
+						// If TokenReview becomes a bottleneck, consider adding TTL-based cache with 1-minute expiry
 						tr := &authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: token}}
 						rv, err := K8sClient.AuthenticationV1().TokenReviews().Create(c.Request.Context(), tr, v1.CreateOptions{})
 						if err != nil {

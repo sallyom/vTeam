@@ -83,7 +83,7 @@ class TestLangfuseInitialization:
         assert result is False
         assert manager.langfuse_client is None
         assert "LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is missing" in caplog.text
-        assert "ambient-langfuse-keys" in caplog.text
+        assert "ambient-admin-observability" in caplog.text
 
     @pytest.mark.asyncio
     @patch("observability.LANGFUSE_AVAILABLE", True)

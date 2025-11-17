@@ -8,6 +8,7 @@ including security features (secret sanitization, timeouts).
 import os
 import logging
 from typing import Any
+from urllib.parse import urlparse
 
 from security_utils import sanitize_exception_message, with_sync_timeout
 
@@ -87,8 +88,9 @@ class ObservabilityManager:
             logging.warning(
                 "LANGFUSE_ENABLED is true but LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is missing. "
                 "Langfuse observability will be disabled for this session. "
-                "To enable Langfuse, create the 'ambient-langfuse-keys' secret in the operator's namespace "
-                "with keys: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, LANGFUSE_ENABLED. "
+                "To enable Langfuse, platform admin must create the 'ambient-admin-observability' secret "
+                "in the operator's namespace with all LANGFUSE_* keys: "
+                "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, LANGFUSE_ENABLED. "
                 "See e2e/langfuse/README.md for setup instructions."
             )
             return False
@@ -96,7 +98,34 @@ class ObservabilityManager:
         if not host:
             logging.warning(
                 "LANGFUSE_HOST is missing. Langfuse observability will be disabled for this session. "
-                "Add LANGFUSE_HOST to the 'ambient-langfuse-keys' secret (e.g., http://langfuse-web.langfuse.svc.cluster.local:3000)."
+                "Add LANGFUSE_HOST to the 'ambient-admin-observability' secret "
+                "(e.g., LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000)."
+            )
+            return False
+
+        # Validate LANGFUSE_HOST format to prevent malformed URLs
+        try:
+            parsed = urlparse(host)
+            # URL must have a scheme (http/https) and a valid network location (hostname)
+            if not parsed.scheme or not parsed.netloc:
+                logging.warning(
+                    f"LANGFUSE_HOST has invalid format (missing scheme or hostname): {host}. "
+                    "Expected format: http://hostname:port or https://hostname:port. "
+                    "Langfuse observability will be disabled for this session."
+                )
+                return False
+            # Validate scheme is http or https
+            if parsed.scheme not in ("http", "https"):
+                logging.warning(
+                    f"LANGFUSE_HOST has unsupported scheme '{parsed.scheme}'. "
+                    "Only http and https are supported. "
+                    "Langfuse observability will be disabled for this session."
+                )
+                return False
+        except Exception as e:
+            logging.warning(
+                f"Failed to parse LANGFUSE_HOST URL '{host}': {e}. "
+                "Langfuse observability will be disabled for this session."
             )
             return False
 
@@ -330,6 +359,13 @@ class ObservabilityManager:
                 # CRITICAL: Always flush, even if no result payload
                 # Otherwise traces never appear in Langfuse UI!
                 # Use 30s timeout to handle network latency and batch uploads
+                # Rationale:
+                # - Langfuse SDK batches events before HTTP upload
+                # - Typical sessions: 10-50 events, flush takes 500ms-2s
+                # - Large sessions: 500+ events can take 5-10s to upload
+                # - Network latency: cluster-internal ~50ms, external 200-500ms
+                # - 30s provides 3x-6x safety margin for worst-case scenarios
+                # - If flush regularly times out, increase timeout or check network/Langfuse health
                 success, _ = await with_sync_timeout(
                     self.langfuse_client.flush, 30.0, "Langfuse flush"
                 )

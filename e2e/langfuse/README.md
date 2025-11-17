@@ -23,14 +23,16 @@
 
 ## Quick Start
 
-### Platform-Wide Configuration (Recommended)
+### Platform-Wide Configuration (Platform Admin Only)
 
-**Langfuse keys are configured once at deployment time for the entire platform.**
+**IMPORTANT**: Langfuse observability is configured by **platform administrators**, not individual workspace users. All LANGFUSE_* configuration is stored in a single secret for consistency and security.
 
-1. **Create the `ambient-langfuse-keys` secret** in the `ambient-code` namespace (or your operator namespace):
+#### Step 1: Create the Secret
+
+Create the `ambient-admin-observability` secret with all Langfuse configuration:
 
 ```bash
-kubectl create secret generic ambient-langfuse-keys \
+kubectl create secret generic ambient-admin-observability \
   --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-... \
   --from-literal=LANGFUSE_SECRET_KEY=sk-lf-... \
   --from-literal=LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000 \
@@ -38,28 +40,25 @@ kubectl create secret generic ambient-langfuse-keys \
   -n ambient-code
 ```
 
-2. **Restart the operator** to pick up the new secret:
+#### Step 2: Restart the Operator
 
 ```bash
 kubectl rollout restart deployment ambient-operator -n ambient-code
 ```
 
-3. **All new sessions** will automatically have Langfuse observability enabled!
+#### Step 3: Verify
 
-### Alternative: Per-Project Configuration
+All new sessions will automatically have Langfuse observability enabled. Check runner pod logs:
 
-If you need per-project Langfuse keys for cost isolation:
+```bash
+kubectl logs -n <workspace-namespace> <runner-pod> -c ambient-code-runner | grep Langfuse
+```
 
-1. **Access WorkspaceSettings** for your project:
-   - Navigate to your workspace
-   - Go to Settings tab
-   - Expand "Observability" section
+### Per-Workspace Configuration (Not Supported)
 
-2. **Configure Langfuse keys** in the `ambient-non-vertex-integrations` secret:
-   - `LANGFUSE_PUBLIC_KEY`: Add your `pk-lf-...` key
-   - `LANGFUSE_SECRET_KEY`: Add your `sk-lf-...` key
+Per-workspace Langfuse configuration is **not supported**. Observability must be consistent across the platform for proper cost tracking and compliance. All LANGFUSE_* configuration is managed by platform administrators via the `ambient-admin-observability` secret.
 
-Note: Per-project keys override platform-wide keys for that project only.
+If you need workspace-specific tracking, use Langfuse's built-in tagging and filtering features instead.
 
 ## How Langfuse Observability Works
 
@@ -96,7 +95,7 @@ Note: Per-project keys override platform-wide keys for that project only.
 ### Key Points
 
 1. **Simple integration**: Runner uses Langfuse Python SDK (v3+) for direct HTTP API calls
-2. **API Key auth**: Runner automatically adds API keys from `ambient-langfuse-keys` secret
+2. **API Key auth**: Runner automatically receives all LANGFUSE_* config from `ambient-admin-observability` secret
 3. **Automatic nesting**: Child spans (tools, generations) attach to parent session span via SDK context
 
 ## Trace Structure
@@ -151,42 +150,36 @@ Note: Per-project keys override platform-wide keys for that project only.
 
 ## Configuration Details
 
-### Platform-Wide Secret (`ambient-langfuse-keys`)
+### Platform Admin Secret (`ambient-admin-observability`)
 
-Created at deployment time in the operator's namespace:
+All Langfuse configuration is stored in a single secret managed by platform administrators:
 
 ```yaml
 apiVersion: v1
 kind: Secret
 metadata:
-  name: ambient-langfuse-keys
-  namespace: ambient-code
+  name: ambient-admin-observability
+  namespace: ambient-code  # operator's namespace
 type: Opaque
 stringData:
+  # Credentials (sensitive)
   LANGFUSE_PUBLIC_KEY: "pk-lf-..."
   LANGFUSE_SECRET_KEY: "sk-lf-..."
+
+  # Configuration
   LANGFUSE_HOST: "http://langfuse-web.langfuse.svc.cluster.local:3000"
   LANGFUSE_ENABLED: "true"
 ```
 
-### Per-Project Secret (Optional, `ambient-non-vertex-integrations`)
-
-For project-specific Langfuse keys:
-
-```yaml
-LANGFUSE_PUBLIC_KEY: "pk-lf-..."
-LANGFUSE_SECRET_KEY: "sk-lf-..."
-```
-
-Note: `LANGFUSE_HOST` and `LANGFUSE_ENABLED` are configured platform-wide and cannot be overridden per-project.
+**Note**: This secret is platform-wide and cannot be overridden per-workspace. For workspace-specific tracking, use Langfuse's tags and filters.
 
 ## Updating Configuration
 
-### Platform-Wide Update
+### Platform-Wide Update (Platform Admin Only)
 
 ```bash
 # Update the secret
-kubectl create secret generic ambient-langfuse-keys \
+kubectl create secret generic ambient-admin-observability \
   --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-new-key \
   --from-literal=LANGFUSE_SECRET_KEY=sk-lf-new-key \
   --from-literal=LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000 \

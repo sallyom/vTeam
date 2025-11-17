@@ -22,6 +22,22 @@ def sanitize_exception_message(
     Replaces any occurrence of secret values with redacted placeholders.
     NEVER logs the exception object itself - only the sanitized message string.
 
+    Approach: Simple string replacement
+    Rationale:
+    - Straightforward and easy to audit (no complex regex patterns)
+    - Works for typical cases: API keys, tokens, hosts in error messages
+    - Performance: O(n*m) where n=message length, m=number of secrets (acceptable for small m)
+
+    Limitations:
+    - May not catch secrets in encoded forms (base64, URL-encoded)
+    - Substring matches could over-redact (e.g., "pk" in "package")
+    - Relies on caller providing complete secrets dict
+
+    For production use:
+    - Always include all sensitive values in secrets_to_redact
+    - Test with actual error scenarios to verify effectiveness
+    - Consider regex-based redaction if encoded forms are concern
+
     Args:
         exception: The exception object
         secrets_to_redact: Dict mapping secret names to values (e.g., {"public_key": "pk-123"})
@@ -31,7 +47,7 @@ def sanitize_exception_message(
     """
     error_msg = str(exception)
 
-    # Redact each secret
+    # Redact each secret using simple string replacement
     for secret_name, secret_value in secrets_to_redact.items():
         if secret_value and secret_value.strip():
             placeholder = f"[REDACTED_{secret_name.upper()}]"
