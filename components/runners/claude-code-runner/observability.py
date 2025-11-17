@@ -88,7 +88,7 @@ class ObservabilityManager:
             logging.warning(
                 "LANGFUSE_ENABLED is true but LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is missing. "
                 "Langfuse observability will be disabled for this session. "
-                "To enable Langfuse, platform admin must create the 'ambient-admin-observability' secret "
+                "To enable Langfuse, platform admin must create the 'ambient-admin-langfuse-secret' secret "
                 "in the operator's namespace with all LANGFUSE_* keys: "
                 "LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, LANGFUSE_ENABLED. "
                 "See e2e/langfuse/README.md for setup instructions."
@@ -98,7 +98,7 @@ class ObservabilityManager:
         if not host:
             logging.warning(
                 "LANGFUSE_HOST is missing. Langfuse observability will be disabled for this session. "
-                "Add LANGFUSE_HOST to the 'ambient-admin-observability' secret "
+                "Add LANGFUSE_HOST to the 'ambient-admin-langfuse-secret' secret "
                 "(e.g., LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000)."
             )
             return False

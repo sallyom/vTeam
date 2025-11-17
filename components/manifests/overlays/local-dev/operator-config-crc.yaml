@@ -12,11 +12,11 @@ data:
   ANTHROPIC_VERTEX_PROJECT_ID: ""
   GOOGLE_APPLICATION_CREDENTIALS: ""
 
-  # Note: Langfuse observability configuration is stored in the 'ambient-admin-observability'
+  # Note: Langfuse observability configuration is stored in the 'ambient-admin-langfuse-secret'
   # Secret (platform-admin managed). All LANGFUSE_* config is in one place.
   # For local dev, Langfuse is typically disabled. To enable, create the secret with:
   #
-  # kubectl create secret generic ambient-admin-observability \
+  # kubectl create secret generic ambient-admin-langfuse-secret \
   #   --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-... \
   #   --from-literal=LANGFUSE_SECRET_KEY=sk-lf-... \
   #   --from-literal=LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000 \

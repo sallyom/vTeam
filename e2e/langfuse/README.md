@@ -29,10 +29,10 @@
 
 #### Step 1: Create the Secret
 
-Create the `ambient-admin-observability` secret with all Langfuse configuration:
+Create the `ambient-admin-langfuse-secret` secret with all Langfuse configuration:
 
 ```bash
-kubectl create secret generic ambient-admin-observability \
+kubectl create secret generic ambient-admin-langfuse-secret \
   --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-... \
   --from-literal=LANGFUSE_SECRET_KEY=sk-lf-... \
   --from-literal=LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000 \
@@ -56,7 +56,7 @@ kubectl logs -n <workspace-namespace> <runner-pod> -c ambient-code-runner | grep
 
 ### Per-Workspace Configuration (Not Supported)
 
-Per-workspace Langfuse configuration is **not supported**. Observability must be consistent across the platform for proper cost tracking and compliance. All LANGFUSE_* configuration is managed by platform administrators via the `ambient-admin-observability` secret.
+Per-workspace Langfuse configuration is **not supported**. Observability must be consistent across the platform for proper cost tracking and compliance. All LANGFUSE_* configuration is managed by platform administrators via the `ambient-admin-langfuse-secret` secret.
 
 If you need workspace-specific tracking, use Langfuse's built-in tagging and filtering features instead.
 
@@ -95,7 +95,7 @@ If you need workspace-specific tracking, use Langfuse's built-in tagging and fil
 ### Key Points
 
 1. **Simple integration**: Runner uses Langfuse Python SDK (v3+) for direct HTTP API calls
-2. **API Key auth**: Runner automatically receives all LANGFUSE_* config from `ambient-admin-observability` secret
+2. **API Key auth**: Runner automatically receives all LANGFUSE_* config from `ambient-admin-langfuse-secret` secret
 3. **Automatic nesting**: Child spans (tools, generations) attach to parent session span via SDK context
 
 ## Trace Structure
@@ -150,7 +150,7 @@ If you need workspace-specific tracking, use Langfuse's built-in tagging and fil
 
 ## Configuration Details
 
-### Platform Admin Secret (`ambient-admin-observability`)
+### Platform Admin Secret (`ambient-admin-langfuse-secret`)
 
 All Langfuse configuration is stored in a single secret managed by platform administrators:
 
@@ -158,7 +158,7 @@ All Langfuse configuration is stored in a single secret managed by platform admi
 apiVersion: v1
 kind: Secret
 metadata:
-  name: ambient-admin-observability
+  name: ambient-admin-langfuse-secret
   namespace: ambient-code  # operator's namespace
 type: Opaque
 stringData:
@@ -179,7 +179,7 @@ stringData:
 
 ```bash
 # Update the secret
-kubectl create secret generic ambient-admin-observability \
+kubectl create secret generic ambient-admin-langfuse-secret \
   --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-new-key \
   --from-literal=LANGFUSE_SECRET_KEY=sk-lf-new-key \
   --from-literal=LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000 \

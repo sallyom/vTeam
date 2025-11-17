@@ -505,7 +505,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 
 								// Platform-wide Langfuse observability configuration (injected from operator env)
 								// Uses explicit env vars instead of EnvFrom to prevent automatic exposure of future secret keys
-								// All LANGFUSE_* vars come from ambient-admin-observability Secret (platform-admin managed)
+								// All LANGFUSE_* vars come from ambient-admin-langfuse-secret Secret (platform-admin managed)
 								if os.Getenv("LANGFUSE_ENABLED") != "" {
 									base = append(base, corev1.EnvVar{Name: "LANGFUSE_ENABLED", Value: os.Getenv("LANGFUSE_ENABLED")})
 								}
@@ -654,7 +654,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 								}
 
 								// Note: Platform-wide Langfuse observability keys are injected via explicit Env entries above
-								// (LANGFUSE_* env vars from ambient-admin-observability Secret, platform-admin managed)
+								// (LANGFUSE_* env vars from ambient-admin-langfuse-secret Secret, platform-admin managed)
 								// EnvFrom is intentionally NOT used here to prevent automatic exposure of future secret keys
 
 								return sources

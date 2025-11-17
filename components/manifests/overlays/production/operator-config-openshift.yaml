@@ -13,10 +13,10 @@ data:
   GOOGLE_APPLICATION_CREDENTIALS: "/app/vertex/ambient-code-key.json"
 
   # Note: Langfuse observability configuration (LANGFUSE_ENABLED, LANGFUSE_HOST,
-  # LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY) is stored in the 'ambient-admin-observability'
+  # LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY) is stored in the 'ambient-admin-langfuse-secret'
   # Secret (platform-admin managed). All LANGFUSE_* config is in one place.
   #
-  # Create the secret with: kubectl create secret generic ambient-admin-observability \
+  # Create the secret with: kubectl create secret generic ambient-admin-langfuse-secret \
   #   --from-literal=LANGFUSE_PUBLIC_KEY=pk-lf-... \
   #   --from-literal=LANGFUSE_SECRET_KEY=sk-lf-... \
   #   --from-literal=LANGFUSE_HOST=http://langfuse-web.langfuse.svc.cluster.local:3000 \
