@@ -127,11 +127,12 @@ class ObservabilityManager:
             return True
 
         except Exception as e:
-            # Sanitize error message to prevent API key leakage
+            # Sanitize error message to prevent API key and host leakage
             # NEVER log exception object - only sanitized message string
             secrets = {
                 "public_key": public_key,
                 "secret_key": secret_key,
+                "host": host,
             }
             error_msg = sanitize_exception_message(e, secrets)
 

@@ -33,11 +33,17 @@ var (
 
 // Kubernetes DNS-1123 label validation (namespace, service account names)
 // Must be lowercase alphanumeric or '-', max 63 chars, start/end with alphanumeric
+// Regex allows single char (e.g., "a") or multi-char with optional middle section
 var kubernetesNameRegex = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // isValidKubernetesName validates that a string is a valid Kubernetes DNS-1123 label
-// Returns false if the name contains invalid characters or exceeds 63 characters
+// Returns false if:
+//   - name is empty (prevents empty string injection)
+//   - name exceeds 63 characters
+//   - name contains invalid characters (not lowercase alphanumeric or '-')
+//   - name starts or ends with '-' (enforced by regex)
 func isValidKubernetesName(name string) bool {
+	// Explicit length check: reject empty strings and names > 63 chars
 	if len(name) == 0 || len(name) > 63 {
 		return false
 	}
