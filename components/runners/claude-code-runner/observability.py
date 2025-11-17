@@ -246,7 +246,14 @@ class ObservabilityManager:
         if tool_use_id in self._langfuse_tool_spans:
             try:
                 tool_span = self._langfuse_tool_spans[tool_use_id]
-                result_text = str(content)[:500] if content else "No output"
+                # Truncate long results with indicator
+                if content:
+                    result_text = str(content)
+                    if len(result_text) > 500:
+                        result_text = result_text[:500] + "...[truncated]"
+                else:
+                    result_text = "No output"
+
                 tool_span.end(
                     output={"result": result_text},
                     level="ERROR" if is_error else "DEFAULT",
@@ -321,13 +328,18 @@ class ObservabilityManager:
 
                 # CRITICAL: Always flush, even if no result payload
                 # Otherwise traces never appear in Langfuse UI!
+                # Use 30s timeout to handle network latency and batch uploads
                 success, _ = await with_sync_timeout(
-                    self.langfuse_client.flush, 5.0, "Langfuse flush"
+                    self.langfuse_client.flush, 30.0, "Langfuse flush"
                 )
                 if success:
                     logging.info("Langfuse flush completed successfully")
                 else:
-                    logging.warning("Langfuse flush timed out, data may not be sent")
+                    # Error level for flush timeouts - this means observability data was lost
+                    logging.error(
+                        "Langfuse flush timed out after 30s - observability data may not be sent. "
+                        "Check network connectivity to LANGFUSE_HOST."
+                    )
             except Exception as e:
                 logging.warning(f"Failed to complete Langfuse session span: {e}")
 
@@ -342,11 +354,14 @@ class ObservabilityManager:
             try:
                 # End span with error status
                 self.langfuse_span.end(level="ERROR", status_message=str(error))
-                # Flush with 5s timeout to prevent hanging on error path
+                # Flush with 30s timeout (same as success path)
                 success, _ = await with_sync_timeout(
-                    self.langfuse_client.flush, 5.0, "Langfuse error cleanup flush"
+                    self.langfuse_client.flush, 30.0, "Langfuse error cleanup flush"
                 )
                 if not success:
-                    logging.debug("Langfuse error cleanup flush timed out")
+                    logging.error(
+                        "Langfuse error cleanup flush timed out after 30s - "
+                        "error trace may not be sent."
+                    )
             except Exception as cleanup_err:
                 logging.debug(f"Failed to cleanup Langfuse span: {cleanup_err}")

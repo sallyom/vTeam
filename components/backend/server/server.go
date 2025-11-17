@@ -96,6 +96,13 @@ func forwardedIdentityMiddleware() gin.HandlerFunc {
 				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 					token := strings.TrimSpace(parts[1])
 					if token != "" {
+						// Check if K8sClient is initialized
+						if K8sClient == nil {
+							log.Printf("Warning: K8sClient not initialized, cannot perform TokenReview")
+							c.Next()
+							return
+						}
+
 						// Perform TokenReview to validate and extract user identity
 						tr := &authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: token}}
 						rv, err := K8sClient.AuthenticationV1().TokenReviews().Create(c.Request.Context(), tr, v1.CreateOptions{})
