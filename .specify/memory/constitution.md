@@ -413,4 +413,5 @@ Runtime development guidance is maintained in:
 - Component-specific README files
 - MkDocs documentation in `/docs`
 
-**Version**: 1.0.0 | **Status**: Ratified | **Ratified**: 2025-11-13 | **Last Amended**: 2025-11-13
+**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
+<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
