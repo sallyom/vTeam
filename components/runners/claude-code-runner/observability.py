@@ -13,9 +13,6 @@ from urllib.parse import urlparse
 from security_utils import sanitize_exception_message, with_sync_timeout
 
 # Langfuse will be imported lazily only when enabled
-# This prevents any potential conflicts with other SDKs (like claude_agent_sdk)
-# when Langfuse is not needed
-
 
 class ObservabilityManager:
     """Manages Langfuse observability for Claude sessions.
@@ -38,7 +35,7 @@ class ObservabilityManager:
 
         # Langfuse state
         self.langfuse_client = None
-        self.langfuse_span = None
+        self.langfuse_trace = None  # Root trace (not span)
         self._langfuse_tool_spans: dict[str, Any] = {}
 
     async def initialize(self, prompt: str, namespace: str) -> bool:
@@ -72,7 +69,6 @@ class ObservabilityManager:
             return False
 
         # Import langfuse only when it's actually needed
-        # This prevents potential conflicts with other SDKs when disabled
         try:
             from langfuse import Langfuse
         except ImportError:
@@ -134,23 +130,35 @@ class ObservabilityManager:
                 public_key=public_key, secret_key=secret_key, host=host
             )
 
-            # Create a ROOT span for this session using start_span()
-            # (Same API as tool spans - child spans/generations attach automatically)
-            self.langfuse_span = self.langfuse_client.start_span(
+            # Create a ROOT SPAN for this session using start_span() (SDK v3 API)
+            # This automatically creates a trace and serves as the root observation
+            # All child observations will be nested under this root span
+            self.langfuse_trace = self.langfuse_client.start_span(
                 name="claude_agent_session",
                 input={"prompt": prompt},
                 metadata={
-                    "session_id": self.session_id,
                     "namespace": namespace,
-                    "user_id": self.user_id if self.user_id else None,
-                    "user_name": self.user_name if self.user_name else None,
                 },
             )
 
+            # SDK v3: Set trace-level attributes using update_trace()
+            # These attributes (user_id, session_id, tags) must be set at trace level,
+            # not in span metadata, for them to appear in Langfuse UI
+            trace_attrs = {
+                "session_id": self.session_id,
+                "tags": ["claude-code", f"namespace:{namespace}"],
+            }
             if self.user_id:
+                trace_attrs["user_id"] = self.user_id
                 logging.info(
                     f"Langfuse: Tracking session for user {self.user_name} ({self.user_id})"
                 )
+
+            # Set trace-level attributes (for filtering/aggregation in Langfuse UI)
+            self.langfuse_trace.update_trace(**trace_attrs)
+
+            # Also set as span attributes for consistency
+            self.langfuse_trace.update(**trace_attrs)
 
             logging.info("Langfuse tracing enabled for session")
             return True
@@ -175,7 +183,7 @@ class ObservabilityManager:
 
             # Continue without Langfuse - don't fail the session
             self.langfuse_client = None
-            self.langfuse_span = None
+            self.langfuse_trace = None
             return False
 
     def track_generation(self, message: Any, model: str, turn_count: int) -> None:
@@ -186,7 +194,7 @@ class ObservabilityManager:
             model: Model name (e.g., "claude-3-5-sonnet-20241022")
             turn_count: Current turn number
         """
-        if not self.langfuse_client or not self.langfuse_span:
+        if not self.langfuse_client or not self.langfuse_trace:
             return
 
         try:
@@ -202,24 +210,41 @@ class ObservabilityManager:
             if not text_content:
                 return
 
+            output_text = "\n".join(text_content)
+
             # Check if message has usage data (it might not on every AssistantMessage)
             usage_data = getattr(message, "usage", None)
 
-            generation_kwargs = {
-                "name": "claude_response",
-                "input": {"turn": turn_count},
-                "output": {"text": "\n".join(text_content)[:1000]},  # Limit size
-                "model": model,
-                "metadata": {"turn": turn_count},
+            # Create generation as child of root span (SDK v3 API)
+            # Start with basic info - we'll update with usage/output next
+            generation = self.langfuse_trace.start_generation(
+                name=f"claude_response_turn_{turn_count}",
+                input=[{"role": "user", "content": f"Turn {turn_count}"}],
+                model=model,
+                metadata={"turn": turn_count},
+            )
+
+            # update() with output and usage_details before end()
+            update_kwargs = {
+                "output": output_text,
             }
+
+            # Propagate user_id and session_id to each generation for filtering/aggregation
+            if self.user_id:
+                update_kwargs["user_id"] = self.user_id
+            if self.session_id:
+                update_kwargs["session_id"] = self.session_id
 
             # Add usage_details if available (for Langfuse cost tracking)
             if usage_data and hasattr(usage_data, "__dict__"):
                 usage_dict = {}
                 if hasattr(usage_data, "input_tokens"):
-                    usage_dict["input"] = usage_data.input_tokens
+                    usage_dict["input_tokens"] = usage_data.input_tokens
                 if hasattr(usage_data, "output_tokens"):
-                    usage_dict["output"] = usage_data.output_tokens
+                    usage_dict["output_tokens"] = usage_data.output_tokens
+                # Calculate total_tokens if both input and output are present
+                if "input_tokens" in usage_dict and "output_tokens" in usage_dict:
+                    usage_dict["total_tokens"] = usage_dict["input_tokens"] + usage_dict["output_tokens"]
                 if hasattr(usage_data, "cache_read_input_tokens"):
                     usage_dict["cache_read_input_tokens"] = (
                         usage_data.cache_read_input_tokens
@@ -230,15 +255,18 @@ class ObservabilityManager:
                     )
 
                 if usage_dict:
-                    generation_kwargs["usage_details"] = usage_dict
+                    update_kwargs["usage_details"] = usage_dict
                     logging.info(
                         f"Langfuse: Tracking generation with usage: {usage_dict}"
                     )
 
-            # Create generation as child of root span (not root-level)
-            # This ensures usage/cost data rolls up to the trace
-            generation = self.langfuse_span.start_generation(**generation_kwargs)
+            # Update generation with output and usage data
+            generation.update(**update_kwargs)
+
+            # Then end the generation
             generation.end()
+
+            logging.debug(f"Langfuse: Created generation for turn {turn_count} with {len(output_text)} chars")
         except Exception as e:
             logging.debug(f"Failed to create Langfuse generation: {e}")
 
@@ -252,9 +280,9 @@ class ObservabilityManager:
         """
         # Add Langfuse span for tool decision as child of root span
         # This ensures tool usage is properly nested in the trace hierarchy
-        if self.langfuse_client and self.langfuse_span:
+        if self.langfuse_client and self.langfuse_trace:
             try:
-                tool_span = self.langfuse_span.start_span(
+                tool_span = self.langfuse_trace.start_span(
                     name=f"tool_{tool_name}",
                     input=tool_input,
                     metadata={
@@ -262,6 +290,16 @@ class ObservabilityManager:
                         "tool_name": tool_name,
                     },
                 )
+
+                # Propagate user_id and session_id to tool span for filtering/aggregation
+                span_attrs = {}
+                if self.user_id:
+                    span_attrs["user_id"] = self.user_id
+                if self.session_id:
+                    span_attrs["session_id"] = self.session_id
+                if span_attrs:
+                    tool_span.update(**span_attrs)
+
                 # Store tool span to update with result later
                 self._langfuse_tool_spans[tool_id] = tool_span
             except Exception as e:
@@ -302,14 +340,14 @@ class ObservabilityManager:
         Args:
             result_payload: ResultMessage payload with usage/cost data
         """
-        if not self.langfuse_client or not self.langfuse_span:
+        if not self.langfuse_client or not self.langfuse_trace:
             return
 
         try:
             usage = result_payload.get("usage")
             total_cost = result_payload.get("total_cost_usd")
 
-            # Build usage_details dict for Langfuse (proper SDK format)
+            # Build usage_details dict for Langfuse (proper SDK v3 format)
             usage_details = {}
             if usage and hasattr(usage, "__dict__"):
                 input_tokens = getattr(usage, "input_tokens", None)
@@ -317,11 +355,14 @@ class ObservabilityManager:
                 total_tokens = getattr(usage, "total_tokens", None)
 
                 if input_tokens is not None:
-                    usage_details["input"] = input_tokens
+                    usage_details["input_tokens"] = input_tokens
                 if output_tokens is not None:
-                    usage_details["output"] = output_tokens
+                    usage_details["output_tokens"] = output_tokens
+                # SDK v3 expects 'total_tokens' field (calculate if not provided)
                 if total_tokens is not None:
-                    usage_details["total"] = total_tokens
+                    usage_details["total_tokens"] = total_tokens
+                elif input_tokens is not None and output_tokens is not None:
+                    usage_details["total_tokens"] = input_tokens + output_tokens
 
                 # Include cache tokens if available
                 cache_read = getattr(usage, "cache_read_input_tokens", None)
@@ -331,12 +372,12 @@ class ObservabilityManager:
                 if cache_creation is not None:
                     usage_details["cache_creation_input_tokens"] = cache_creation
 
-            # Build cost_details dict for Langfuse
+            # Build cost_details dict for Langfuse (SDK v3 uses 'total' not 'total_cost')
             cost_details = {}
             if total_cost is not None:
-                cost_details["total_cost"] = total_cost
+                cost_details["total"] = total_cost
 
-            # Update span with usage and cost data (not just metadata)
+            # Update trace with usage and cost data (not just metadata)
             # This ensures proper cost tracking in Langfuse UI
             update_kwargs = {}
             if usage_details:
@@ -347,7 +388,7 @@ class ObservabilityManager:
                 logging.info(f"Langfuse: Session cost - {cost_details}")
 
             if update_kwargs:
-                self.langfuse_span.update(**update_kwargs)
+                self.langfuse_trace.update(**update_kwargs)
         except Exception as e:
             logging.debug(f"Failed to update Langfuse with session totals: {e}")
 
@@ -358,12 +399,12 @@ class ObservabilityManager:
             result_payload: ResultMessage payload with final metrics (may be None)
         """
         # Complete Langfuse session span with final results
-        if self.langfuse_span and self.langfuse_client:
+        if self.langfuse_trace and self.langfuse_client:
             try:
-                # End the span with final output/metadata
+                # SDK v3 best practice: call update() with data, then end()
                 if result_payload:
-                    # Build usage and cost for span.end() call
-                    end_kwargs = {
+                    # Build update kwargs with output and metadata
+                    update_kwargs = {
                         "output": result_payload,
                         "metadata": {
                             "num_turns": result_payload.get("num_turns", 0),
@@ -372,41 +413,57 @@ class ObservabilityManager:
                         },
                     }
 
-                    # Add usage_details if present
+                    # Add usage_details if present (SDK v3 format)
                     usage = result_payload.get("usage")
                     if usage and hasattr(usage, "__dict__"):
                         usage_details = {}
-                        if hasattr(usage, "input_tokens") and usage.input_tokens is not None:
-                            usage_details["input"] = usage.input_tokens
-                        if hasattr(usage, "output_tokens") and usage.output_tokens is not None:
-                            usage_details["output"] = usage.output_tokens
-                        if hasattr(usage, "total_tokens") and usage.total_tokens is not None:
-                            usage_details["total"] = usage.total_tokens
-                        if usage_details:
-                            end_kwargs["usage_details"] = usage_details
+                        input_tokens = getattr(usage, "input_tokens", None)
+                        output_tokens = getattr(usage, "output_tokens", None)
+                        total_tokens = getattr(usage, "total_tokens", None)
 
-                    # Add cost_details if present
+                        if input_tokens is not None:
+                            usage_details["input_tokens"] = input_tokens
+                        if output_tokens is not None:
+                            usage_details["output_tokens"] = output_tokens
+                        # SDK v3 expects 'total_tokens' field (calculate if not provided)
+                        if total_tokens is not None:
+                            usage_details["total_tokens"] = total_tokens
+                        elif input_tokens is not None and output_tokens is not None:
+                            usage_details["total_tokens"] = input_tokens + output_tokens
+
+                        # Include cache tokens if available
+                        cache_read = getattr(usage, "cache_read_input_tokens", None)
+                        cache_creation = getattr(usage, "cache_creation_input_tokens", None)
+                        if cache_read is not None:
+                            usage_details["cache_read_input_tokens"] = cache_read
+                        if cache_creation is not None:
+                            usage_details["cache_creation_input_tokens"] = cache_creation
+
+                        if usage_details:
+                            update_kwargs["usage_details"] = usage_details
+                            logging.info(f"Langfuse: Final usage - {usage_details}")
+
+                    # Add cost_details if present (SDK v3 uses 'total' not 'total_cost')
                     total_cost = result_payload.get("total_cost_usd")
                     if total_cost is not None:
-                        end_kwargs["cost_details"] = {"total_cost": total_cost}
+                        update_kwargs["cost_details"] = {"total": total_cost}
+                        logging.info(f"Langfuse: Final cost - ${total_cost}")
 
-                    self.langfuse_span.end(**end_kwargs)
-                    logging.info("Langfuse span ended with result payload")
+                    # Update span with all data first (SDK v3 best practice)
+                    self.langfuse_trace.update(**update_kwargs)
+                    logging.info("Langfuse span updated with result payload")
+
+                    # Then end the span (SDK v3 pattern)
+                    self.langfuse_trace.end()
+                    logging.info("Langfuse span ended")
                 else:
                     # No result payload (e.g., git push operations), but still end span
-                    self.langfuse_span.end()
+                    self.langfuse_trace.end()
                     logging.info("Langfuse span ended without result payload")
 
                 # CRITICAL: Always flush, even if no result payload
-                # Otherwise traces never appear in Langfuse UI!
                 # Use 30s timeout to handle network latency and batch uploads
-                # Rationale:
-                # - Langfuse SDK batches events before HTTP upload
-                # - Typical sessions: 10-50 events, flush takes 500ms-2s
-                # - Large sessions: 500+ events can take 5-10s to upload
-                # - Network latency: cluster-internal ~50ms, external 200-500ms
-                # - 30s provides 3x-6x safety margin for worst-case scenarios
-                # - If flush regularly times out, increase timeout or check network/Langfuse health
+                # If flush regularly times out, increase timeout or check network/Langfuse health
                 success, _ = await with_sync_timeout(
                     self.langfuse_client.flush, 30.0, "Langfuse flush"
                 )
@@ -419,7 +476,7 @@ class ObservabilityManager:
                         "Check network connectivity to LANGFUSE_HOST."
                     )
             except Exception as e:
-                logging.warning(f"Failed to complete Langfuse session span: {e}")
+                logging.warning(f"Failed to complete Langfuse session trace: {e}")
 
     async def cleanup_on_error(self, error: Exception) -> None:
         """End spans and flush observability data (error path).
@@ -428,10 +485,10 @@ class ObservabilityManager:
             error: Exception that caused the failure
         """
         # 1. End Langfuse span with error if available
-        if self.langfuse_span and self.langfuse_client:
+        if self.langfuse_trace and self.langfuse_client:
             try:
                 # End span with error status
-                self.langfuse_span.end(level="ERROR", status_message=str(error))
+                self.langfuse_trace.end(level="ERROR", status_message=str(error))
                 # Flush with 30s timeout (same as success path)
                 success, _ = await with_sync_timeout(
                     self.langfuse_client.flush, 30.0, "Langfuse error cleanup flush"

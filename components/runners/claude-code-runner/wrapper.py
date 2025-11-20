@@ -602,7 +602,7 @@ class ClaudeCodeAdapter:
                         logging.info("No initial prompt - Claude will greet based on system prompt")
                 else:
                     logging.info("Skipping prompts - SDK resuming with full context")
-                
+
                 # Mark that first run is complete
                 self._first_run = False
 
