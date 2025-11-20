@@ -473,6 +473,10 @@ class ClaudeCodeAdapter:
 
             result_payload = None
             self._turn_count = 0
+            # Store current message and usage for tracking
+            current_message = None
+            current_usage = None
+
             # Import SDK message and content types for accurate mapping
             from claude_agent_sdk import (
                 AssistantMessage,
@@ -490,7 +494,7 @@ class ClaudeCodeAdapter:
             sdk_session_id = None
 
             async def process_response_stream(client_obj):
-                nonlocal result_payload, sdk_session_id
+                nonlocal result_payload, sdk_session_id, current_message, current_usage
                 async for message in client_obj.receive_response():
                     logging.info(f"[ClaudeSDKClient]: {message}")
 
@@ -506,6 +510,10 @@ class ClaudeCodeAdapter:
                                 logging.warning(f"Failed to store SDK session ID in CR annotations: {e}")
 
                     if isinstance(message, (AssistantMessage, UserMessage)):
+                        # Store AssistantMessage for tracking after we get usage from ResultMessage
+                        if isinstance(message, AssistantMessage):
+                            current_message = message
+
                         for block in getattr(message, 'content', []) or []:
                             if isinstance(block, TextBlock):
                                 text_piece = getattr(block, 'text', None)
@@ -548,15 +556,30 @@ class ClaudeCodeAdapter:
                                 self._turn_count += 1
                             elif isinstance(block, ThinkingBlock):
                                 await self._send_log({"level": "debug", "message": "Model is reasoning..."})
-                        # Track generation in observability (only for AssistantMessage)
-                        if isinstance(message, AssistantMessage):
-                            obs.track_generation(message, configured_model, self._turn_count)
                     elif isinstance(message, (SystemMessage)):
                         text = getattr(message, 'text', None)
                         if text:
                             await self._send_log({"level": "debug", "message": str(text)})
                     elif isinstance(message, (ResultMessage)):
-                        # Only surface result envelope to UI in non-interactive mode
+                        # Extract usage from ResultMessage
+                        usage_raw = getattr(message, 'usage', None)
+                        logging.info(f"ResultMessage.usage = {usage_raw} (type: {type(usage_raw)})")
+
+                        # Convert usage object to dict if needed
+                        if usage_raw is not None and not isinstance(usage_raw, dict):
+                            try:
+                                if hasattr(usage_raw, '__dict__'):
+                                    usage_raw = usage_raw.__dict__
+                                elif hasattr(usage_raw, 'model_dump'):
+                                    usage_raw = usage_raw.model_dump()
+                            except Exception as e:
+                                logging.warning(f"Could not convert usage object to dict: {e}")
+
+                        # Track the interaction with usage data
+                        if current_message and usage_raw and isinstance(usage_raw, dict):
+                            obs.track_interaction(current_message, configured_model, self._turn_count, usage_raw)
+                            current_message = None  # Clear after tracking
+
                         result_payload = {
                             "subtype": getattr(message, 'subtype', None),
                             "duration_ms": getattr(message, 'duration_ms', None),
@@ -565,9 +588,12 @@ class ClaudeCodeAdapter:
                             "num_turns": getattr(message, 'num_turns', None),
                             "session_id": getattr(message, 'session_id', None),
                             "total_cost_usd": getattr(message, 'total_cost_usd', None),
-                            "usage": getattr(message, 'usage', None),
+                            "usage": usage_raw,  # Per-query usage (will be replaced with cumulative at session end)
                             "result": getattr(message, 'result', None),
                         }
+
+                        logging.info(f"Built result_payload with per-query usage: {result_payload.get('usage')}")
+
                         if not interactive:
                             await self.shell._send_message(
                                 MessageType.AGENT_MESSAGE,
@@ -602,7 +628,7 @@ class ClaudeCodeAdapter:
                         logging.info("No initial prompt - Claude will greet based on system prompt")
                 else:
                     logging.info("Skipping prompts - SDK resuming with full context")
-                
+
                 # Mark that first run is complete
                 self._first_run = False
 
@@ -655,8 +681,8 @@ class ClaudeCodeAdapter:
             # Note: All output is streamed via WebSocket, not collected here
             await self._check_pr_intent("")
 
-            # Finalize observability (end spans and flush)
-            await obs.finalize(result_payload)
+            # Finalize observability (flush data to Langfuse)
+            await obs.finalize()
 
             # Return success - result_payload may be None if SDK didn't send ResultMessage
             # (which can happen legitimately for some operations like git push)

@@ -140,29 +140,15 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 					log.Printf("Successfully deleted job %s for stopped session", jobName)
 				}
 
-				// Then, explicitly delete all pods for this job (by job-name label)
-				podSelector := fmt.Sprintf("job-name=%s", jobName)
-				log.Printf("Deleting pods with job-name selector: %s", podSelector)
-				err = config.K8sClient.CoreV1().Pods(sessionNamespace).DeleteCollection(context.TODO(), v1.DeleteOptions{}, v1.ListOptions{
-					LabelSelector: podSelector,
-				})
-				if err != nil && !errors.IsNotFound(err) {
-					log.Printf("Failed to delete pods for job %s: %v (continuing anyway)", jobName, err)
-				} else {
-					log.Printf("Successfully deleted pods for job %s", jobName)
-				}
-
-				// Also delete any pods labeled with this session (in case owner refs are lost)
-				sessionPodSelector := fmt.Sprintf("agentic-session=%s", name)
-				log.Printf("Deleting pods with agentic-session selector: %s", sessionPodSelector)
-				err = config.K8sClient.CoreV1().Pods(sessionNamespace).DeleteCollection(context.TODO(), v1.DeleteOptions{}, v1.ListOptions{
-					LabelSelector: sessionPodSelector,
-				})
-				if err != nil && !errors.IsNotFound(err) {
-					log.Printf("Failed to delete session-labeled pods: %v (continuing anyway)", err)
-				} else {
-					log.Printf("Successfully deleted session-labeled pods")
-				}
+				// IMPORTANT: Do NOT explicitly delete pods here
+				// Job deletion with Foreground propagation will automatically cascade to pods
+				// Explicit pod deletion bypasses TerminationGracePeriodSeconds
+				//
+				// Kubernetes will:
+				// 1. Send SIGTERM to container for graceful shutdown
+				// 2. Wait up to TerminationGracePeriodSeconds (30s default) for graceful exit
+				// 3. Send SIGKILL if still running after grace period
+				log.Printf("Pods for job %s will be deleted automatically by Kubernetes", jobName)
 			} else {
 				log.Printf("Job %s already completed (Succeeded: %d, Failed: %d), no cleanup needed", jobName, job.Status.Succeeded, job.Status.Failed)
 			}
@@ -397,6 +383,8 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
+					// Default grace period for graceful shutdown
+					TerminationGracePeriodSeconds: int64Ptr(30),
 					// Explicitly set service account for pod creation permissions
 					AutomountServiceAccountToken: boolPtr(false),
 					Volumes: []corev1.Volume{
