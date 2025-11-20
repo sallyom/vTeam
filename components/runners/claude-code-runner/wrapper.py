@@ -557,6 +557,32 @@ class ClaudeCodeAdapter:
                             await self._send_log({"level": "debug", "message": str(text)})
                     elif isinstance(message, (ResultMessage)):
                         # Only surface result envelope to UI in non-interactive mode
+                        logging.info(f"ResultMessage received - extracting usage data...")
+
+                        # Log ALL attributes of ResultMessage for debugging
+                        all_attrs = dir(message)
+                        logging.info(f"ResultMessage attributes: {[a for a in all_attrs if not a.startswith('_')]}")
+
+                        # Extract usage with detailed logging
+                        usage_raw = getattr(message, 'usage', None)
+                        logging.info(f"ResultMessage.usage = {usage_raw} (type: {type(usage_raw)})")
+
+                        # If usage is an object, log its attributes too
+                        if usage_raw is not None and not isinstance(usage_raw, dict):
+                            logging.info(f"Usage is object, attributes: {[a for a in dir(usage_raw) if not a.startswith('_')]}")
+                            # Try to convert to dict if it's an object
+                            try:
+                                if hasattr(usage_raw, '__dict__'):
+                                    usage_dict_from_obj = usage_raw.__dict__
+                                    logging.info(f"Usage object.__dict__ = {usage_dict_from_obj}")
+                                    usage_raw = usage_dict_from_obj
+                                elif hasattr(usage_raw, 'model_dump'):
+                                    usage_dict_from_model = usage_raw.model_dump()
+                                    logging.info(f"Usage object.model_dump() = {usage_dict_from_model}")
+                                    usage_raw = usage_dict_from_model
+                            except Exception as e:
+                                logging.warning(f"Could not convert usage object to dict: {e}")
+
                         result_payload = {
                             "subtype": getattr(message, 'subtype', None),
                             "duration_ms": getattr(message, 'duration_ms', None),
@@ -565,9 +591,12 @@ class ClaudeCodeAdapter:
                             "num_turns": getattr(message, 'num_turns', None),
                             "session_id": getattr(message, 'session_id', None),
                             "total_cost_usd": getattr(message, 'total_cost_usd', None),
-                            "usage": getattr(message, 'usage', None),
+                            "usage": usage_raw,  # Use potentially converted usage
                             "result": getattr(message, 'result', None),
                         }
+
+                        logging.info(f"Built result_payload with usage: {result_payload.get('usage')}")
+
                         if not interactive:
                             await self.shell._send_message(
                                 MessageType.AGENT_MESSAGE,
@@ -602,7 +631,7 @@ class ClaudeCodeAdapter:
                         logging.info("No initial prompt - Claude will greet based on system prompt")
                 else:
                     logging.info("Skipping prompts - SDK resuming with full context")
-                
+
                 # Mark that first run is complete
                 self._first_run = False
 

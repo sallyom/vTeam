@@ -152,6 +152,7 @@ echo "Installing Langfuse with Helm..."
 echo "   (This may take 5-10 minutes...)"
 helm upgrade --install langfuse langfuse/langfuse \
   --namespace langfuse \
+  --version ">= 3.63.0" \
   --set langfuse.nextauth.secret.value="$NEXTAUTH_SECRET" \
   --set langfuse.salt.value="$SALT" \
   --set postgresql.auth.password="$POSTGRES_PASSWORD" \
