@@ -1,8 +1,27 @@
 """
-Observability manager for Claude Code runner.
+Observability manager for Claude Code runner - SDK v3 simplified pattern.
 
-Provides Langfuse LLM observability for Claude sessions,
-including security features (secret sanitization, timeouts).
+Provides Langfuse LLM observability for Claude sessions:
+- propagate_attributes() context manager sets user_id/session_id/tags in OpenTelemetry context
+- update_current_trace() sets trace-level name, input, output, and metadata
+- Generations and tool spans are tracked as direct children of the trace
+- Security features (secret sanitization, timeouts)
+
+SDK v3 CORRECT pattern:
+1. propagate_attributes() context sets user_id/session_id/tags in OpenTelemetry context
+2. start_as_current_span() creates root span to establish the trace (REQUIRED!)
+3. update_current_trace() sets trace-level metadata (visible in UI)
+4. Generations and tool spans created via start_as_current_generation() and start_as_current_span()
+5. All child observations automatically inherit user_id/session_id/tags from propagate_attributes()
+6. Usage data tracked in trace metadata for visibility
+7. Summary generation with Anthropic-specific usage_details enables auto-cost calculation
+
+Anthropic-specific cost tracking:
+- Claude SDK only provides session-level usage in ResultMessage (no per-turn usage)
+- We create a "session_summary" generation at the end with all usage data
+- usage_details fields (input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens)
+- Langfuse automatically calculates costs using configured Claude model pricing
+- Reference: https://langfuse.com/docs/observability/features/token-and-cost-tracking
 """
 
 import os
@@ -19,6 +38,20 @@ class ObservabilityManager:
 
     Handles initialization, event tracking, and cleanup for Langfuse with
     security features (secret sanitization, timeouts).
+
+    SDK v3 CORRECT approach:
+    - propagate_attributes() context manager sets user_id/session_id/tags in OTel context
+    - start_as_current_span() creates root span to establish the trace (REQUIRED!)
+    - update_current_trace() sets trace-level metadata
+    - Generations and tool spans are created as children of the root span
+    - All child observations automatically inherit user_id/session_id/tags
+    - Usage data tracked in trace metadata for visibility
+    - Summary generation with Anthropic-specific usage_details enables auto-cost calculation
+
+    Anthropic cost tracking:
+    - Claude SDK only provides session-level usage (no per-turn data)
+    - finalize() creates "session_summary" generation with usage_details
+    - Langfuse auto-calculates costs using configured Claude model pricing
     """
 
     def __init__(self, session_id: str, user_id: str, user_name: str):
@@ -35,8 +68,12 @@ class ObservabilityManager:
 
         # Langfuse state
         self.langfuse_client = None
-        self.langfuse_trace = None  # Root trace (not span)
+        self._propagate_ctx = None  # propagate_attributes() context manager
+        self._root_span_ctx = None  # Root span context manager
         self._langfuse_tool_spans: dict[str, Any] = {}
+
+        # Track configured model for usage_details in summary generation
+        self.configured_model = None
 
     async def initialize(self, prompt: str, namespace: str) -> bool:
         """Initialize Langfuse observability.
@@ -52,6 +89,8 @@ class ObservabilityManager:
 
     async def _init_langfuse(self, prompt: str, namespace: str) -> bool:
         """Initialize Langfuse observability with security checks.
+
+        Sets up propagate_attributes() context and updates trace metadata.
 
         Args:
             prompt: Initial prompt for the session
@@ -126,40 +165,56 @@ class ObservabilityManager:
             return False
 
         try:
+            # Import propagate_attributes for SDK v3 pattern
+            from langfuse import propagate_attributes
+
+            # Initialize Langfuse client
             self.langfuse_client = Langfuse(
                 public_key=public_key, secret_key=secret_key, host=host
             )
 
-            # Create a ROOT SPAN for this session using start_span() (SDK v3 API)
-            # This automatically creates a trace and serves as the root observation
-            # All child observations will be nested under this root span
-            self.langfuse_trace = self.langfuse_client.start_span(
+            trace_tags = ["claude-code", f"namespace:{namespace}"]
+
+            # SDK v3 CORRECT pattern:
+            # 1. Enter propagate_attributes() context (sets user_id/session_id/tags in OTel context)
+            # 2. Create a root span/observation to establish the trace
+            # 3. Update the trace with metadata
+            # 4. All child generations/tool spans automatically inherit user_id/session_id/tags
+
+            # Step 1: Enter propagate_attributes context (WITHOUT metadata - keep under 200 chars)
+            # Only session-level attributes that apply to ALL observations
+            self._propagate_ctx = propagate_attributes(
+                user_id=self.user_id,
+                session_id=self.session_id,
+                tags=trace_tags
+            )
+            self._propagate_ctx.__enter__()
+
+            # Step 2: Create root span to establish the trace
+            # This is REQUIRED for update_current_trace() to work
+            self._root_span_ctx = self.langfuse_client.start_as_current_span(
                 name="claude_agent_session",
-                input={"prompt": prompt},
-                metadata={
-                    "namespace": namespace,
-                },
+                input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
+                metadata={"namespace": namespace, "user_name": self.user_name}
+            )
+            self._root_span_ctx.__enter__()
+
+            # Step 3: Update trace-level attributes
+            # This sets metadata visible at the trace level in Langfuse UI
+            self.langfuse_client.update_current_trace(
+                name="claude_agent_session",
+                metadata={"namespace": namespace, "user_name": self.user_name}
             )
 
-            # SDK v3: Set trace-level attributes using update_trace()
-            # These attributes (user_id, session_id, tags) must be set at trace level,
-            # not in span metadata, for them to appear in Langfuse UI
-            trace_attrs = {
-                "session_id": self.session_id,
-                "tags": ["claude-code", f"namespace:{namespace}"],
-            }
             if self.user_id:
-                trace_attrs["user_id"] = self.user_id
                 logging.info(
                     f"Langfuse: Tracking session for user {self.user_name} ({self.user_id})"
                 )
 
-            # Set trace-level attributes (for filtering/aggregation in Langfuse UI)
-            self.langfuse_trace.update_trace(**trace_attrs)
-
-            # Also set as span attributes for consistency
-            self.langfuse_trace.update(**trace_attrs)
-
+            logging.info(
+                f"Langfuse: Trace initialized with propagate_attributes - "
+                f"user_id={self.user_id}, session_id={self.session_id}, tags={trace_tags}"
+            )
             logging.info("Langfuse tracing enabled for session")
             return True
 
@@ -181,127 +236,118 @@ class ObservabilityManager:
             )
             logging.debug(f"Langfuse initialization error type: {type(e).__name__}")
 
+            # Cleanup any partially initialized state
+            if self._root_span_ctx:
+                try:
+                    self._root_span_ctx.__exit__(None, None, None)
+                except Exception:
+                    pass
+            if self._propagate_ctx:
+                try:
+                    self._propagate_ctx.__exit__(None, None, None)
+                except Exception:
+                    pass
+
             # Continue without Langfuse - don't fail the session
             self.langfuse_client = None
-            self.langfuse_trace = None
+            self._propagate_ctx = None
+            self._root_span_ctx = None
             return False
 
     def track_generation(self, message: Any, model: str, turn_count: int) -> None:
-        """Track Claude generation in Langfuse.
+        """Track Claude generation in Langfuse using SDK v3 start_as_current_generation().
+
+        User_id, session_id, and tags are automatically inherited via propagate_attributes().
+
+        NOTE: AssistantMessage does NOT contain usage data. Usage tracking happens in finalize()
+        when we receive the ResultMessage with session-level usage metrics.
 
         Args:
             message: AssistantMessage from Claude SDK
             model: Model name (e.g., "claude-3-5-sonnet-20241022")
             turn_count: Current turn number
         """
-        if not self.langfuse_client or not self.langfuse_trace:
+        if not self.langfuse_client:
+            logging.debug(f"Langfuse: Skipping generation tracking - client not initialized")
             return
 
+        # Store configured model for use in summary generation
+        if not self.configured_model:
+            self.configured_model = model
+            logging.debug(f"Langfuse: Captured configured model: {model}")
+
+        logging.debug(f"Langfuse: track_generation called for turn {turn_count}, model={model}")
         try:
             # Import here to avoid circular dependency
             from claude_agent_sdk import TextBlock
 
-            # Extract text content and usage data for generation
+            # Extract text content for generation
             text_content = []
-            for blk in getattr(message, "content", []) or []:
+            message_content = getattr(message, "content", []) or []
+            logging.debug(f"Langfuse: Processing message with {len(message_content)} content blocks")
+            for blk in message_content:
                 if isinstance(blk, TextBlock):
                     text_content.append(getattr(blk, "text", ""))
+                else:
+                    logging.debug(f"Langfuse: Skipping non-TextBlock: {type(blk).__name__}")
 
             if not text_content:
+                logging.debug(f"Langfuse: No text content found in message, skipping generation tracking")
                 return
 
             output_text = "\n".join(text_content)
+            logging.debug(f"Langfuse: Extracted {len(output_text)} chars of output text")
 
-            # Check if message has usage data (it might not on every AssistantMessage)
-            usage_data = getattr(message, "usage", None)
+            # SDK v3 pattern: Use client.start_as_current_generation()
+            # This creates a generation as a direct child of the trace
+            # User_id/session_id/tags automatically inherited via propagate_attributes()
+            logging.debug(f"Langfuse: Creating generation for turn {turn_count}")
 
-            # Create generation as child of root span (SDK v3 API)
-            # Start with basic info - we'll update with usage/output next
-            generation = self.langfuse_trace.start_generation(
+            gen_ctx = self.langfuse_client.start_as_current_generation(
                 name=f"claude_response_turn_{turn_count}",
                 input=[{"role": "user", "content": f"Turn {turn_count}"}],
                 model=model,
-                metadata={"turn": turn_count},
+                metadata={"turn": turn_count}
             )
+            generation = gen_ctx.__enter__()
 
-            # update() with output and usage_details before end()
-            update_kwargs = {
-                "output": output_text,
-            }
+            # Update with output (usage will be added in finalize when we get ResultMessage)
+            generation.update(output=output_text)
 
-            # Propagate user_id and session_id to each generation for filtering/aggregation
-            if self.user_id:
-                update_kwargs["user_id"] = self.user_id
-            if self.session_id:
-                update_kwargs["session_id"] = self.session_id
+            # End the generation
+            gen_ctx.__exit__(None, None, None)
 
-            # Add usage_details if available (for Langfuse cost tracking)
-            if usage_data and hasattr(usage_data, "__dict__"):
-                usage_dict = {}
-                if hasattr(usage_data, "input_tokens"):
-                    usage_dict["input_tokens"] = usage_data.input_tokens
-                if hasattr(usage_data, "output_tokens"):
-                    usage_dict["output_tokens"] = usage_data.output_tokens
-                # Calculate total_tokens if both input and output are present
-                if "input_tokens" in usage_dict and "output_tokens" in usage_dict:
-                    usage_dict["total_tokens"] = usage_dict["input_tokens"] + usage_dict["output_tokens"]
-                if hasattr(usage_data, "cache_read_input_tokens"):
-                    usage_dict["cache_read_input_tokens"] = (
-                        usage_data.cache_read_input_tokens
-                    )
-                if hasattr(usage_data, "cache_creation_input_tokens"):
-                    usage_dict["cache_creation_input_tokens"] = (
-                        usage_data.cache_creation_input_tokens
-                    )
-
-                if usage_dict:
-                    update_kwargs["usage_details"] = usage_dict
-                    logging.info(
-                        f"Langfuse: Tracking generation with usage: {usage_dict}"
-                    )
-
-            # Update generation with output and usage data
-            generation.update(**update_kwargs)
-
-            # Then end the generation
-            generation.end()
-
-            logging.debug(f"Langfuse: Created generation for turn {turn_count} with {len(output_text)} chars")
+            logging.info(f"Langfuse: Tracked generation for turn {turn_count} with {len(output_text)} chars (usage pending)")
         except Exception as e:
-            logging.debug(f"Failed to create Langfuse generation: {e}")
+            logging.error(f"Langfuse: Failed to create generation: {e}", exc_info=True)
 
     def track_tool_use(self, tool_name: str, tool_id: str, tool_input: dict) -> None:
-        """Track tool decision in Langfuse.
+        """Track tool decision in Langfuse using SDK v3 start_as_current_span().
+
+        User_id, session_id, and tags are automatically inherited via propagate_attributes().
 
         Args:
             tool_name: Name of the tool being used
             tool_id: Unique tool use ID
             tool_input: Tool input parameters
         """
-        # Add Langfuse span for tool decision as child of root span
-        # This ensures tool usage is properly nested in the trace hierarchy
-        if self.langfuse_client and self.langfuse_trace:
+        if self.langfuse_client:
             try:
-                tool_span = self.langfuse_trace.start_span(
+                # SDK v3 pattern: Use client.start_as_current_span()
+                # This creates a span as a direct child of the trace
+                # User_id/session_id/tags automatically inherited via propagate_attributes()
+                # Store context manager to update with result later (in track_tool_result)
+                tool_span_ctx = self.langfuse_client.start_as_current_span(
                     name=f"tool_{tool_name}",
                     input=tool_input,
                     metadata={
                         "tool_id": tool_id,
                         "tool_name": tool_name,
-                    },
+                    }
                 )
-
-                # Propagate user_id and session_id to tool span for filtering/aggregation
-                span_attrs = {}
-                if self.user_id:
-                    span_attrs["user_id"] = self.user_id
-                if self.session_id:
-                    span_attrs["session_id"] = self.session_id
-                if span_attrs:
-                    tool_span.update(**span_attrs)
-
-                # Store tool span to update with result later
-                self._langfuse_tool_spans[tool_id] = tool_span
+                # Enter context and store both context manager and span object
+                tool_span = tool_span_ctx.__enter__()
+                self._langfuse_tool_spans[tool_id] = (tool_span_ctx, tool_span)
             except Exception as e:
                 logging.debug(f"Failed to create Langfuse tool span: {e}")
 
@@ -316,7 +362,7 @@ class ObservabilityManager:
         # Update Langfuse tool span with result
         if tool_use_id in self._langfuse_tool_spans:
             try:
-                tool_span = self._langfuse_tool_spans[tool_use_id]
+                tool_span_ctx, tool_span = self._langfuse_tool_spans[tool_use_id]
                 # Truncate long results with indicator
                 if content:
                     result_text = str(content)
@@ -325,145 +371,144 @@ class ObservabilityManager:
                 else:
                     result_text = "No output"
 
-                tool_span.end(
+                # SDK v3 pattern: Update span then exit context manager
+                tool_span.update(
                     output={"result": result_text},
                     level="ERROR" if is_error else "DEFAULT",
-                    metadata={"is_error": is_error or False},
+                    metadata={"is_error": is_error or False}
                 )
+
+                # Exit the context manager (ends the span)
+                tool_span_ctx.__exit__(None, None, None)
                 del self._langfuse_tool_spans[tool_use_id]
             except Exception as e:
                 logging.debug(f"Failed to update Langfuse tool span: {e}")
 
-    def track_session_totals(self, result_payload: dict) -> None:
-        """Track session-level cost and usage in Langfuse.
-
-        Args:
-            result_payload: ResultMessage payload with usage/cost data
-        """
-        if not self.langfuse_client or not self.langfuse_trace:
-            return
-
-        try:
-            usage = result_payload.get("usage")
-            total_cost = result_payload.get("total_cost_usd")
-
-            # Build usage_details dict for Langfuse (proper SDK v3 format)
-            usage_details = {}
-            if usage and hasattr(usage, "__dict__"):
-                input_tokens = getattr(usage, "input_tokens", None)
-                output_tokens = getattr(usage, "output_tokens", None)
-                total_tokens = getattr(usage, "total_tokens", None)
-
-                if input_tokens is not None:
-                    usage_details["input_tokens"] = input_tokens
-                if output_tokens is not None:
-                    usage_details["output_tokens"] = output_tokens
-                # SDK v3 expects 'total_tokens' field (calculate if not provided)
-                if total_tokens is not None:
-                    usage_details["total_tokens"] = total_tokens
-                elif input_tokens is not None and output_tokens is not None:
-                    usage_details["total_tokens"] = input_tokens + output_tokens
-
-                # Include cache tokens if available
-                cache_read = getattr(usage, "cache_read_input_tokens", None)
-                cache_creation = getattr(usage, "cache_creation_input_tokens", None)
-                if cache_read is not None:
-                    usage_details["cache_read_input_tokens"] = cache_read
-                if cache_creation is not None:
-                    usage_details["cache_creation_input_tokens"] = cache_creation
-
-            # Build cost_details dict for Langfuse (SDK v3 uses 'total' not 'total_cost')
-            cost_details = {}
-            if total_cost is not None:
-                cost_details["total"] = total_cost
-
-            # Update trace with usage and cost data (not just metadata)
-            # This ensures proper cost tracking in Langfuse UI
-            update_kwargs = {}
-            if usage_details:
-                update_kwargs["usage_details"] = usage_details
-                logging.info(f"Langfuse: Session usage - {usage_details}")
-            if cost_details:
-                update_kwargs["cost_details"] = cost_details
-                logging.info(f"Langfuse: Session cost - {cost_details}")
-
-            if update_kwargs:
-                self.langfuse_trace.update(**update_kwargs)
-        except Exception as e:
-            logging.debug(f"Failed to update Langfuse with session totals: {e}")
-
     async def finalize(self, result_payload: dict | None) -> None:
-        """End spans and flush observability data (success path).
+        """Finalize trace and flush observability data (success path).
+
+        Updates trace with final metrics and exits propagate_attributes context.
 
         Args:
             result_payload: ResultMessage payload with final metrics (may be None)
+                Expected structure: {
+                    "num_turns": int,
+                    "duration_ms": int,
+                    "total_cost_usd": float,
+                    "subtype": str,
+                    "usage": {
+                        "input_tokens": int,
+                        "output_tokens": int,
+                        "total_tokens": int,
+                        "cache_read_input_tokens": int,
+                        "cache_creation_input_tokens": int
+                    }
+                }
         """
-        # Complete Langfuse session span with final results
-        if self.langfuse_trace and self.langfuse_client:
+        logging.debug(f"Langfuse: finalize() called with result_payload={result_payload is not None}")
+
+        # Cleanup and flush
+        if self.langfuse_client:
+            logging.debug(f"Langfuse: Finalizing trace")
             try:
-                # SDK v3 best practice: call update() with data, then end()
+                # Update trace with final metadata if we have results
                 if result_payload:
-                    # Build update kwargs with output and metadata
-                    update_kwargs = {
-                        "output": result_payload,
-                        "metadata": {
-                            "num_turns": result_payload.get("num_turns", 0),
-                            "duration_ms": result_payload.get("duration_ms"),
-                            "subtype": result_payload.get("subtype"),
-                        },
+                    # Extract usage data from ResultMessage
+                    usage_data = result_payload.get("usage")
+
+                    # Build usage dict for metadata
+                    usage_dict = None
+                    if usage_data and isinstance(usage_data, dict):
+                        usage_dict = {
+                            "input_tokens": usage_data.get("input_tokens", 0),
+                            "output_tokens": usage_data.get("output_tokens", 0),
+                            "total_tokens": usage_data.get("total_tokens", 0),
+                            "cache_read_input_tokens": usage_data.get("cache_read_input_tokens", 0),
+                            "cache_creation_input_tokens": usage_data.get("cache_creation_input_tokens", 0),
+                        }
+                        logging.info(f"Langfuse: Extracted usage from ResultMessage for metadata: {usage_dict}")
+
+                    # Update the trace with output and metadata including usage
+                    trace_metadata = {
+                        "num_turns": result_payload.get("num_turns"),
+                        "duration_ms": result_payload.get("duration_ms"),
+                        "total_cost_usd": result_payload.get("total_cost_usd"),
+                        "subtype": result_payload.get("subtype"),
                     }
 
-                    # Add usage_details if present (SDK v3 format)
-                    usage = result_payload.get("usage")
-                    if usage and hasattr(usage, "__dict__"):
-                        usage_details = {}
-                        input_tokens = getattr(usage, "input_tokens", None)
-                        output_tokens = getattr(usage, "output_tokens", None)
-                        total_tokens = getattr(usage, "total_tokens", None)
+                    # Add usage to metadata for visibility
+                    if usage_dict:
+                        trace_metadata["usage"] = usage_dict
+                        logging.info(f"Langfuse: Adding usage to trace metadata: {usage_dict}")
 
-                        if input_tokens is not None:
-                            usage_details["input_tokens"] = input_tokens
-                        if output_tokens is not None:
-                            usage_details["output_tokens"] = output_tokens
-                        # SDK v3 expects 'total_tokens' field (calculate if not provided)
-                        if total_tokens is not None:
-                            usage_details["total_tokens"] = total_tokens
-                        elif input_tokens is not None and output_tokens is not None:
-                            usage_details["total_tokens"] = input_tokens + output_tokens
+                    self.langfuse_client.update_current_trace(
+                        output=result_payload,
+                        metadata=trace_metadata
+                    )
+                    logging.info("Langfuse: Updated trace with final metrics and usage")
 
-                        # Include cache tokens if available
-                        cache_read = getattr(usage, "cache_read_input_tokens", None)
-                        cache_creation = getattr(usage, "cache_creation_input_tokens", None)
-                        if cache_read is not None:
-                            usage_details["cache_read_input_tokens"] = cache_read
-                        if cache_creation is not None:
-                            usage_details["cache_creation_input_tokens"] = cache_creation
+                    # CRITICAL: Create a summary generation with usage_details for Anthropic-specific cost calculation
+                    # This enables Langfuse to automatically calculate costs using custom Claude model pricing
+                    # Reference: https://langfuse.com/docs/observability/features/token-and-cost-tracking
+                    if usage_dict:
+                        logging.info("Langfuse: Creating summary generation with Anthropic-specific usage_details for auto-cost calculation")
+                        try:
+                            # Use the model captured from track_generation() calls
+                            # Falls back to environment variable if no generations were tracked
+                            model_name = self.configured_model or os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
 
-                        if usage_details:
-                            update_kwargs["usage_details"] = usage_details
-                            logging.info(f"Langfuse: Final usage - {usage_details}")
+                            # Create summary generation with Anthropic-specific usage_details
+                            # Langfuse expects: input_tokens, output_tokens, cache_read_input_tokens
+                            gen_ctx = self.langfuse_client.start_as_current_generation(
+                                name="session_summary",
+                                model=model_name,
+                                input=[{"role": "system", "content": "Session usage summary"}],
+                                metadata={
+                                    "summary": True,
+                                    "num_turns": result_payload.get("num_turns"),
+                                    "duration_ms": result_payload.get("duration_ms"),
+                                }
+                            )
+                            generation = gen_ctx.__enter__()
 
-                    # Add cost_details if present (SDK v3 uses 'total' not 'total_cost')
-                    total_cost = result_payload.get("total_cost_usd")
-                    if total_cost is not None:
-                        update_kwargs["cost_details"] = {"total": total_cost}
-                        logging.info(f"Langfuse: Final cost - ${total_cost}")
+                            # Update with output and Anthropic-specific usage_details
+                            # Field names match Anthropic API response format
+                            generation.update(
+                                output=f"Session completed with {result_payload.get('num_turns')} turns",
+                                usage_details={
+                                    "input_tokens": usage_dict.get("input_tokens", 0),
+                                    "output_tokens": usage_dict.get("output_tokens", 0),
+                                    "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens", 0),
+                                    # Include cache creation tokens if available
+                                    "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
+                                }
+                            )
 
-                    # Update span with all data first (SDK v3 best practice)
-                    self.langfuse_trace.update(**update_kwargs)
-                    logging.info("Langfuse span updated with result payload")
+                            # End the generation
+                            gen_ctx.__exit__(None, None, None)
 
-                    # Then end the span (SDK v3 pattern)
-                    self.langfuse_trace.end()
-                    logging.info("Langfuse span ended")
-                else:
-                    # No result payload (e.g., git push operations), but still end span
-                    self.langfuse_trace.end()
-                    logging.info("Langfuse span ended without result payload")
+                            logging.info(
+                                f"Langfuse: Created session_summary generation with usage_details: "
+                                f"input={usage_dict.get('input_tokens', 0)}, "
+                                f"output={usage_dict.get('output_tokens', 0)}, "
+                                f"cache_read={usage_dict.get('cache_read_input_tokens', 0)}, "
+                                f"cache_creation={usage_dict.get('cache_creation_input_tokens', 0)} "
+                                f"for model {model_name}. "
+                                f"Langfuse will automatically calculate cost using custom model pricing."
+                            )
+                        except Exception as gen_err:
+                            logging.error(f"Langfuse: Failed to create summary generation with usage_details: {gen_err}", exc_info=True)
 
-                # CRITICAL: Always flush, even if no result payload
+                # Exit contexts in reverse order (root span first, then propagate_attributes)
+                if self._root_span_ctx:
+                    self._root_span_ctx.__exit__(None, None, None)
+                    logging.info("Langfuse root span context exited")
+                if self._propagate_ctx:
+                    self._propagate_ctx.__exit__(None, None, None)
+                    logging.info("Langfuse propagate_attributes context exited")
+
+                # Flush to ensure all data is sent
                 # Use 30s timeout to handle network latency and batch uploads
-                # If flush regularly times out, increase timeout or check network/Langfuse health
                 success, _ = await with_sync_timeout(
                     self.langfuse_client.flush, 30.0, "Langfuse flush"
                 )
@@ -476,19 +521,34 @@ class ObservabilityManager:
                         "Check network connectivity to LANGFUSE_HOST."
                     )
             except Exception as e:
-                logging.warning(f"Failed to complete Langfuse session trace: {e}")
+                logging.error(f"Failed to complete Langfuse session trace: {e}", exc_info=True)
 
     async def cleanup_on_error(self, error: Exception) -> None:
-        """End spans and flush observability data (error path).
+        """Finalize trace on error and flush observability data (error path).
+
+        Updates trace with error details and exits propagate_attributes context.
 
         Args:
             error: Exception that caused the failure
         """
-        # 1. End Langfuse span with error if available
-        if self.langfuse_trace and self.langfuse_client:
+        # Cleanup and flush
+        if self.langfuse_client:
             try:
-                # End span with error status
-                self.langfuse_trace.end(level="ERROR", status_message=str(error))
+                # Update trace with error details
+                self.langfuse_client.update_current_trace(
+                    output={"error": str(error)},
+                    metadata={"error_type": type(error).__name__}
+                )
+                logging.debug("Langfuse: Marked trace as ERROR")
+
+                # Exit contexts in reverse order (root span first, then propagate_attributes)
+                if self._root_span_ctx:
+                    self._root_span_ctx.__exit__(None, None, None)
+                    logging.info("Langfuse root span context exited (error path)")
+                if self._propagate_ctx:
+                    self._propagate_ctx.__exit__(None, None, None)
+                    logging.info("Langfuse propagate_attributes context exited (error path)")
+
                 # Flush with 30s timeout (same as success path)
                 success, _ = await with_sync_timeout(
                     self.langfuse_client.flush, 30.0, "Langfuse error cleanup flush"
@@ -499,4 +559,4 @@ class ObservabilityManager:
                         "error trace may not be sent."
                     )
             except Exception as cleanup_err:
-                logging.debug(f"Failed to cleanup Langfuse span: {cleanup_err}")
+                logging.error(f"Failed to cleanup Langfuse trace: {cleanup_err}", exc_info=True)
