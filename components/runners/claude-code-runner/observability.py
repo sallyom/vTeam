@@ -1,19 +1,21 @@
 """
-Observability manager for Claude Code runner - SDK v3 pattern with root span.
+Observability manager for Claude Code runner - SDK v3 pattern with explicit trace creation.
 
 Provides Langfuse LLM observability for Claude sessions:
+- Explicit trace ID creation using create_trace_id() for consistent trace identity
 - propagate_attributes() context manager sets user_id/session_id/tags in OpenTelemetry context
-- Root span creates REQUIRED active span context for SDK operations
+- Root span establishes the trace with proper name and nesting hierarchy
 - Generations and tool spans are tracked as children of the root span
 - Security features (secret sanitization, timeouts)
 
-SDK v3 pattern (REQUIRES root span):
-1. propagate_attributes() ensures user_id/session_id/tags flow to all observations
-2. Root span creates ACTIVE SPAN CONTEXT (without this, operations are silently skipped!)
-3. Generations and tool spans created via start_as_current_generation() and start_as_current_span()
-4. All observations automatically inherit user_id/session_id/tags from propagate_attributes()
-5. Usage data tracked in root span metadata for visibility
-6. Summary generation with Anthropic-specific usage_details enables auto-cost calculation
+SDK v3 pattern (explicit trace creation):
+1. Create trace ID explicitly using create_trace_id(seed=session_id) for deterministic IDs
+2. propagate_attributes() ensures user_id/session_id/tags flow to all observations
+3. Root span created with trace_context pointing to explicit trace ID
+4. update_current_trace() sets the trace name visible in Langfuse UI
+5. All child observations use the same trace_context for proper nesting
+6. Usage data tracked in root span metadata for visibility
+7. Summary generation with Anthropic-specific usage_details enables auto-cost calculation
 
 Anthropic-specific cost tracking:
 - Claude SDK only provides session-level usage in ResultMessage (no per-turn usage)
@@ -38,9 +40,11 @@ class ObservabilityManager:
     Handles initialization, event tracking, and cleanup for Langfuse with
     security features (secret sanitization, timeouts).
 
-    SDK v3 pattern (REQUIRES root span):
+    SDK v3 pattern (explicit trace creation):
+    - create_trace_id() creates explicit trace ID for consistent identity
     - propagate_attributes() context manager sets user_id/session_id/tags in OTel context
-    - Root span creates ACTIVE SPAN CONTEXT (required for SDK operations to work!)
+    - Root span with trace_context establishes the trace hierarchy
+    - update_current_trace() sets the trace name visible in Langfuse UI
     - Generations and tool spans are children of the root span
     - All observations automatically inherit user_id/session_id/tags
     - Usage data tracked in root span metadata for visibility
@@ -178,16 +182,22 @@ class ObservabilityManager:
 
             trace_tags = ["claude-code", f"namespace:{namespace}"]
 
-            # SDK v3 pattern (REQUIRES root span!):
-            # 1. Enter propagate_attributes() context (sets user_id/session_id/tags in OTel context)
-            # 2. Create root span INSIDE propagate_attributes context (creates ACTIVE span context)
-            # 3. All generations/tool spans automatically inherit user_id/session_id/tags
+            # SDK v3 pattern for explicit trace creation:
+            # 1. Create trace ID explicitly using create_trace_id() with session_id as seed
+            # 2. Enter propagate_attributes() context (sets user_id/session_id/tags in OTel context)
+            # 3. Create root span with trace_context pointing to the explicit trace ID
+            # 4. All child observations use the same trace_context for proper nesting
             #
-            # CRITICAL: Without the root span, there's NO ACTIVE SPAN in the context,
-            # causing SDK operations to be silently skipped with warning:
-            # "No active span in current context. Operations that depend on an active span will be skipped."
+            # This ensures:
+            # - Single trace in Langfuse UI with proper name
+            # - All observations nested under the root span
+            # - Consistent trace ID across all operations
 
-            # Step 1: Enter propagate_attributes context
+            # Step 1: Create explicit trace ID (deterministic based on session_id)
+            self._trace_id = self.langfuse_client.create_trace_id(seed=self.session_id)
+            logging.info(f"Langfuse: Created explicit trace_id={self._trace_id} for session {self.session_id}")
+
+            # Step 2: Enter propagate_attributes context
             self._propagate_ctx = propagate_attributes(
                 user_id=self.user_id,
                 session_id=self.session_id,
@@ -200,8 +210,8 @@ class ObservabilityManager:
             )
             self._propagate_ctx.__enter__()
 
-            # Step 2: Create root span - REQUIRED for nesting to work
-            # The trace name in UI will be "claude_agent_session"
+            # Step 3: Create root span with explicit trace_context
+            # This creates the root span AND establishes it as the trace in Langfuse UI
             self._root_span_ctx = self.langfuse_client.start_as_current_span(
                 name="claude_agent_session",
                 input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
@@ -210,21 +220,19 @@ class ObservabilityManager:
                     "user_id": self.user_id,
                     "session_id": self.session_id,
                     "user_name": self.user_name
-                }
+                },
+                trace_context={"trace_id": self._trace_id}
             )
             self._root_span = self._root_span_ctx.__enter__()
-            self._trace_id = self.langfuse_client.get_current_trace_id()
 
-            # Update root span with name and input AFTER entering context
-            # NOTE: In SDK v3, the root span IS the trace, so updating the span
-            # automatically updates the trace. Do NOT call update_current_trace() here
-            # as it can cause the trace to appear unnamed or create conflicts.
-            self._root_span.update(
+            # Step 4: Update the trace name and input using update_current_trace()
+            # This ensures the trace appears with the correct name in Langfuse UI
+            self.langfuse_client.update_current_trace(
                 name="claude_agent_session",
                 input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt}
             )
 
-            logging.info(f"Langfuse: Root span 'claude_agent_session' created and updated - trace_id={self._trace_id}")
+            logging.info(f"Langfuse: Root span and trace 'claude_agent_session' created - trace_id={self._trace_id}")
 
             if self.user_id:
                 logging.info(
