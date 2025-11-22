@@ -1,28 +1,24 @@
 """
-Observability manager for Claude Code runner - SDK v3 pattern with span object nesting.
+Observability manager for Claude Code runner - SDK v3 session-based grouping pattern.
 
 Provides Langfuse LLM observability for Claude sessions:
-- Explicit trace ID creation using create_trace_id() for consistent trace identity
-- propagate_attributes() context manager sets user_id/session_id/tags in OpenTelemetry context
-- Root span establishes the trace with proper name and nesting hierarchy
-- Child observations created via span object method for automatic nesting
+- Session-based grouping via propagate_attributes() with session_id
+- Each interaction creates a separate trace (not nested) with usage data
+- All traces grouped in Langfuse Sessions view by session_id
+- Simplified pattern focused on usage and cost tracking, not hierarchy
 - Security features (secret sanitization, timeouts)
 
-SDK v3 pattern (span object method for nesting):
-1. Create trace ID explicitly using create_trace_id(seed=session_id) for deterministic IDs
-2. propagate_attributes() ensures user_id/session_id/tags flow to all observations
-3. Root span created with trace_context pointing to explicit trace ID
-4. Root span context kept active throughout session (not exited until finalize)
-5. update_current_trace() sets the trace name visible in Langfuse UI
-6. All child observations use root_span.start_as_current_observation() for automatic nesting
-7. Usage data set via .update(usage_details={...}) after observation creation (SDK v3 API)
-8. Summary generation with Anthropic-specific usage_details enables auto-cost calculation
+SDK v3 pattern (session-based grouping for usage tracking):
+1. Enter propagate_attributes() context with user_id, session_id, tags
+2. Each turn/interaction creates a separate trace via start_as_current_observation()
+3. All traces automatically grouped by session_id in Langfuse Sessions tab
+4. Usage data set via .update(usage_details={...}) after observation creation (SDK v3 API)
+5. Summary generation at session end with total usage_details for cost calculation
 
-CRITICAL: For automatic parent-child nesting in SDK v3:
-- Call root_span.start_as_current_observation() NOT langfuse_client.start_as_current_observation()
-- The global client method creates root-level observations, not children
-- The span object method creates properly nested children automatically
-- Keep root span context active throughout session for nesting to work
+This pattern is simpler and more appropriate when:
+- Primary goal is usage/cost tracking, not performance analysis
+- Don't need hierarchical nesting of observations
+- Want to see each interaction as a separate trace with its own cost
 
 Anthropic-specific cost tracking:
 - Claude SDK only provides session-level usage in ResultMessage (no per-turn usage)
@@ -47,21 +43,15 @@ class ObservabilityManager:
     Handles initialization, event tracking, and cleanup for Langfuse with
     security features (secret sanitization, timeouts).
 
-    SDK v3 pattern (span object method for nesting):
-    - create_trace_id() creates explicit trace ID for consistent identity
+    SDK v3 pattern (session-based grouping for usage tracking):
     - propagate_attributes() context manager sets user_id/session_id/tags in OTel context
-    - Root span with trace_context establishes the trace hierarchy
-    - Root span context kept active throughout session (not exited until finalize)
-    - update_current_trace() sets the trace name visible in Langfuse UI
-    - Child observations use root_span.start_as_current_observation() for automatic nesting
-    - All observations automatically inherit user_id/session_id/tags
+    - Each interaction creates a separate trace (not nested)
+    - All traces grouped by session_id in Langfuse Sessions view
     - Usage data set via .update(usage_details={...}) after observation creation
     - Summary generation with Anthropic-specific usage_details enables auto-cost calculation
 
-    CRITICAL: For automatic parent-child nesting in SDK v3:
-    - Call root_span.start_as_current_observation() NOT langfuse_client.start_as_current_observation()
-    - The global client method creates root-level observations, not children
-    - The span object method creates properly nested children automatically
+    This simplified pattern is focused on usage/cost tracking, not performance hierarchy.
+    All traces for a session can be viewed together in the Sessions tab in Langfuse UI.
 
     Anthropic cost tracking:
     - Claude SDK only provides session-level usage (no per-turn data)
@@ -83,10 +73,7 @@ class ObservabilityManager:
 
         # Langfuse state
         self.langfuse_client = None
-        self._propagate_ctx = None  # propagate_attributes() context manager
-        self._root_span_ctx = None  # Root span context manager
-        self._root_span = None  # Root span object (kept active for child nesting)
-        self._trace_id = None  # Trace ID for explicit trace identity
+        self._propagate_ctx = None  # propagate_attributes() context manager (for session grouping)
         self._langfuse_tool_spans: dict[str, Any] = {}
 
         # Track configured model for usage_details in summary generation
@@ -195,23 +182,13 @@ class ObservabilityManager:
 
             trace_tags = ["claude-code", f"namespace:{namespace}"]
 
-            # SDK v3 pattern for span object nesting:
-            # 1. Create trace ID explicitly using create_trace_id() with session_id as seed
-            # 2. Enter propagate_attributes() context (sets user_id/session_id/tags in OTel context)
-            # 3. Create root span with trace_context pointing to the explicit trace ID
-            # 4. Keep root span context active throughout session (not exited until finalize)
-            # 5. All child observations use root_span.start_as_current_observation() for automatic nesting
-            #
-            # This ensures:
-            # - Single trace in Langfuse UI with proper name
-            # - All observations nested under the root span (via span object method)
-            # - Automatic parent-child relationships without manual trace_context
+            # SDK v3 pattern for session-based grouping (simplified for usage tracking):
+            # 1. Enter propagate_attributes() context with user_id, session_id, tags
+            # 2. All subsequent traces automatically grouped by session_id
+            # 3. Each interaction creates a separate trace (not nested)
+            # 4. View all traces together in Langfuse Sessions tab
 
-            # Step 1: Create explicit trace ID (deterministic based on session_id)
-            self._trace_id = self.langfuse_client.create_trace_id(seed=self.session_id)
-            logging.info(f"Langfuse: Created explicit trace_id={self._trace_id} for session {self.session_id}")
-
-            # Step 2: Enter propagate_attributes context
+            # Enter propagate_attributes context - this groups all traces by session_id
             self._propagate_ctx = propagate_attributes(
                 user_id=self.user_id,
                 session_id=self.session_id,
@@ -224,30 +201,8 @@ class ObservabilityManager:
             )
             self._propagate_ctx.__enter__()
 
-            # Step 3: Create root span with explicit trace_context
-            # This creates the root span AND establishes it as the trace in Langfuse UI
-            self._root_span_ctx = self.langfuse_client.start_as_current_span(
-                name="claude_agent_session",
-                input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
-                metadata={
-                    "namespace": namespace,
-                    "user_id": self.user_id,
-                    "session_id": self.session_id,
-                    "user_name": self.user_name
-                },
-                trace_context={"trace_id": self._trace_id}
-            )
-            self._root_span = self._root_span_ctx.__enter__()
-
-            # Step 4: Update the trace name and input using update_current_trace()
-            # This ensures the trace appears with the correct name in Langfuse UI
-            self.langfuse_client.update_current_trace(
-                name="claude_agent_session",
-                input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt}
-            )
-
-            logging.info(f"Langfuse: Root span and trace 'claude_agent_session' created - trace_id={self._trace_id}")
-            logging.info(f"Langfuse: Root span context will remain active for child observation nesting")
+            logging.info(f"Langfuse: Session-based grouping enabled for session {self.session_id}")
+            logging.info(f"Langfuse: All traces will be grouped by session_id in Sessions view")
 
             if self.user_id:
                 logging.info(
@@ -255,10 +210,9 @@ class ObservabilityManager:
                 )
 
             logging.info(
-                f"Langfuse: Root span created with propagate_attributes - "
+                f"Langfuse: propagate_attributes active - "
                 f"user_id={self.user_id}, session_id={self.session_id}, tags={trace_tags}"
             )
-            logging.info("Langfuse tracing enabled for session with active span context")
             return True
 
         except Exception as e:
@@ -280,11 +234,6 @@ class ObservabilityManager:
             logging.debug(f"Langfuse initialization error type: {type(e).__name__}")
 
             # Cleanup any partially initialized state
-            if self._root_span_ctx:
-                try:
-                    self._root_span_ctx.__exit__(None, None, None)
-                except Exception:
-                    pass
             if self._propagate_ctx:
                 try:
                     self._propagate_ctx.__exit__(None, None, None)
@@ -294,9 +243,6 @@ class ObservabilityManager:
             # Continue without Langfuse - don't fail the session
             self.langfuse_client = None
             self._propagate_ctx = None
-            self._root_span = None
-            self._trace_id = None
-            self._parent_observation_id = None
             return False
 
     def track_generation(self, message: Any, model: str, turn_count: int) -> None:
@@ -343,18 +289,16 @@ class ObservabilityManager:
             output_text = "\n".join(text_content)
             logging.debug(f"Langfuse: Extracted {len(output_text)} chars of output text")
 
-            # CRITICAL: Use span object method for automatic parent linking
-            # Calling self._root_span.start_as_current_observation() creates children automatically
-            # DO NOT use self.langfuse_client.start_as_current_observation() - that creates root-level observations!
-            logging.debug(f"Langfuse: Creating generation for turn {turn_count} as child of root span")
+            # Create separate trace for this generation
+            # All traces automatically grouped by session_id via propagate_attributes
+            logging.debug(f"Langfuse: Creating separate trace for turn {turn_count}")
 
-            with self._root_span.start_as_current_observation(
+            with self.langfuse_client.start_as_current_observation(
                 as_type="generation",
                 name=f"claude_response_turn_{turn_count}",
                 input=[{"role": "user", "content": f"Turn {turn_count}"}],
                 model=model,
                 metadata={"turn": turn_count}
-                # No trace_context needed - automatic nesting via span object method!
             ) as generation:
                 generation.update(output=output_text)
 
@@ -374,12 +318,11 @@ class ObservabilityManager:
         """
         if self.langfuse_client:
             try:
-                # CRITICAL: Use span object method for automatic parent linking
-                # Calling self._root_span.start_as_current_observation() creates children automatically
-                # DO NOT use self.langfuse_client.start_as_current_observation() - that creates root-level observations!
-                logging.debug(f"Langfuse: Creating tool span for {tool_name} as child of root span")
+                # Create separate trace for this tool
+                # All traces automatically grouped by session_id via propagate_attributes
+                logging.debug(f"Langfuse: Creating separate trace for tool {tool_name}")
 
-                tool_span_ctx = self._root_span.start_as_current_observation(
+                tool_span_ctx = self.langfuse_client.start_as_current_observation(
                     as_type="span",
                     name=f"tool_{tool_name}",
                     input=tool_input,
@@ -387,7 +330,6 @@ class ObservabilityManager:
                         "tool_id": tool_id,
                         "tool_name": tool_name,
                     }
-                    # No trace_context needed - automatic nesting via span object method!
                 )
                 tool_span = tool_span_ctx.__enter__()
                 # Store both context and span for updating with result later
@@ -491,48 +433,7 @@ class ObservabilityManager:
                             f"Check if the Claude SDK version supports usage tracking."
                         )
 
-                    # Update the trace with output and metadata including usage
-                    trace_metadata = {
-                        "num_turns": result_payload.get("num_turns"),
-                        "duration_ms": result_payload.get("duration_ms"),
-                        "total_cost_usd": result_payload.get("total_cost_usd"),
-                        "subtype": result_payload.get("subtype"),
-                    }
-
-                    # Add usage to metadata for visibility
-                    if usage_dict:
-                        trace_metadata["usage"] = usage_dict
-                        logging.info(f"Langfuse: Adding usage to root span metadata: {usage_dict}")
-                    else:
-                        logging.warning("Langfuse: Skipping usage in trace metadata (no usage data available)")
-
-                    # Update root span with final output, model, and metadata (what appears in Langfuse UI)
-                    # In SDK v3, the root span IS the trace, so update the span directly
-                    if self._root_span:
-                        # Transform usage to Langfuse format if available
-                        # Note: usage_dict["total_tokens"] is calculated above (input + output)
-                        usage_for_span = None
-                        if usage_dict:
-                            usage_for_span = {
-                                "input": usage_dict.get("input_tokens", 0),
-                                "output": usage_dict.get("output_tokens", 0),
-                                "total": usage_dict.get("total_tokens", 0),  # Calculated value
-                                "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens", 0),
-                                "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
-                            }
-
-                        # Get model name for cost calculation
-                        model_name = self.configured_model or os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
-
-                        self._root_span.update(
-                            output=result_payload,
-                            metadata=trace_metadata,
-                            model=model_name,  # Set model for cost calculation
-                            usage_details=usage_for_span  # Set usage directly on span for cost tracking
-                        )
-                        logging.info(f"Langfuse: Updated root span with model={model_name}, final metrics" + (" and usage" if usage_dict else " (NO USAGE)"))
-
-                    # CRITICAL: Create a summary generation with usage_details for Anthropic-specific cost calculation
+                    # CRITICAL: Create a session summary generation with usage_details for cost tracking
                     # This enables Langfuse to automatically calculate costs using custom Claude model pricing
                     # Reference: https://langfuse.com/docs/observability/features/token-and-cost-tracking
                     if usage_dict:
@@ -556,12 +457,11 @@ class ObservabilityManager:
                             }
                             logging.info(f"Langfuse: Creating session_summary with usage_details: {usage_details_dict}")
 
-                            # CRITICAL: Use span object method for automatic parent linking
-                            # Calling self._root_span.start_as_current_observation() creates children automatically
-                            # DO NOT use self.langfuse_client.start_as_current_observation() - that creates root-level observations!
-                            logging.debug(f"Langfuse: Creating session_summary as child of root span")
+                            # Create separate trace for session summary
+                            # All traces automatically grouped by session_id via propagate_attributes
+                            logging.debug(f"Langfuse: Creating session_summary as separate trace")
 
-                            with self._root_span.start_as_current_observation(
+                            with self.langfuse_client.start_as_current_observation(
                                 as_type="generation",
                                 name="session_summary",
                                 model=model_name,
@@ -571,8 +471,8 @@ class ObservabilityManager:
                                     "summary": True,
                                     "num_turns": result_payload.get("num_turns"),
                                     "duration_ms": result_payload.get("duration_ms"),
+                                    "total_cost_usd": result_payload.get("total_cost_usd"),
                                 }
-                                # No trace_context needed - automatic nesting via span object method!
                             ) as generation:
                                 # Update with usage_details after creation (SDK v3 pattern)
                                 generation.update(usage_details=usage_details_dict)
@@ -596,15 +496,6 @@ class ObservabilityManager:
                             f"Without this generation, Langfuse CANNOT calculate costs automatically. "
                             f"Root cause: result_payload['usage'] was {usage_data} (expected dict with input_tokens, output_tokens, etc.)"
                         )
-
-                # NOTE: Removed redundant update_current_trace() call here
-                # The trace name is already set by the root span update in initialize()
-                # In SDK v3, the root span IS the trace, so we don't need to update both
-
-                # End root span context (if it exists)
-                if self._root_span_ctx:
-                    self._root_span_ctx.__exit__(None, None, None)
-                    logging.info("Langfuse root span context exited")
 
                 # Exit propagate_attributes context
                 if self._propagate_ctx:
@@ -630,7 +521,7 @@ class ObservabilityManager:
     async def cleanup_on_error(self, error: Exception) -> None:
         """Finalize trace on error and flush observability data (error path).
 
-        Updates root span with error details, exits root span and propagate_attributes contexts.
+        Exits propagate_attributes context and flushes data.
 
         Args:
             error: Exception that caused the failure
@@ -638,24 +529,6 @@ class ObservabilityManager:
         # Cleanup and flush
         if self.langfuse_client:
             try:
-                # Update root span with error details
-                # In SDK v3, the root span IS the trace, so update the span directly
-                try:
-                    if self._root_span:
-                        self._root_span.update(
-                            output={"error": str(error)},
-                            metadata={"error_type": type(error).__name__, "status": "ERROR"},
-                            level="ERROR"
-                        )
-                        logging.debug("Langfuse: Marked root span as ERROR")
-                except Exception as e:
-                    logging.warning(f"Langfuse: Failed to update root span with error: {e}")
-
-                # End root span context (if it exists from old code)
-                if self._root_span_ctx:
-                    self._root_span_ctx.__exit__(None, None, None)
-                    logging.info("Langfuse root span context exited (error path)")
-
                 # Exit propagate_attributes context
                 if self._propagate_ctx:
                     self._propagate_ctx.__exit__(None, None, None)
