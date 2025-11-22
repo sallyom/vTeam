@@ -216,7 +216,7 @@ class ObservabilityManager:
 
             # Get the current trace_id from the active context
             self._trace_id = self.langfuse_client.get_current_trace_id()
-            logging.debug(f"Langfuse: Root span created - trace_id={self._trace_id}")
+            logging.info(f"Langfuse: Root span created - trace_id={self._trace_id}")
 
             # Step 3: Update the root span to ensure it has the correct name
             # This might help the trace get the correct name in the UI
@@ -225,7 +225,7 @@ class ObservabilityManager:
                     name="claude_agent_session",
                     input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt}
                 )
-                logging.debug("Langfuse: Updated root span name")
+                logging.info("Langfuse: ✅ Updated root span name to 'claude_agent_session'")
 
             # Step 4: Set trace-level name and input (what appears in Langfuse UI trace list)
             self.langfuse_client.update_current_trace(
@@ -238,7 +238,7 @@ class ObservabilityManager:
                     "user_name": self.user_name
                 }
             )
-            logging.debug("Langfuse: Updated current trace name and metadata")
+            logging.info("Langfuse: ✅ Updated current trace name to 'claude_agent_session'")
 
             if self.user_id:
                 logging.info(
