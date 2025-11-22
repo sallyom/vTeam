@@ -67,9 +67,8 @@ class ObservabilityManager:
         # Langfuse state
         self.langfuse_client = None
         self._propagate_ctx = None  # propagate_attributes() context manager
-        self._root_span = None  # Root span object
+        self._root_span = None  # Root trace object (not a span)
         self._trace_id = None  # Trace ID for explicit parent linking
-        self._parent_observation_id = None  # Root span ID for explicit parent linking
         self._langfuse_tool_spans: dict[str, Any] = {}
 
         # Track configured model for usage_details in summary generation
@@ -200,9 +199,9 @@ class ObservabilityManager:
             )
             self._propagate_ctx.__enter__()
 
-            # Step 2: Create root span for explicit parent linking (no context manager needed)
-            # Use start_span() for manual lifecycle - returns span with trace_id and id
-            self._root_span = self.langfuse_client.start_span(
+            # Step 2: Create root trace using trace() instead of start_span()
+            # This creates a trace-level container that child observations can link to
+            self._root_span = self.langfuse_client.trace(
                 name="claude_agent_session",
                 input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
                 metadata={
@@ -213,10 +212,10 @@ class ObservabilityManager:
                 }
             )
 
-            # Store trace_id and parent_id for explicit linking of child observations
-            self._trace_id = self._root_span.trace_id
-            self._parent_observation_id = self._root_span.id
-            logging.debug(f"Langfuse: Root span created - trace_id={self._trace_id}, parent_id={self._parent_observation_id}")
+            # Store trace_id for explicit linking of child observations
+            # With trace(), we use trace_id as parent, not a span id
+            self._trace_id = self._root_span.id
+            logging.debug(f"Langfuse: Root trace created - trace_id={self._trace_id}")
 
             # Step 3: Set trace-level name and input (what appears in Langfuse UI trace list)
             self.langfuse_client.update_current_trace(
@@ -318,13 +317,12 @@ class ObservabilityManager:
             output_text = "\n".join(text_content)
             logging.debug(f"Langfuse: Extracted {len(output_text)} chars of output text")
 
-            # EXPLICIT PARENT LINKING: Use trace_context parameter with SDK v3
-            # trace_context dict with trace_id and parent_span_id
-            logging.debug(f"Langfuse: Creating generation for turn {turn_count} with trace_context")
+            # EXPLICIT PARENT LINKING: Link to trace using trace_id only
+            # Since root is a trace (not a span), child observations link directly to trace
+            logging.debug(f"Langfuse: Creating generation for turn {turn_count} with trace_id={self._trace_id}")
 
             trace_context = {
-                "trace_id": self._trace_id,
-                "parent_span_id": self._parent_observation_id
+                "trace_id": self._trace_id
             }
 
             with self.langfuse_client.start_as_current_observation(
@@ -353,10 +351,9 @@ class ObservabilityManager:
         """
         if self.langfuse_client:
             try:
-                # EXPLICIT PARENT LINKING: Use trace_context parameter with SDK v3
+                # EXPLICIT PARENT LINKING: Link to trace using trace_id only
                 trace_context = {
-                    "trace_id": self._trace_id,
-                    "parent_span_id": self._parent_observation_id
+                    "trace_id": self._trace_id
                 }
 
                 tool_span_ctx = self.langfuse_client.start_as_current_observation(
@@ -519,8 +516,7 @@ class ObservabilityManager:
                             logging.info(f"Langfuse: Creating session_summary with usage_details: {usage_details_dict}")
 
                             trace_context = {
-                                "trace_id": self._trace_id,
-                                "parent_span_id": self._parent_observation_id
+                                "trace_id": self._trace_id
                             }
 
                             with self.langfuse_client.start_as_current_observation(
