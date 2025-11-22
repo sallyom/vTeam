@@ -318,19 +318,24 @@ class ObservabilityManager:
             output_text = "\n".join(text_content)
             logging.debug(f"Langfuse: Extracted {len(output_text)} chars of output text")
 
-            # EXPLICIT PARENT LINKING: Use generation() with trace_id and parent_observation_id
-            # This bypasses OTel context issues and directly links to root span
-            logging.debug(f"Langfuse: Creating generation for turn {turn_count} with explicit parent linking")
+            # EXPLICIT PARENT LINKING: Use trace_context parameter with SDK v3
+            # trace_context dict with trace_id and parent_span_id
+            logging.debug(f"Langfuse: Creating generation for turn {turn_count} with trace_context")
 
-            generation = self.langfuse_client.generation(
-                trace_id=self._trace_id,
-                parent_observation_id=self._parent_observation_id,
+            trace_context = {
+                "trace_id": self._trace_id,
+                "parent_span_id": self._parent_observation_id
+            }
+
+            with self.langfuse_client.start_as_current_observation(
+                as_type="generation",
                 name=f"claude_response_turn_{turn_count}",
                 input=[{"role": "user", "content": f"Turn {turn_count}"}],
-                output=output_text,
                 model=model,
-                metadata={"turn": turn_count}
-            )
+                metadata={"turn": turn_count},
+                trace_context=trace_context
+            ) as generation:
+                generation.update(output=output_text)
 
             logging.info(f"Langfuse: Tracked generation for turn {turn_count} with {len(output_text)} chars (usage pending)")
         except Exception as e:
@@ -348,21 +353,26 @@ class ObservabilityManager:
         """
         if self.langfuse_client:
             try:
-                # EXPLICIT PARENT LINKING: Use span() with trace_id and parent_observation_id
-                # This bypasses OTel context issues and directly links to root span
-                tool_span = self.langfuse_client.span(
-                    trace_id=self._trace_id,
-                    parent_observation_id=self._parent_observation_id,
+                # EXPLICIT PARENT LINKING: Use trace_context parameter with SDK v3
+                trace_context = {
+                    "trace_id": self._trace_id,
+                    "parent_span_id": self._parent_observation_id
+                }
+
+                tool_span_ctx = self.langfuse_client.start_as_current_observation(
+                    as_type="span",
                     name=f"tool_{tool_name}",
                     input=tool_input,
                     metadata={
                         "tool_id": tool_id,
                         "tool_name": tool_name,
-                    }
+                    },
+                    trace_context=trace_context
                 )
-                # Store span object for updating with result later
-                self._langfuse_tool_spans[tool_id] = tool_span
-                logging.debug(f"Langfuse: Created tool span for {tool_name} with explicit parent linking")
+                tool_span = tool_span_ctx.__enter__()
+                # Store both context and span for updating with result later
+                self._langfuse_tool_spans[tool_id] = (tool_span_ctx, tool_span)
+                logging.debug(f"Langfuse: Created tool span for {tool_name} with trace_context")
             except Exception as e:
                 logging.debug(f"Failed to create Langfuse tool span: {e}")
 
@@ -377,7 +387,7 @@ class ObservabilityManager:
         # Update Langfuse tool span with result
         if tool_use_id in self._langfuse_tool_spans:
             try:
-                tool_span = self._langfuse_tool_spans[tool_use_id]
+                tool_span_ctx, tool_span = self._langfuse_tool_spans[tool_use_id]
                 # Truncate long results with indicator
                 if content:
                     result_text = str(content)
@@ -386,16 +396,16 @@ class ObservabilityManager:
                 else:
                     result_text = "No output"
 
-                # Update span with result (explicit linking pattern doesn't need context exit)
+                # Update span with result then exit context
                 tool_span.update(
                     output={"result": result_text},
                     level="ERROR" if is_error else "DEFAULT",
                     metadata={"is_error": is_error or False}
                 )
-                tool_span.end()
+                tool_span_ctx.__exit__(None, None, None)
 
                 del self._langfuse_tool_spans[tool_use_id]
-                logging.debug(f"Langfuse: Updated and ended tool span for {tool_use_id}")
+                logging.debug(f"Langfuse: Updated and closed tool span for {tool_use_id}")
             except Exception as e:
                 logging.debug(f"Failed to update Langfuse tool span: {e}")
 
@@ -495,7 +505,7 @@ class ObservabilityManager:
                             model_name = self.configured_model or os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
                             logging.info(f"Langfuse: Using model for session_summary: {model_name}")
 
-                            # EXPLICIT PARENT LINKING: Use generation() with trace_id and parent_observation_id
+                            # EXPLICIT PARENT LINKING: Use trace_context parameter with SDK v3
                             # CRITICAL: Transform Claude SDK field names to Langfuse generic format
                             # Claude SDK uses: "input_tokens", "output_tokens", "total_tokens"
                             # Langfuse expects: "input", "output", "total"
@@ -508,21 +518,28 @@ class ObservabilityManager:
                             }
                             logging.info(f"Langfuse: Creating session_summary with usage_details: {usage_details_dict}")
 
-                            generation = self.langfuse_client.generation(
-                                trace_id=self._trace_id,
-                                parent_observation_id=self._parent_observation_id,
+                            trace_context = {
+                                "trace_id": self._trace_id,
+                                "parent_span_id": self._parent_observation_id
+                            }
+
+                            with self.langfuse_client.start_as_current_observation(
+                                as_type="generation",
                                 name="session_summary",
                                 model=model_name,
                                 input=[{"role": "system", "content": "Session usage summary"}],
                                 output=f"Session completed with {result_payload.get('num_turns')} turns",
-                                usage_details=usage_details_dict,
+                                usage=usage_details_dict,
                                 metadata={
                                     "summary": True,
                                     "num_turns": result_payload.get("num_turns"),
                                     "duration_ms": result_payload.get("duration_ms"),
-                                }
-                            )
-                            logging.info("Langfuse: session_summary generation created with explicit parent linking")
+                                },
+                                trace_context=trace_context
+                            ) as generation:
+                                # Generation is created with all parameters above
+                                pass
+                            logging.info("Langfuse: session_summary generation created with explicit parent linking and trace_context")
 
                             logging.info(
                                 f"Langfuse: ✅ SUCCESS - Created session_summary generation with usage_details: "
