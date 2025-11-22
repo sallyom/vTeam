@@ -312,6 +312,16 @@ class ObservabilityManager:
             ) as generation:
                 generation.update(output=output_text)
 
+            # Update trace name after first generation (while context is still active)
+            if turn_count == 0:
+                try:
+                    self.langfuse_client.update_current_trace(
+                        name="claude_agent_session"
+                    )
+                    logging.info("Langfuse: ✅ Updated trace name to 'claude_agent_session' after first generation")
+                except Exception as e:
+                    logging.warning(f"Langfuse: Failed to update trace name: {e}")
+
             logging.info(f"Langfuse: Tracked generation for turn {turn_count} with {len(output_text)} chars (usage pending)")
         except Exception as e:
             logging.error(f"Langfuse: Failed to create generation: {e}", exc_info=True)
