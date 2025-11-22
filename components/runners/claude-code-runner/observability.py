@@ -318,21 +318,16 @@ class ObservabilityManager:
             output_text = "\n".join(text_content)
             logging.debug(f"Langfuse: Extracted {len(output_text)} chars of output text")
 
-            # EXPLICIT PARENT LINKING: Link to trace using trace_id only
-            # Since root is a trace (not a span), child observations link directly to trace
-            logging.debug(f"Langfuse: Creating generation for turn {turn_count} with trace_id={self._trace_id}")
-
-            trace_context = {
-                "trace_id": self._trace_id
-            }
+            # Use OTel context propagation - we're already inside root span context
+            # No need for explicit trace_context since start_as_current_span created the context
+            logging.debug(f"Langfuse: Creating generation for turn {turn_count} in current context")
 
             with self.langfuse_client.start_as_current_observation(
                 as_type="generation",
                 name=f"claude_response_turn_{turn_count}",
                 input=[{"role": "user", "content": f"Turn {turn_count}"}],
                 model=model,
-                metadata={"turn": turn_count},
-                trace_context=trace_context
+                metadata={"turn": turn_count}
             ) as generation:
                 generation.update(output=output_text)
 
@@ -352,11 +347,7 @@ class ObservabilityManager:
         """
         if self.langfuse_client:
             try:
-                # EXPLICIT PARENT LINKING: Link to trace using trace_id only
-                trace_context = {
-                    "trace_id": self._trace_id
-                }
-
+                # Use OTel context propagation - we're already inside root span context
                 tool_span_ctx = self.langfuse_client.start_as_current_observation(
                     as_type="span",
                     name=f"tool_{tool_name}",
@@ -364,13 +355,12 @@ class ObservabilityManager:
                     metadata={
                         "tool_id": tool_id,
                         "tool_name": tool_name,
-                    },
-                    trace_context=trace_context
+                    }
                 )
                 tool_span = tool_span_ctx.__enter__()
                 # Store both context and span for updating with result later
                 self._langfuse_tool_spans[tool_id] = (tool_span_ctx, tool_span)
-                logging.debug(f"Langfuse: Created tool span for {tool_name} with trace_context")
+                logging.debug(f"Langfuse: Created tool span for {tool_name} in current context")
             except Exception as e:
                 logging.debug(f"Failed to create Langfuse tool span: {e}")
 
@@ -516,10 +506,7 @@ class ObservabilityManager:
                             }
                             logging.info(f"Langfuse: Creating session_summary with usage_details: {usage_details_dict}")
 
-                            trace_context = {
-                                "trace_id": self._trace_id
-                            }
-
+                            # Use OTel context propagation - we're already inside root span context
                             with self.langfuse_client.start_as_current_observation(
                                 as_type="generation",
                                 name="session_summary",
@@ -531,12 +518,11 @@ class ObservabilityManager:
                                     "summary": True,
                                     "num_turns": result_payload.get("num_turns"),
                                     "duration_ms": result_payload.get("duration_ms"),
-                                },
-                                trace_context=trace_context
+                                }
                             ) as generation:
                                 # Generation is created with all parameters above
                                 pass
-                            logging.info("Langfuse: session_summary generation created with explicit parent linking and trace_context")
+                            logging.info("Langfuse: session_summary generation created in current context")
 
                             logging.info(
                                 f"Langfuse: ✅ SUCCESS - Created session_summary generation with usage_details: "
