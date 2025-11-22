@@ -1,26 +1,31 @@
 """
-Observability manager for Claude Code runner - SDK v3 pattern with explicit trace creation.
+Observability manager for Claude Code runner - SDK v3 pattern with explicit parent linking.
 
 Provides Langfuse LLM observability for Claude sessions:
 - Explicit trace ID creation using create_trace_id() for consistent trace identity
 - propagate_attributes() context manager sets user_id/session_id/tags in OpenTelemetry context
 - Root span establishes the trace with proper name and nesting hierarchy
-- Generations and tool spans are tracked as children of the root span
+- Explicit parent linking via parent_span_id for reliable observation nesting
 - Security features (secret sanitization, timeouts)
 
-SDK v3 pattern (explicit trace creation):
+SDK v3 pattern (explicit trace creation and parent linking):
 1. Create trace ID explicitly using create_trace_id(seed=session_id) for deterministic IDs
 2. propagate_attributes() ensures user_id/session_id/tags flow to all observations
 3. Root span created with trace_context pointing to explicit trace ID
-4. update_current_trace() sets the trace name visible in Langfuse UI
-5. All child observations use the same trace_context for proper nesting
-6. Usage data tracked in root span metadata for visibility
-7. Summary generation with Anthropic-specific usage_details enables auto-cost calculation
+4. Capture parent_observation_id using get_current_observation_id() while root span is active
+5. update_current_trace() sets the trace name visible in Langfuse UI
+6. All child observations use trace_context with BOTH trace_id AND parent_span_id for proper nesting
+7. Usage data set via .update(usage_details={...}) after observation creation (SDK v3 API)
+8. Summary generation with Anthropic-specific usage_details enables auto-cost calculation
+
+CRITICAL: In long-running async sessions, OpenTelemetry context does NOT persist reliably.
+Therefore, child observations MUST use explicit parent linking via:
+  trace_context = {"trace_id": trace_id, "parent_span_id": parent_observation_id}
 
 Anthropic-specific cost tracking:
 - Claude SDK only provides session-level usage in ResultMessage (no per-turn usage)
 - We create a "session_summary" generation at the end with all usage data
-- usage_details fields (input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens)
+- usage_details set via .update() method with fields: input, output, total, cache_read_input_tokens, cache_creation_input_tokens
 - Langfuse automatically calculates costs using configured Claude model pricing
 - Reference: https://langfuse.com/docs/observability/features/token-and-cost-tracking
 """
@@ -40,15 +45,19 @@ class ObservabilityManager:
     Handles initialization, event tracking, and cleanup for Langfuse with
     security features (secret sanitization, timeouts).
 
-    SDK v3 pattern (explicit trace creation):
+    SDK v3 pattern (explicit trace creation and parent linking):
     - create_trace_id() creates explicit trace ID for consistent identity
     - propagate_attributes() context manager sets user_id/session_id/tags in OTel context
     - Root span with trace_context establishes the trace hierarchy
+    - get_current_observation_id() captures parent_observation_id for child linking
     - update_current_trace() sets the trace name visible in Langfuse UI
-    - Generations and tool spans are children of the root span
+    - Child observations use trace_context with BOTH trace_id AND parent_span_id
     - All observations automatically inherit user_id/session_id/tags
-    - Usage data tracked in root span metadata for visibility
+    - Usage data set via .update(usage_details={...}) after observation creation
     - Summary generation with Anthropic-specific usage_details enables auto-cost calculation
+
+    CRITICAL: OpenTelemetry context does NOT persist in long-running async sessions.
+    All child observations MUST use explicit parent linking via parent_span_id.
 
     Anthropic cost tracking:
     - Claude SDK only provides session-level usage (no per-turn data)
@@ -74,6 +83,7 @@ class ObservabilityManager:
         self._root_span_ctx = None  # Root span context manager
         self._root_span = None  # Root span object
         self._trace_id = None  # Trace ID for explicit parent linking
+        self._parent_observation_id = None  # Root span observation ID for nesting children
         self._langfuse_tool_spans: dict[str, Any] = {}
 
         # Track configured model for usage_details in summary generation
@@ -182,16 +192,17 @@ class ObservabilityManager:
 
             trace_tags = ["claude-code", f"namespace:{namespace}"]
 
-            # SDK v3 pattern for explicit trace creation:
+            # SDK v3 pattern for explicit trace creation and parent linking:
             # 1. Create trace ID explicitly using create_trace_id() with session_id as seed
             # 2. Enter propagate_attributes() context (sets user_id/session_id/tags in OTel context)
             # 3. Create root span with trace_context pointing to the explicit trace ID
-            # 4. All child observations use the same trace_context for proper nesting
+            # 4. Capture parent_observation_id using get_current_observation_id() for child linking
+            # 5. All child observations use trace_context with BOTH trace_id AND parent_span_id
             #
             # This ensures:
             # - Single trace in Langfuse UI with proper name
             # - All observations nested under the root span
-            # - Consistent trace ID across all operations
+            # - Reliable parent-child relationships in long-running async sessions
 
             # Step 1: Create explicit trace ID (deterministic based on session_id)
             self._trace_id = self.langfuse_client.create_trace_id(seed=self.session_id)
@@ -225,7 +236,12 @@ class ObservabilityManager:
             )
             self._root_span = self._root_span_ctx.__enter__()
 
-            # Step 4: Update the trace name and input using update_current_trace()
+            # Step 4: CRITICAL - Capture parent observation ID while context is active
+            # This is needed for explicit parent linking in long-running async sessions
+            self._parent_observation_id = self.langfuse_client.get_current_observation_id()
+            logging.info(f"Langfuse: Captured parent_observation_id={self._parent_observation_id} for nesting children")
+
+            # Step 5: Update the trace name and input using update_current_trace()
             # This ensures the trace appears with the correct name in Langfuse UI
             self.langfuse_client.update_current_trace(
                 name="claude_agent_session",
@@ -330,8 +346,11 @@ class ObservabilityManager:
 
             # CRITICAL: Use explicit trace_context for parent linking
             # OpenTelemetry context doesn't persist across async boundaries in long-running sessions
-            # Must explicitly link to trace_id captured during initialization
-            trace_context = {"trace_id": self._trace_id}
+            # Must explicitly link to both trace_id AND parent_span_id for proper nesting
+            trace_context = {
+                "trace_id": self._trace_id,
+                "parent_span_id": self._parent_observation_id  # Links generation to root span
+            }
             logging.debug(f"Langfuse: Creating generation for turn {turn_count} with explicit trace_context={trace_context}")
 
             with self.langfuse_client.start_as_current_observation(
@@ -362,7 +381,11 @@ class ObservabilityManager:
             try:
                 # CRITICAL: Use explicit trace_context for parent linking
                 # OpenTelemetry context doesn't persist across async boundaries in long-running sessions
-                trace_context = {"trace_id": self._trace_id}
+                # Must explicitly link to both trace_id AND parent_span_id for proper nesting
+                trace_context = {
+                    "trace_id": self._trace_id,
+                    "parent_span_id": self._parent_observation_id  # Links tool to root span
+                }
                 logging.debug(f"Langfuse: Creating tool span for {tool_name} with explicit trace_context={trace_context}")
 
                 tool_span_ctx = self.langfuse_client.start_as_current_observation(
@@ -514,7 +537,7 @@ class ObservabilityManager:
                             output=result_payload,
                             metadata=trace_metadata,
                             model=model_name,  # Set model for cost calculation
-                            usage=usage_for_span  # Set usage directly on span for cost tracking
+                            usage_details=usage_for_span  # Set usage directly on span for cost tracking
                         )
                         logging.info(f"Langfuse: Updated root span with model={model_name}, final metrics" + (" and usage" if usage_dict else " (NO USAGE)"))
 
@@ -544,7 +567,11 @@ class ObservabilityManager:
 
                             # CRITICAL: Use explicit trace_context for parent linking
                             # OpenTelemetry context doesn't persist across async boundaries in long-running sessions
-                            trace_context = {"trace_id": self._trace_id}
+                            # Must explicitly link to both trace_id AND parent_span_id for proper nesting
+                            trace_context = {
+                                "trace_id": self._trace_id,
+                                "parent_span_id": self._parent_observation_id  # Links summary to root span
+                            }
                             logging.debug(f"Langfuse: Creating session_summary with explicit trace_context={trace_context}")
 
                             with self.langfuse_client.start_as_current_observation(
@@ -553,7 +580,6 @@ class ObservabilityManager:
                                 model=model_name,
                                 input=[{"role": "system", "content": "Session usage summary"}],
                                 output=f"Session completed with {result_payload.get('num_turns')} turns",
-                                usage=usage_details_dict,
                                 metadata={
                                     "summary": True,
                                     "num_turns": result_payload.get("num_turns"),
@@ -561,8 +587,8 @@ class ObservabilityManager:
                                 },
                                 trace_context=trace_context
                             ) as generation:
-                                # Generation is created with all parameters above
-                                pass
+                                # Update with usage_details after creation (SDK v3 pattern)
+                                generation.update(usage_details=usage_details_dict)
                             logging.info("Langfuse: session_summary generation created with explicit parent linking")
 
                             logging.info(
