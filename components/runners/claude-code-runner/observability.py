@@ -187,11 +187,7 @@ class ObservabilityManager:
             # causing SDK operations to be silently skipped with warning:
             # "No active span in current context. Operations that depend on an active span will be skipped."
 
-            # APPROACH: No explicit root span, just propagate_attributes
-            # Let the first observation create the trace automatically
-            # We'll update the trace name in finalize() after all observations are complete
-
-            # Enter propagate_attributes context to set user/session for all observations
+            # Step 1: Enter propagate_attributes context
             self._propagate_ctx = propagate_attributes(
                 user_id=self.user_id,
                 session_id=self.session_id,
@@ -203,7 +199,22 @@ class ObservabilityManager:
                 }
             )
             self._propagate_ctx.__enter__()
-            logging.info("Langfuse: propagate_attributes context entered - all observations will inherit user/session/tags")
+
+            # Step 2: Create root span - REQUIRED for nesting to work
+            # The trace name in UI will be "claude_agent_session"
+            self._root_span_ctx = self.langfuse_client.start_as_current_span(
+                name="claude_agent_session",
+                input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
+                metadata={
+                    "namespace": namespace,
+                    "user_id": self.user_id,
+                    "session_id": self.session_id,
+                    "user_name": self.user_name
+                }
+            )
+            self._root_span = self._root_span_ctx.__enter__()
+            self._trace_id = self.langfuse_client.get_current_trace_id()
+            logging.info(f"Langfuse: Root span 'claude_agent_session' created - trace_id={self._trace_id}")
 
             if self.user_id:
                 logging.info(
@@ -311,16 +322,6 @@ class ObservabilityManager:
                 metadata={"turn": turn_count}
             ) as generation:
                 generation.update(output=output_text)
-
-            # Update trace name after first generation (while context is still active)
-            if turn_count == 0:
-                try:
-                    self.langfuse_client.update_current_trace(
-                        name="claude_agent_session"
-                    )
-                    logging.info("Langfuse: ✅ Updated trace name to 'claude_agent_session' after first generation")
-                except Exception as e:
-                    logging.warning(f"Langfuse: Failed to update trace name: {e}")
 
             logging.info(f"Langfuse: Tracked generation for turn {turn_count} with {len(output_text)} chars (usage pending)")
         except Exception as e:
