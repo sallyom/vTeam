@@ -320,16 +320,19 @@ class ObservabilityManager:
             output_text = "\n".join(text_content)
             logging.debug(f"Langfuse: Extracted {len(output_text)} chars of output text")
 
-            # Use OTel context propagation - we're already inside root span context
-            # No need for explicit trace_context since start_as_current_span created the context
-            logging.debug(f"Langfuse: Creating generation for turn {turn_count} in current context")
+            # CRITICAL: Use explicit trace_context for parent linking
+            # OpenTelemetry context doesn't persist across async boundaries in long-running sessions
+            # Must explicitly link to trace_id captured during initialization
+            trace_context = {"trace_id": self._trace_id}
+            logging.debug(f"Langfuse: Creating generation for turn {turn_count} with explicit trace_context={trace_context}")
 
             with self.langfuse_client.start_as_current_observation(
                 as_type="generation",
                 name=f"claude_response_turn_{turn_count}",
                 input=[{"role": "user", "content": f"Turn {turn_count}"}],
                 model=model,
-                metadata={"turn": turn_count}
+                metadata={"turn": turn_count},
+                trace_context=trace_context
             ) as generation:
                 generation.update(output=output_text)
 
@@ -349,7 +352,11 @@ class ObservabilityManager:
         """
         if self.langfuse_client:
             try:
-                # Use OTel context propagation - we're already inside root span context
+                # CRITICAL: Use explicit trace_context for parent linking
+                # OpenTelemetry context doesn't persist across async boundaries in long-running sessions
+                trace_context = {"trace_id": self._trace_id}
+                logging.debug(f"Langfuse: Creating tool span for {tool_name} with explicit trace_context={trace_context}")
+
                 tool_span_ctx = self.langfuse_client.start_as_current_observation(
                     as_type="span",
                     name=f"tool_{tool_name}",
@@ -357,12 +364,13 @@ class ObservabilityManager:
                     metadata={
                         "tool_id": tool_id,
                         "tool_name": tool_name,
-                    }
+                    },
+                    trace_context=trace_context
                 )
                 tool_span = tool_span_ctx.__enter__()
                 # Store both context and span for updating with result later
                 self._langfuse_tool_spans[tool_id] = (tool_span_ctx, tool_span)
-                logging.debug(f"Langfuse: Created tool span for {tool_name} in current context")
+                logging.debug(f"Langfuse: Created tool span for {tool_name} with explicit parent linking")
             except Exception as e:
                 logging.debug(f"Failed to create Langfuse tool span: {e}")
 
@@ -439,14 +447,19 @@ class ObservabilityManager:
                     # Build usage dict for metadata
                     usage_dict = None
                     if usage_data and isinstance(usage_data, dict):
+                        input_tokens = usage_data.get("input_tokens", 0)
+                        output_tokens = usage_data.get("output_tokens", 0)
+                        # CRITICAL: Claude SDK does NOT provide total_tokens - we must calculate it!
+                        total_tokens = input_tokens + output_tokens
+
                         usage_dict = {
-                            "input_tokens": usage_data.get("input_tokens", 0),
-                            "output_tokens": usage_data.get("output_tokens", 0),
-                            "total_tokens": usage_data.get("total_tokens", 0),
+                            "input_tokens": input_tokens,
+                            "output_tokens": output_tokens,
+                            "total_tokens": total_tokens,  # Calculated, not extracted
                             "cache_read_input_tokens": usage_data.get("cache_read_input_tokens", 0),
                             "cache_creation_input_tokens": usage_data.get("cache_creation_input_tokens", 0),
                         }
-                        logging.info(f"Langfuse: ✅ Extracted usage from ResultMessage for metadata: {usage_dict}")
+                        logging.info(f"Langfuse: ✅ Extracted usage from ResultMessage for metadata: {usage_dict} (total_tokens calculated)")
                     else:
                         logging.warning(
                             f"Langfuse: ⚠️ NO USAGE DATA FOUND in result_payload! "
@@ -475,12 +488,13 @@ class ObservabilityManager:
                     # In SDK v3, the root span IS the trace, so update the span directly
                     if self._root_span:
                         # Transform usage to Langfuse format if available
+                        # Note: usage_dict["total_tokens"] is calculated above (input + output)
                         usage_for_span = None
                         if usage_dict:
                             usage_for_span = {
                                 "input": usage_dict.get("input_tokens", 0),
                                 "output": usage_dict.get("output_tokens", 0),
-                                "total": usage_dict.get("total_tokens", 0),
+                                "total": usage_dict.get("total_tokens", 0),  # Calculated value
                                 "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens", 0),
                                 "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
                             }
@@ -509,18 +523,22 @@ class ObservabilityManager:
 
                             # EXPLICIT PARENT LINKING: Use trace_context parameter with SDK v3
                             # CRITICAL: Transform Claude SDK field names to Langfuse generic format
-                            # Claude SDK uses: "input_tokens", "output_tokens", "total_tokens"
+                            # Claude SDK uses: "input_tokens", "output_tokens" (total_tokens calculated above)
                             # Langfuse expects: "input", "output", "total"
                             usage_details_dict = {
                                 "input": usage_dict.get("input_tokens", 0),
                                 "output": usage_dict.get("output_tokens", 0),
-                                "total": usage_dict.get("total_tokens", 0),
+                                "total": usage_dict.get("total_tokens", 0),  # Calculated value (input + output)
                                 "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens", 0),
                                 "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
                             }
                             logging.info(f"Langfuse: Creating session_summary with usage_details: {usage_details_dict}")
 
-                            # Use OTel context propagation - we're already inside root span context
+                            # CRITICAL: Use explicit trace_context for parent linking
+                            # OpenTelemetry context doesn't persist across async boundaries in long-running sessions
+                            trace_context = {"trace_id": self._trace_id}
+                            logging.debug(f"Langfuse: Creating session_summary with explicit trace_context={trace_context}")
+
                             with self.langfuse_client.start_as_current_observation(
                                 as_type="generation",
                                 name="session_summary",
@@ -532,16 +550,18 @@ class ObservabilityManager:
                                     "summary": True,
                                     "num_turns": result_payload.get("num_turns"),
                                     "duration_ms": result_payload.get("duration_ms"),
-                                }
+                                },
+                                trace_context=trace_context
                             ) as generation:
                                 # Generation is created with all parameters above
                                 pass
-                            logging.info("Langfuse: session_summary generation created in current context")
+                            logging.info("Langfuse: session_summary generation created with explicit parent linking")
 
                             logging.info(
                                 f"Langfuse: ✅ SUCCESS - Created session_summary generation with usage_details: "
                                 f"input={usage_dict.get('input_tokens', 0)}, "
                                 f"output={usage_dict.get('output_tokens', 0)}, "
+                                f"total={usage_dict.get('total_tokens', 0)}, "
                                 f"cache_read={usage_dict.get('cache_read_input_tokens', 0)}, "
                                 f"cache_creation={usage_dict.get('cache_creation_input_tokens', 0)} "
                                 f"for model {model_name}. "

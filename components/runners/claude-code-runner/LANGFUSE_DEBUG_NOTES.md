@@ -60,15 +60,37 @@ From `dir(langfuse_client)`:
 **Result**: ❌ `AttributeError: 'Langfuse' object has no attribute 'trace'`
 **Root Cause**: `.trace()` method doesn't exist in SDK v3
 
-### Attempt 4: `start_as_current_span()` with context manager (CURRENT)
+### Attempt 4: `start_as_current_span()` with context manager
 **Commit**: ee8e56d
 **Approach**:
 - Root: `start_as_current_span()` with `__enter__()` to activate OTel context
 - Get trace_id from `get_current_trace_id()` after entering context
 - Children: `start_as_current_observation(trace_context={"trace_id": ...})`
 - Cleanup: `__exit__()` on both root span and propagate_attributes contexts
+**Status**: ❌ **FAILED** - Observations created separate unnamed traces
+**Result**: User reported 3 traces instead of 1:
+  1. First `claude_agent_session` trace (initial)
+  2. Second `claude_agent_session` trace
+  3. **Third UNNAMED trace** ← All new observations (turns 2+) went here
+**Root Cause**: Missing `trace_context` parameter in child observation calls!
+  - Lines 327-334: `track_generation()` called `start_as_current_observation()` WITHOUT trace_context
+  - Lines 353-361: `track_tool_use()` called `start_as_current_observation()` WITHOUT trace_context
+  - Lines 530-542: `finalize()` session_summary called `start_as_current_observation()` WITHOUT trace_context
+  - Code had comments saying "Use OTel context propagation - we're already inside root span context"
+  - BUT context doesn't persist across async boundaries in long-running sessions!
+
+### Attempt 5: Explicit trace_context on ALL child observations (CURRENT)
+**Commit**: TBD (this fix)
+**Approach**:
+- Root: Same as Attempt 4 - `start_as_current_span()` with `__enter__()`, capture trace_id
+- Children: **ALWAYS** pass `trace_context={"trace_id": self._trace_id}` to ALL observation calls:
+  - `track_generation()`: Line 335 - Added trace_context parameter
+  - `track_tool_use()`: Line 368 - Added trace_context parameter
+  - `finalize()` session_summary: Line 554 - Added trace_context parameter
+- Cleanup: Same as Attempt 4
 **Status**: 🔄 Testing in progress
-**Expected Outcome**: Proper trace hierarchy with OpenTelemetry context propagation
+**Expected Outcome**: All observations nest under single `claude_agent_session` trace, no unnamed traces
+**Rationale**: OpenTelemetry context is NOT reliable for async/long-running sessions. Must use explicit parent linking via trace_context parameter on EVERY child observation creation.
 
 ## Previous Session Attempts (Before This Session)
 
@@ -98,13 +120,14 @@ The user mentioned ~500 commits of debugging across two branches. Previous attem
 
 ## Current Implementation Details
 
-### Root Span Creation (Attempt 4)
+### Root Span Creation (Attempt 5 - CURRENT)
 ```python
 # Step 1: Set user/session attributes in OTel context
 self._propagate_ctx = self.langfuse_client.propagate_attributes(
     user_id=self.user_id,
     session_id=self.session_id,
-    tags=["claude_agent_session"]
+    tags=["claude_agent_session"],
+    metadata={...}
 )
 self._propagate_ctx.__enter__()
 
@@ -116,18 +139,20 @@ self._root_span_ctx = self.langfuse_client.start_as_current_span(
 )
 self._root_span = self._root_span_ctx.__enter__()
 
-# Step 3: Get trace_id from active context
+# Step 3: Get trace_id from active context - CRITICAL for explicit parent linking!
 self._trace_id = self.langfuse_client.get_current_trace_id()
 
-# Step 4: Update trace-level metadata
-self.langfuse_client.update_current_trace(
+# Step 4: Update root span (not trace - root span IS the trace in SDK v3)
+self._root_span.update(
     name="claude_agent_session",
     input={"prompt": prompt[:1000]}
 )
 ```
 
-### Child Observation Creation (Attempt 4)
+### Child Observation Creation (Attempt 5 - CURRENT)
 ```python
+# CRITICAL: ALWAYS pass trace_context for explicit parent linking
+# OTel context doesn't persist across async boundaries in long-running sessions!
 trace_context = {"trace_id": self._trace_id}
 
 with self.langfuse_client.start_as_current_observation(
@@ -136,12 +161,27 @@ with self.langfuse_client.start_as_current_observation(
     input=[{"role": "user", "content": f"Turn {turn_count}"}],
     model=model,
     metadata={"turn": turn_count},
-    trace_context=trace_context
+    trace_context=trace_context  # ← REQUIRED! Don't rely on OTel context!
 ) as generation:
     generation.update(output=output_text)
 ```
 
-### Session Summary with Usage (Attempt 4)
+### Tool Span Creation (Attempt 5 - CURRENT)
+```python
+# CRITICAL: ALWAYS pass trace_context for explicit parent linking
+trace_context = {"trace_id": self._trace_id}
+
+tool_span_ctx = self.langfuse_client.start_as_current_observation(
+    as_type="span",
+    name=f"tool_{tool_name}",
+    input=tool_input,
+    metadata={"tool_id": tool_id, "tool_name": tool_name},
+    trace_context=trace_context  # ← REQUIRED! Don't rely on OTel context!
+)
+tool_span = tool_span_ctx.__enter__()
+```
+
+### Session Summary with Usage (Attempt 5 - CURRENT)
 ```python
 usage_details_dict = {
     "input": usage_dict.get("input_tokens", 0),
@@ -151,6 +191,7 @@ usage_details_dict = {
     "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
 }
 
+# CRITICAL: ALWAYS pass trace_context for explicit parent linking
 trace_context = {"trace_id": self._trace_id}
 
 with self.langfuse_client.start_as_current_observation(
@@ -158,7 +199,7 @@ with self.langfuse_client.start_as_current_observation(
     name="session_summary",
     model=model_name,
     usage=usage_details_dict,  # Note: "usage" not "usage_details"
-    trace_context=trace_context
+    trace_context=trace_context  # ← REQUIRED! Don't rely on OTel context!
 ) as generation:
     pass
 ```
