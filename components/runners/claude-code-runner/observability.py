@@ -214,7 +214,25 @@ class ObservabilityManager:
             )
             self._root_span = self._root_span_ctx.__enter__()
             self._trace_id = self.langfuse_client.get_current_trace_id()
-            logging.info(f"Langfuse: Root span 'claude_agent_session' created - trace_id={self._trace_id}")
+
+            # Update root span and trace with name and input AFTER entering context
+            self._root_span.update(
+                name="claude_agent_session",
+                input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt}
+            )
+
+            self.langfuse_client.update_current_trace(
+                name="claude_agent_session",
+                input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
+                metadata={
+                    "namespace": namespace,
+                    "user_id": self.user_id,
+                    "session_id": self.session_id,
+                    "user_name": self.user_name
+                }
+            )
+
+            logging.info(f"Langfuse: Root span 'claude_agent_session' created and updated - trace_id={self._trace_id}")
 
             if self.user_id:
                 logging.info(
