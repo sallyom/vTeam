@@ -461,15 +461,16 @@ class ObservabilityManager:
                                     "duration_ms": result_payload.get("duration_ms"),
                                 }
                             ) as generation:
-                                # Update with output and Anthropic-specific usage_details
-                                # Field names match Anthropic API response format
+                                # Update with output and usage_details
+                                # Field names use Langfuse SDK generic format: "input", "output", "total"
+                                # Cache types are custom usage types (must be configured in Langfuse UI model pricing)
                                 generation.update(
                                     output=f"Session completed with {result_payload.get('num_turns')} turns",
                                     usage_details={
-                                        "input_tokens": usage_dict.get("input_tokens", 0),
-                                        "output_tokens": usage_dict.get("output_tokens", 0),
+                                        "input": usage_dict.get("input_tokens", 0),
+                                        "output": usage_dict.get("output_tokens", 0),
+                                        "total": usage_dict.get("total_tokens", 0),
                                         "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens", 0),
-                                        # Include cache creation tokens if available
                                         "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
                                     }
                                 )
@@ -478,10 +479,12 @@ class ObservabilityManager:
                                 f"Langfuse: Created session_summary generation with usage_details: "
                                 f"input={usage_dict.get('input_tokens', 0)}, "
                                 f"output={usage_dict.get('output_tokens', 0)}, "
+                                f"total={usage_dict.get('total_tokens', 0)}, "
                                 f"cache_read={usage_dict.get('cache_read_input_tokens', 0)}, "
                                 f"cache_creation={usage_dict.get('cache_creation_input_tokens', 0)} "
                                 f"for model {model_name}. "
-                                f"Langfuse will automatically calculate cost using custom model pricing."
+                                f"Langfuse will automatically calculate cost using model pricing. "
+                                f"Note: Cache usage types must be configured in Langfuse UI (Settings > Models)."
                             )
                         except Exception as gen_err:
                             logging.error(f"Langfuse: Failed to create summary generation with usage_details: {gen_err}", exc_info=True)
