@@ -69,7 +69,7 @@ class ObservabilityManager:
         # Langfuse state
         self.langfuse_client = None
         self._propagate_ctx = None  # propagate_attributes() context manager
-        self._root_span_ctx = None  # Root span context manager
+        self._root_span = None  # Root span object (using start_span for manual lifecycle)
         self._langfuse_tool_spans: dict[str, Any] = {}
 
         # Track configured model for usage_details in summary generation
@@ -191,13 +191,14 @@ class ObservabilityManager:
             self._propagate_ctx.__enter__()
 
             # Step 2: Create root span to establish the trace
-            # This is REQUIRED for update_current_trace() to work
-            self._root_span_ctx = self.langfuse_client.start_as_current_span(
+            # Use start_span() for manual lifecycle control (NOT start_as_current_span!)
+            # start_span() returns a span object that stays active until .end() is called
+            # This avoids the immediate termination bug from manual __enter__/__exit__
+            self._root_span = self.langfuse_client.start_span(
                 name="claude_agent_session",
                 input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
                 metadata={"namespace": namespace, "user_name": self.user_name}
             )
-            self._root_span_ctx.__enter__()
 
             # Step 3: Update trace-level attributes
             # This sets metadata visible at the trace level in Langfuse UI
@@ -237,9 +238,9 @@ class ObservabilityManager:
             logging.debug(f"Langfuse initialization error type: {type(e).__name__}")
 
             # Cleanup any partially initialized state
-            if self._root_span_ctx:
+            if self._root_span:
                 try:
-                    self._root_span_ctx.__exit__(None, None, None)
+                    self._root_span.end()
                 except Exception:
                     pass
             if self._propagate_ctx:
@@ -251,7 +252,7 @@ class ObservabilityManager:
             # Continue without Langfuse - don't fail the session
             self.langfuse_client = None
             self._propagate_ctx = None
-            self._root_span_ctx = None
+            self._root_span = None
             return False
 
     def track_generation(self, message: Any, model: str, turn_count: int) -> None:
@@ -298,24 +299,18 @@ class ObservabilityManager:
             output_text = "\n".join(text_content)
             logging.debug(f"Langfuse: Extracted {len(output_text)} chars of output text")
 
-            # SDK v3 pattern: Use client.start_as_current_generation()
-            # This creates a generation as a direct child of the trace
-            # User_id/session_id/tags automatically inherited via propagate_attributes()
+            # Use proper with statement for generation (context manager protocol)
+            # Generation completes immediately - this is fine for point-in-time events
             logging.debug(f"Langfuse: Creating generation for turn {turn_count}")
 
-            gen_ctx = self.langfuse_client.start_as_current_generation(
+            with self.langfuse_client.start_as_current_generation(
                 name=f"claude_response_turn_{turn_count}",
                 input=[{"role": "user", "content": f"Turn {turn_count}"}],
                 model=model,
                 metadata={"turn": turn_count}
-            )
-            generation = gen_ctx.__enter__()
-
-            # Update with output (usage will be added in finalize when we get ResultMessage)
-            generation.update(output=output_text)
-
-            # End the generation
-            gen_ctx.__exit__(None, None, None)
+            ) as generation:
+                # Update with output (usage will be added in finalize when we get ResultMessage)
+                generation.update(output=output_text)
 
             logging.info(f"Langfuse: Tracked generation for turn {turn_count} with {len(output_text)} chars (usage pending)")
         except Exception as e:
@@ -333,11 +328,9 @@ class ObservabilityManager:
         """
         if self.langfuse_client:
             try:
-                # SDK v3 pattern: Use client.start_as_current_span()
-                # This creates a span as a direct child of the trace
-                # User_id/session_id/tags automatically inherited via propagate_attributes()
-                # Store context manager to update with result later (in track_tool_result)
-                tool_span_ctx = self.langfuse_client.start_as_current_span(
+                # Use start_span() for manual lifecycle control
+                # Span stays active until .end() is called in track_tool_result
+                tool_span = self.langfuse_client.start_span(
                     name=f"tool_{tool_name}",
                     input=tool_input,
                     metadata={
@@ -345,9 +338,8 @@ class ObservabilityManager:
                         "tool_name": tool_name,
                     }
                 )
-                # Enter context and store both context manager and span object
-                tool_span = tool_span_ctx.__enter__()
-                self._langfuse_tool_spans[tool_id] = (tool_span_ctx, tool_span)
+                # Store span object for later update
+                self._langfuse_tool_spans[tool_id] = tool_span
             except Exception as e:
                 logging.debug(f"Failed to create Langfuse tool span: {e}")
 
@@ -362,7 +354,7 @@ class ObservabilityManager:
         # Update Langfuse tool span with result
         if tool_use_id in self._langfuse_tool_spans:
             try:
-                tool_span_ctx, tool_span = self._langfuse_tool_spans[tool_use_id]
+                tool_span = self._langfuse_tool_spans[tool_use_id]
                 # Truncate long results with indicator
                 if content:
                     result_text = str(content)
@@ -371,15 +363,15 @@ class ObservabilityManager:
                 else:
                     result_text = "No output"
 
-                # SDK v3 pattern: Update span then exit context manager
+                # Update span then end it
                 tool_span.update(
                     output={"result": result_text},
                     level="ERROR" if is_error else "DEFAULT",
                     metadata={"is_error": is_error or False}
                 )
 
-                # Exit the context manager (ends the span)
-                tool_span_ctx.__exit__(None, None, None)
+                # End the span (manual lifecycle)
+                tool_span.end()
                 del self._langfuse_tool_spans[tool_use_id]
             except Exception as e:
                 logging.debug(f"Failed to update Langfuse tool span: {e}")
@@ -457,9 +449,9 @@ class ObservabilityManager:
                             # Falls back to environment variable if no generations were tracked
                             model_name = self.configured_model or os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
 
-                            # Create summary generation with Anthropic-specific usage_details
+                            # Create summary generation with proper with statement
                             # Langfuse expects: input_tokens, output_tokens, cache_read_input_tokens
-                            gen_ctx = self.langfuse_client.start_as_current_generation(
+                            with self.langfuse_client.start_as_current_generation(
                                 name="session_summary",
                                 model=model_name,
                                 input=[{"role": "system", "content": "Session usage summary"}],
@@ -468,24 +460,19 @@ class ObservabilityManager:
                                     "num_turns": result_payload.get("num_turns"),
                                     "duration_ms": result_payload.get("duration_ms"),
                                 }
-                            )
-                            generation = gen_ctx.__enter__()
-
-                            # Update with output and Anthropic-specific usage_details
-                            # Field names match Anthropic API response format
-                            generation.update(
-                                output=f"Session completed with {result_payload.get('num_turns')} turns",
-                                usage_details={
-                                    "input_tokens": usage_dict.get("input_tokens", 0),
-                                    "output_tokens": usage_dict.get("output_tokens", 0),
-                                    "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens", 0),
-                                    # Include cache creation tokens if available
-                                    "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
-                                }
-                            )
-
-                            # End the generation
-                            gen_ctx.__exit__(None, None, None)
+                            ) as generation:
+                                # Update with output and Anthropic-specific usage_details
+                                # Field names match Anthropic API response format
+                                generation.update(
+                                    output=f"Session completed with {result_payload.get('num_turns')} turns",
+                                    usage_details={
+                                        "input_tokens": usage_dict.get("input_tokens", 0),
+                                        "output_tokens": usage_dict.get("output_tokens", 0),
+                                        "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens", 0),
+                                        # Include cache creation tokens if available
+                                        "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
+                                    }
+                                )
 
                             logging.info(
                                 f"Langfuse: Created session_summary generation with usage_details: "
@@ -499,10 +486,10 @@ class ObservabilityManager:
                         except Exception as gen_err:
                             logging.error(f"Langfuse: Failed to create summary generation with usage_details: {gen_err}", exc_info=True)
 
-                # Exit contexts in reverse order (root span first, then propagate_attributes)
-                if self._root_span_ctx:
-                    self._root_span_ctx.__exit__(None, None, None)
-                    logging.info("Langfuse root span context exited")
+                # End root span and exit propagate_attributes context
+                if self._root_span:
+                    self._root_span.end()
+                    logging.info("Langfuse root span ended")
                 if self._propagate_ctx:
                     self._propagate_ctx.__exit__(None, None, None)
                     logging.info("Langfuse propagate_attributes context exited")
@@ -541,10 +528,10 @@ class ObservabilityManager:
                 )
                 logging.debug("Langfuse: Marked trace as ERROR")
 
-                # Exit contexts in reverse order (root span first, then propagate_attributes)
-                if self._root_span_ctx:
-                    self._root_span_ctx.__exit__(None, None, None)
-                    logging.info("Langfuse root span context exited (error path)")
+                # End root span and exit propagate_attributes context
+                if self._root_span:
+                    self._root_span.end()
+                    logging.info("Langfuse root span ended (error path)")
                 if self._propagate_ctx:
                     self._propagate_ctx.__exit__(None, None, None)
                     logging.info("Langfuse propagate_attributes context exited (error path)")
