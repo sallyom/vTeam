@@ -67,7 +67,8 @@ class ObservabilityManager:
         # Langfuse state
         self.langfuse_client = None
         self._propagate_ctx = None  # propagate_attributes() context manager
-        self._root_span = None  # Root trace object (not a span)
+        self._root_span_ctx = None  # Root span context manager
+        self._root_span = None  # Root span object
         self._trace_id = None  # Trace ID for explicit parent linking
         self._langfuse_tool_spans: dict[str, Any] = {}
 
@@ -199,9 +200,9 @@ class ObservabilityManager:
             )
             self._propagate_ctx.__enter__()
 
-            # Step 2: Create root trace using trace() instead of start_span()
-            # This creates a trace-level container that child observations can link to
-            self._root_span = self.langfuse_client.trace(
+            # Step 2: Create root span using start_as_current_span() context manager
+            # This automatically creates a trace and span, sets them as current in OTel context
+            self._root_span_ctx = self.langfuse_client.start_as_current_span(
                 name="claude_agent_session",
                 input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
                 metadata={
@@ -211,11 +212,11 @@ class ObservabilityManager:
                     "user_name": self.user_name
                 }
             )
+            self._root_span = self._root_span_ctx.__enter__()
 
-            # Store trace_id for explicit linking of child observations
-            # With trace(), we use trace_id as parent, not a span id
-            self._trace_id = self._root_span.id
-            logging.debug(f"Langfuse: Root trace created - trace_id={self._trace_id}")
+            # Get the current trace_id from the active context
+            self._trace_id = self.langfuse_client.get_current_trace_id()
+            logging.debug(f"Langfuse: Root span created - trace_id={self._trace_id}")
 
             # Step 3: Set trace-level name and input (what appears in Langfuse UI trace list)
             self.langfuse_client.update_current_trace(
@@ -254,9 +255,9 @@ class ObservabilityManager:
             logging.debug(f"Langfuse initialization error type: {type(e).__name__}")
 
             # Cleanup any partially initialized state
-            if self._root_span:
+            if self._root_span_ctx:
                 try:
-                    self._root_span.end()
+                    self._root_span_ctx.__exit__(None, None, None)
                 except Exception:
                     pass
             if self._propagate_ctx:
@@ -555,10 +556,10 @@ class ObservabilityManager:
                             f"Root cause: result_payload['usage'] was {usage_data} (expected dict with input_tokens, output_tokens, etc.)"
                         )
 
-                # End root span
-                if self._root_span:
-                    self._root_span.end()
-                    logging.info("Langfuse root span ended")
+                # End root span context
+                if self._root_span_ctx:
+                    self._root_span_ctx.__exit__(None, None, None)
+                    logging.info("Langfuse root span context exited")
 
                 # Exit propagate_attributes context
                 if self._propagate_ctx:
@@ -602,10 +603,10 @@ class ObservabilityManager:
                     )
                     logging.debug("Langfuse: Marked root span as ERROR")
 
-                # End root span
-                if self._root_span:
-                    self._root_span.end()
-                    logging.info("Langfuse root span ended (error path)")
+                # End root span context
+                if self._root_span_ctx:
+                    self._root_span_ctx.__exit__(None, None, None)
+                    logging.info("Langfuse root span context exited (error path)")
 
                 # Exit propagate_attributes context
                 if self._propagate_ctx:
