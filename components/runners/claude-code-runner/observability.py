@@ -215,21 +215,13 @@ class ObservabilityManager:
             self._root_span = self._root_span_ctx.__enter__()
             self._trace_id = self.langfuse_client.get_current_trace_id()
 
-            # Update root span and trace with name and input AFTER entering context
+            # Update root span with name and input AFTER entering context
+            # NOTE: In SDK v3, the root span IS the trace, so updating the span
+            # automatically updates the trace. Do NOT call update_current_trace() here
+            # as it can cause the trace to appear unnamed or create conflicts.
             self._root_span.update(
                 name="claude_agent_session",
                 input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt}
-            )
-
-            self.langfuse_client.update_current_trace(
-                name="claude_agent_session",
-                input={"prompt": prompt[:1000] if len(prompt) > 1000 else prompt},
-                metadata={
-                    "namespace": namespace,
-                    "user_id": self.user_id,
-                    "session_id": self.session_id,
-                    "user_name": self.user_name
-                }
             )
 
             logging.info(f"Langfuse: Root span 'claude_agent_session' created and updated - trace_id={self._trace_id}")
@@ -479,13 +471,30 @@ class ObservabilityManager:
                     else:
                         logging.warning("Langfuse: Skipping usage in trace metadata (no usage data available)")
 
-                    # Update trace with final output and metadata (what appears in Langfuse UI)
-                    # No root span to update since we removed it
-                    self.langfuse_client.update_current_trace(
-                        output=result_payload,
-                        metadata=trace_metadata
-                    )
-                    logging.info("Langfuse: Updated trace with final metrics" + (" and usage" if usage_dict else " (NO USAGE)"))
+                    # Update root span with final output, model, and metadata (what appears in Langfuse UI)
+                    # In SDK v3, the root span IS the trace, so update the span directly
+                    if self._root_span:
+                        # Transform usage to Langfuse format if available
+                        usage_for_span = None
+                        if usage_dict:
+                            usage_for_span = {
+                                "input": usage_dict.get("input_tokens", 0),
+                                "output": usage_dict.get("output_tokens", 0),
+                                "total": usage_dict.get("total_tokens", 0),
+                                "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens", 0),
+                                "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens", 0),
+                            }
+
+                        # Get model name for cost calculation
+                        model_name = self.configured_model or os.getenv('LLM_MODEL', 'claude-3-5-sonnet-20241022')
+
+                        self._root_span.update(
+                            output=result_payload,
+                            metadata=trace_metadata,
+                            model=model_name,  # Set model for cost calculation
+                            usage=usage_for_span  # Set usage directly on span for cost tracking
+                        )
+                        logging.info(f"Langfuse: Updated root span with model={model_name}, final metrics" + (" and usage" if usage_dict else " (NO USAGE)"))
 
                     # CRITICAL: Create a summary generation with usage_details for Anthropic-specific cost calculation
                     # This enables Langfuse to automatically calculate costs using custom Claude model pricing
@@ -547,20 +556,9 @@ class ObservabilityManager:
                             f"Root cause: result_payload['usage'] was {usage_data} (expected dict with input_tokens, output_tokens, etc.)"
                         )
 
-                # Update trace name before exiting (final attempt to set name)
-                try:
-                    self.langfuse_client.update_current_trace(
-                        name="claude_agent_session",
-                        output=result_payload,
-                        metadata={
-                            "completed": True,
-                            "num_turns": result_payload.get("num_turns"),
-                            "duration_ms": result_payload.get("duration_ms")
-                        }
-                    )
-                    logging.info("Langfuse: ✅ Updated trace name to 'claude_agent_session' in finalize")
-                except Exception as e:
-                    logging.warning(f"Langfuse: Failed to update trace name in finalize: {e}")
+                # NOTE: Removed redundant update_current_trace() call here
+                # The trace name is already set by the root span update in initialize()
+                # In SDK v3, the root span IS the trace, so we don't need to update both
 
                 # End root span context (if it exists)
                 if self._root_span_ctx:
@@ -599,15 +597,18 @@ class ObservabilityManager:
         # Cleanup and flush
         if self.langfuse_client:
             try:
-                # Update trace with error details (no root span since we removed it)
+                # Update root span with error details
+                # In SDK v3, the root span IS the trace, so update the span directly
                 try:
-                    self.langfuse_client.update_current_trace(
-                        output={"error": str(error)},
-                        metadata={"error_type": type(error).__name__, "status": "ERROR"}
-                    )
-                    logging.debug("Langfuse: Marked trace as ERROR")
+                    if self._root_span:
+                        self._root_span.update(
+                            output={"error": str(error)},
+                            metadata={"error_type": type(error).__name__, "status": "ERROR"},
+                            level="ERROR"
+                        )
+                        logging.debug("Langfuse: Marked root span as ERROR")
                 except Exception as e:
-                    logging.warning(f"Langfuse: Failed to update trace with error: {e}")
+                    logging.warning(f"Langfuse: Failed to update root span with error: {e}")
 
                 # End root span context (if it exists from old code)
                 if self._root_span_ctx:
