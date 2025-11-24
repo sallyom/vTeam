@@ -45,6 +45,9 @@ nav:
     - Overview: user-guide/index.md
     - Getting Started: user-guide/getting-started.md
     - Working with Amber: user-guide/working-with-amber.md
+  - Developer Guide:
+    - Observability & Instrumentation: observability-langfuse.md
+    - Model Pricing: model-pricing.md
   - Labs:
     - Overview: labs/index.md
     - Lab 1 - Your First Agentic Session: labs/basic/lab-1-first-rfe.md
