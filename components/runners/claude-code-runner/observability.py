@@ -1,22 +1,41 @@
 """
 Observability manager for Claude Code runner - hybrid Langfuse integration.
 
-Provides Langfuse LLM observability for Claude sessions with two types of traces:
+Provides Langfuse LLM observability for Claude sessions with hierarchical trace structure:
 
-1. Tool Spans (real-time visibility):
-   - Created for each tool call (Read, Write, Bash, etc.)
-   - Shows tool execution in real-time
-   - NO usage/cost data (prevents inflation from SDK's cumulative metrics)
+1. Session Trace (top-level span):
+   - One trace per Claude session (conversation)
+   - Named: session_{session_id}
+   - Groups all turns and tools for this session
+   - Inherits propagate_attributes metadata (user_id, session_id, tags)
 
-2. Turn-level Generations (accurate usage/cost):
-   - Created from ResultMessage after each interaction completes
+2. Turn Generations (observations within session trace):
+   - Named: claude_turn_1, claude_turn_2, etc.
    - Contains authoritative usage data from Claude SDK
    - Canonical format with separate cache token tracking for accurate cost
+   - Child observations of the session trace
+
+3. Tool Spans (observations within turn generations):
+   - Named: tool_Read, tool_Write, tool_Bash, etc.
+   - Shows tool execution in real-time
+   - NO usage/cost data (prevents inflation from SDK's cumulative metrics)
+   - Child observations of their parent turn
 
 Architecture:
 - Session-based grouping via propagate_attributes() with session_id and user_id
+- Explicit session trace prevents turn chaining (turn2 as child of turn1)
+- All turns are siblings within the session trace, not linear children
 - Langfuse automatically aggregates tokens and costs across all generations
 - Filter by user and session in Langfuse UI
+
+Trace Hierarchy:
+session_xyz (span)
+├── claude_turn_1 (generation)
+│   ├── tool_Read (span)
+│   └── tool_Write (span)
+├── claude_turn_2 (generation)
+│   └── tool_Bash (span)
+└── claude_turn_3 (generation)
 
 Usage Format (turn-level only):
 {
@@ -54,7 +73,10 @@ class ObservabilityManager:
         self.user_name = user_name
         self.langfuse_client = None
         self._propagate_ctx = None
-        self._tool_spans: dict[str, tuple[Any, Any]] = {}
+        self._session_trace_ctx = None
+        self._session_trace = None
+        self._tool_spans: dict[str, Any] = {}  # Stores span objects directly
+        self._current_turn_generation = None  # Track active turn for tool span parenting
 
     async def initialize(self, prompt: str, namespace: str, model: str = None) -> bool:
         """Initialize Langfuse observability.
@@ -138,6 +160,21 @@ class ObservabilityManager:
             )
             self._propagate_ctx.__enter__()
 
+            # Create explicit session-level trace to group all turns
+            # This prevents turn observations from chaining (turn2 child of turn1, etc.)
+            # and provides a clean parent trace for the entire conversation
+            self._session_trace_ctx = self.langfuse_client.start_as_current_observation(
+                as_type="span",
+                name=f"session_{self.session_id}",
+                metadata={
+                    "namespace": namespace,
+                    "model": model,
+                    "user_name": self.user_name,
+                    "initial_prompt": prompt[:200] if len(prompt) > 200 else prompt
+                }
+            )
+            self._session_trace = self._session_trace_ctx.__enter__()
+
             logging.info(f"Langfuse: Session tracking enabled (session_id={self.session_id}, user_id={self.user_id}, model={model})")
             return True
 
@@ -145,6 +182,13 @@ class ObservabilityManager:
             secrets = {"public_key": public_key, "secret_key": secret_key, "host": host}
             error_msg = sanitize_exception_message(e, secrets)
             logging.warning(f"Langfuse init failed: {error_msg}")
+
+            # Cleanup on initialization failure
+            if self._session_trace_ctx:
+                try:
+                    self._session_trace_ctx.__exit__(None, None, None)
+                except Exception:
+                    pass
 
             if self._propagate_ctx:
                 try:
@@ -154,32 +198,57 @@ class ObservabilityManager:
 
             self.langfuse_client = None
             self._propagate_ctx = None
+            self._session_trace_ctx = None
+            self._session_trace = None
             return False
 
-    def track_interaction(
-        self, message: Any, model: str, turn_count: int, usage: dict | None = None
-    ) -> None:
-        """Track a Claude interaction with usage data.
+    def start_turn(self, turn_count: int, model: str) -> None:
+        """Start tracking a new turn (called when AssistantMessage arrives).
 
-        Creates a separate trace for this turn using start_as_current_observation.
-        Usage data from ResultMessage is formatted for Langfuse SDK v3 canonical format:
-            {
-                "input": int,  # Regular input tokens
-                "output": int,  # Output tokens
-                "cache_read_input_tokens": int,  # Optional, if present
-                "cache_creation_input_tokens": int,  # Optional, if present
-            }
-
-        All traces are grouped by session_id via propagate_attributes().
-        Langfuse automatically aggregates usage across all traces in a session.
+        Creates the turn generation observation so that tool spans can be parented to it.
 
         Args:
-            message: AssistantMessage from Claude SDK
-            model: Model name (e.g., "claude-3-5-sonnet-20241022")
             turn_count: Current turn number
+            model: Model name (e.g., "claude-3-5-sonnet-20241022")
+        """
+        if not self.langfuse_client or not self._session_trace:
+            return
+
+        try:
+            # Build metadata
+            metadata = {"turn": turn_count}
+
+            logging.info(f"Langfuse: Starting turn {turn_count} observation with model={model}")
+
+            # Create generation as CHILD of session trace (current) but DON'T set it as current
+            # This ensures all turns are SIBLINGS under the session, not nested children
+            generation = self._session_trace.start_observation(
+                as_type="generation",
+                name=f"claude_turn_{turn_count}",
+                input=[{"role": "user", "content": f"Turn {turn_count}"}],
+                model=model,
+                metadata=metadata,
+            )
+
+            # Store as current turn for tool span parenting
+            self._current_turn_generation = generation
+            logging.debug(f"Langfuse: Turn {turn_count} started, ready for tool spans")
+
+        except Exception as e:
+            logging.error(f"Langfuse: Failed to start turn: {e}", exc_info=True)
+
+    def end_turn(self, turn_count: int, message: Any, usage: dict | None = None) -> None:
+        """Complete turn tracking with output and usage data (called when ResultMessage arrives).
+
+        Updates the turn generation with the assistant's output and usage metrics, then closes it.
+
+        Args:
+            turn_count: Current turn number
+            message: AssistantMessage from Claude SDK
             usage: Usage dict from ResultMessage with input_tokens, output_tokens, cache tokens, etc.
         """
-        if not self.langfuse_client:
+        if not self._current_turn_generation:
+            logging.warning(f"Langfuse: end_turn called but no active turn for turn {turn_count}")
             return
 
         try:
@@ -192,16 +261,9 @@ class ObservabilityManager:
                 if isinstance(blk, TextBlock):
                     text_content.append(getattr(blk, "text", ""))
 
-            if not text_content:
-                logging.debug(f"Turn {turn_count}: No text content, skipping")
-                return
+            output_text = "\n".join(text_content) if text_content else "(no text output)"
 
-            output_text = "\n".join(text_content)
-
-            # Build metadata
-            metadata = {"turn": turn_count}
-
-            # Calculate usage_details upfront if we have usage data
+            # Calculate usage_details if we have usage data
             usage_details_dict = None
             if usage and isinstance(usage, dict):
                 input_tokens = usage.get("input_tokens", 0)
@@ -225,19 +287,17 @@ class ObservabilityManager:
                 if cache_creation > 0:
                     usage_details_dict["cache_creation_input_tokens"] = cache_creation
 
-            logging.info(f"Langfuse: Creating independent trace for turn {turn_count} with model={model}")
-            with self.langfuse_client.start_as_current_observation(
-                as_type="generation",
-                name=f"claude_turn_{turn_count}",
-                input=[{"role": "user", "content": f"Turn {turn_count}"}],
-                model=model,
-                metadata=metadata,
-            ) as generation:
-                # Update with output and usage_details (SDK v3 requires 'usage_details' parameter)
-                update_params = {"output": output_text}
-                if usage_details_dict:
-                    update_params["usage_details"] = usage_details_dict
-                generation.update(**update_params)
+            # Update with output and usage_details (SDK v3 requires 'usage_details' parameter)
+            update_params = {"output": output_text}
+            if usage_details_dict:
+                update_params["usage_details"] = usage_details_dict
+            self._current_turn_generation.update(**update_params)
+
+            # End the generation to close it properly
+            self._current_turn_generation.end()
+
+            # Clear current turn
+            self._current_turn_generation = None
 
             if usage_details_dict:
                 input_count = usage_details_dict.get('input', 0)
@@ -247,7 +307,7 @@ class ObservabilityManager:
                 total_tokens = input_count + output_count + cache_read_count + cache_creation_count
 
                 log_msg = (
-                    f"Langfuse: Tracked turn {turn_count} - model={model}, "
+                    f"Langfuse: Completed turn {turn_count} - "
                     f"{input_count} input, {output_count} output"
                 )
                 if cache_read_count > 0 or cache_creation_count > 0:
@@ -255,10 +315,12 @@ class ObservabilityManager:
                 log_msg += f" (total: {total_tokens})"
                 logging.info(log_msg)
             else:
-                logging.info(f"Langfuse: Tracked turn {turn_count} - model={model} (no usage data)")
+                logging.info(f"Langfuse: Completed turn {turn_count} (no usage data)")
 
         except Exception as e:
-            logging.error(f"Langfuse: Failed to track interaction: {e}", exc_info=True)
+            logging.error(f"Langfuse: Failed to end turn: {e}", exc_info=True)
+            # Clean up turn state even on error
+            self._current_turn_generation = None
 
     def track_tool_use(self, tool_name: str, tool_id: str, tool_input: dict) -> None:
         """Track tool use for visibility in Langfuse UI.
@@ -275,17 +337,38 @@ class ObservabilityManager:
             return
 
         try:
-            # Create span and store for later update with result
+            # Create span as CHILD of current turn generation (not as current observation)
+            # This ensures tools are children of their turn, not siblings or nested incorrectly
             # IMPORTANT: No usage_details parameter - avoids cumulative usage inflation
-            span_ctx = self.langfuse_client.start_as_current_observation(
-                as_type="span",
-                name=f"tool_{tool_name}",
-                input=tool_input,
-                metadata={"tool_id": tool_id, "tool_name": tool_name}
-            )
-            span = span_ctx.__enter__()
-            self._tool_spans[tool_id] = (span_ctx, span)
-            logging.debug(f"Langfuse: Started tool span for {tool_name} (id={tool_id})")
+            if self._current_turn_generation:
+                # Create as child of the current turn
+                span = self._current_turn_generation.start_observation(
+                    as_type="span",
+                    name=f"tool_{tool_name}",
+                    input=tool_input,
+                    metadata={"tool_id": tool_id, "tool_name": tool_name}
+                )
+                self._tool_spans[tool_id] = span
+                logging.debug(f"Langfuse: Started tool span for {tool_name} (id={tool_id}) under turn")
+            else:
+                # Fallback: create under session trace if no active turn
+                logging.warning(f"No active turn generation for tool {tool_name}, creating under session")
+                if self._session_trace:
+                    span = self._session_trace.start_observation(
+                        as_type="span",
+                        name=f"tool_{tool_name}",
+                        input=tool_input,
+                        metadata={"tool_id": tool_id, "tool_name": tool_name}
+                    )
+                else:
+                    span = self.langfuse_client.start_observation(
+                        as_type="span",
+                        name=f"tool_{tool_name}",
+                        input=tool_input,
+                        metadata={"tool_id": tool_id, "tool_name": tool_name}
+                    )
+                self._tool_spans[tool_id] = span
+                logging.debug(f"Langfuse: Started tool span for {tool_name} (id={tool_id})")
         except Exception as e:
             logging.debug(f"Langfuse: Failed to track tool use: {e}")
 
@@ -303,7 +386,7 @@ class ObservabilityManager:
             return
 
         try:
-            tool_span_ctx, tool_span = self._tool_spans[tool_use_id]
+            tool_span = self._tool_spans[tool_use_id]
 
             # Truncate long results for readability
             result_text = str(content) if content else "No output"
@@ -316,7 +399,10 @@ class ObservabilityManager:
                 level="ERROR" if is_error else "DEFAULT",
                 metadata={"is_error": is_error or False}
             )
-            tool_span_ctx.__exit__(None, None, None)
+
+            # End the span to close it properly
+            tool_span.end()
+
             del self._tool_spans[tool_use_id]
             logging.debug(f"Langfuse: Completed tool span for {tool_use_id}")
 
@@ -329,6 +415,11 @@ class ObservabilityManager:
             return
 
         try:
+            # Close session trace first (before propagate context)
+            if self._session_trace_ctx:
+                self._session_trace_ctx.__exit__(None, None, None)
+                logging.info("Langfuse: Session trace closed")
+
             # Exit propagate_attributes context
             if self._propagate_ctx:
                 self._propagate_ctx.__exit__(None, None, None)
@@ -356,6 +447,11 @@ class ObservabilityManager:
             return
 
         try:
+            # Close session trace first
+            if self._session_trace_ctx:
+                self._session_trace_ctx.__exit__(None, None, None)
+
+            # Then close propagate context
             if self._propagate_ctx:
                 self._propagate_ctx.__exit__(None, None, None)
 

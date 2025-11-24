@@ -511,6 +511,9 @@ class ClaudeCodeAdapter:
                         # Store AssistantMessage for tracking after we get usage from ResultMessage
                         if isinstance(message, AssistantMessage):
                             current_message = message
+                            # Start turn tracking NOW so tools can be parented to it
+                            # Turn count will be incremented when ResultMessage arrives
+                            obs.start_turn(self._turn_count + 1, configured_model)
 
                         for block in getattr(message, 'content', []) or []:
                             if isinstance(block, TextBlock):
@@ -576,9 +579,9 @@ class ClaudeCodeAdapter:
                             except Exception as e:
                                 logging.warning(f"Could not convert usage object to dict: {e}")
 
-                        # Track the interaction with usage data
-                        if current_message and usage_raw and isinstance(usage_raw, dict):
-                            obs.track_interaction(current_message, configured_model, self._turn_count, usage_raw)
+                        # Complete turn tracking with usage data
+                        if current_message:
+                            obs.end_turn(self._turn_count, current_message, usage_raw if isinstance(usage_raw, dict) else None)
                             current_message = None  # Clear after tracking
 
                         result_payload = {
