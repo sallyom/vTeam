@@ -273,6 +273,9 @@ class ClaudeCodeAdapter:
                 model=configured_model
             )
 
+            # Store initial prompt for turn 1 (will be used when AssistantMessage arrives)
+            obs._pending_initial_prompt = prompt
+
             # Check if continuing from previous session
             # If PARENT_SESSION_ID is set, use SDK's built-in resume functionality
             parent_session_id = self.context.get_env('PARENT_SESSION_ID', '').strip()
@@ -562,12 +565,12 @@ class ClaudeCodeAdapter:
                         if text:
                             await self._send_log({"level": "debug", "message": str(text)})
                     elif isinstance(message, (ResultMessage)):
-                        # Increment turn count when we receive a ResultMessage (complete interaction)
-                        self._turn_count += 1
-
                         # Extract usage from ResultMessage
                         usage_raw = getattr(message, 'usage', None)
-                        logging.info(f"ResultMessage.usage = {usage_raw} (type: {type(usage_raw)})")
+                        sdk_num_turns = getattr(message, 'num_turns', None)
+                        subtype = getattr(message, 'subtype', None)
+
+                        logging.info(f"ResultMessage: subtype={subtype}, num_turns={sdk_num_turns}, usage={usage_raw}")
 
                         # Convert usage object to dict if needed
                         if usage_raw is not None and not isinstance(usage_raw, dict):
@@ -579,7 +582,14 @@ class ClaudeCodeAdapter:
                             except Exception as e:
                                 logging.warning(f"Could not convert usage object to dict: {e}")
 
+                        # Update turn count from SDK's authoritative num_turns
+                        # This ensures we stay in sync with the SDK's turn tracking
+                        if sdk_num_turns is not None and sdk_num_turns > self._turn_count:
+                            self._turn_count = sdk_num_turns
+                            logging.info(f"Updated turn count to SDK's num_turns: {self._turn_count}")
+
                         # Complete turn tracking with usage data
+                        # Only end turn if we have a current message (AssistantMessage was received)
                         if current_message:
                             obs.end_turn(self._turn_count, current_message, usage_raw if isinstance(usage_raw, dict) else None)
                             current_message = None  # Clear after tracking
