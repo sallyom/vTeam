@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies (claude-agent-sdk bundles its own CLI)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
