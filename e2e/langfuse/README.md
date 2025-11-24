@@ -4,9 +4,9 @@
 
 **Langfuse** is the observability platform for the vTeam/Ambient Code Platform. All traces are sent to Langfuse for LLM-specific observability:
 
-- **Session spans**: Full Claude session lifecycle with cost and token metrics
-- **Generation spans**: Claude's text responses with prompt/completion tracking
-- **Tool spans**: Tool executions (Read, Write, Bash, etc.) with full I/O capture
+- **Session context**: Propagated metadata (user, session, model) across all observations
+- **Turn-level generations**: Each Claude interaction (`claude_turn_X`) with accurate token/cost tracking
+- **Tool spans**: Tool executions (Read, Write, Bash, etc.) for visibility (no token/cost data)
 
 ## Prerequisites
 
@@ -66,13 +66,13 @@ If you need workspace-specific tracking, use Langfuse's built-in tagging and fil
 ┌─────────────────────────────────────────────────┐
 │  Runner Pod                                     │
 ├─────────────────────────────────────────────────┤
-│  Langfuse SDK v3                                │
+│  Langfuse SDK v3 + propagate_attributes        │
 │       ↓ creates                                 │
-│  • Session span (claude_agent_session)          │
-│  • Tool spans (Read, Write, Bash...)           │
-│  • Generation spans (Claude responses)          │
+│  • Session context (user, session, model)       │
+│  • Turn generations (claude_turn_1, 2, 3...)   │
+│  • Tool spans (visibility only, no tokens)     │
 │                                                 │
-│  All spans ────────────────────────────────────┐│
+│  All observations ──────────────────────────────┐│
 └─────────────────────────────────────────────────┼┘
                                                   ↓
                         Langfuse HTTP API
@@ -84,69 +84,78 @@ If you need workspace-specific tracking, use Langfuse's built-in tagging and fil
                   ┌─────────────────────────┐
                   │  Unified Trace View     │
                   ├─────────────────────────┤
-                  │ claude_agent_session    │ ← Session span
-                  │   ├─ tool_Read         │ ← Tool execution
-                  │   ├─ tool_Write        │ ← Tool execution
-                  │   ├─ claude_response   │ ← Claude generation
-                  │   └─ Cost & tokens     │ ← Final metrics
+                  │ Session: xyz            │ ← Grouped by session_id
+                  │   ├─ claude_turn_1     │ ← First interaction (with tokens)
+                  │   │   ├─ tool_Read    │ ← Tool visibility (no tokens)
+                  │   │   └─ tool_Write   │ ← Tool visibility (no tokens)
+                  │   ├─ claude_turn_2     │ ← Second interaction (with tokens)
+                  │   └─ Total cost       │ ← Aggregated metrics
                   └─────────────────────────┘
 ```
 
 ### Key Points
 
-1. **Simple integration**: Runner uses Langfuse Python SDK (v3+) for direct HTTP API calls
-2. **API Key auth**: Runner automatically receives all LANGFUSE_* config from `ambient-admin-langfuse-secret` secret
-3. **Automatic nesting**: Child spans (tools, generations) attach to parent session span via SDK context
+1. **Hybrid tracking**: Turn-level generations have token/cost data, tool spans provide visibility only
+2. **Model metadata**: Model information propagated to all observations via `propagate_attributes`
+3. **Sequential turns**: Proper turn counting (1, 2, 3...) regardless of tool usage
+4. **No double counting**: Tools don't add tokens - they're already counted in the Claude turn that uses them
 
 ## Trace Structure
 
-### Session Span (Root)
+### Session Context (Propagated via `propagate_attributes`)
 
-**Name**: `claude_agent_session`
+All observations inherit these attributes:
 
-- **Input**: Original prompt from user
-- **Output**: Final results with cost/token metrics
-- **Metadata**:
-  - `session_id`: Kubernetes session name
+- **user_id**: User identifier for cost allocation
+- **session_id**: Kubernetes session name for grouping
+- **tags**: `["claude-code", "namespace:X", "model:Y"]`
+- **metadata**:
   - `namespace`: Project namespace
-  - `user_id`: User identifier (for multi-user tracking)
   - `user_name`: User display name
+  - `model`: Model being used (e.g., `claude-sonnet-4-5@20250929`)
+  - `initial_prompt`: First 200 chars of prompt
 
-### Tool Spans (Children)
+### Turn-Level Generations
+
+**Name**: `claude_turn_X` (e.g., `claude_turn_1`, `claude_turn_2`, etc.)
+
+- **Type**: Generation (with usage tracking)
+- **Input**: Turn context
+- **Output**: Claude's complete response for this turn
+- **Model**: Specific model used (inherited from session)
+- **Usage**: Canonical format for accurate cost calculation
+  - `input`: Regular input tokens
+  - `output`: Output tokens
+  - `cache_read_input_tokens`: Cache hits (90% discount)
+  - `cache_creation_input_tokens`: Cache writes (25% premium)
+- **Metadata**:
+  - `turn`: Turn number (sequential: 1, 2, 3...)
+
+### Tool Spans (Visibility Only)
 
 **Name**: `tool_{ToolName}` (e.g., `tool_Read`, `tool_Write`, `tool_Bash`)
 
+- **Type**: Span (no usage tracking)
 - **Input**: Tool parameters (full detail)
 - **Output**: Tool results (truncated to 500 chars)
 - **Metadata**:
   - `tool_id`: Unique ID for this tool use
   - `tool_name`: Tool name (Read, Write, etc.)
-
-### Generation Spans (Children)
-
-**Name**: `claude_response`
-
-- **Input**: Turn number
-- **Output**: Claude's text response (truncated to 1000 chars)
-- **Metadata**:
-  - `model`: Model name (e.g., `claude-3-5-sonnet-20241022`)
-  - `turn`: Turn number in conversation
-- **Usage**: Token counts for cost tracking
-  - `input`: Input tokens
-  - `output`: Output tokens
-  - `cache_read_input_tokens`: Cache hits (if applicable)
-  - `cache_creation_input_tokens`: Cache writes (if applicable)
+- **No Usage Data**: Tools are local operations, tokens already counted in parent turn
 
 ## Viewing Traces
 
 1. Open Langfuse UI: https://langfuse-langfuse.apps.<your-cluster>
 2. Navigate to your project
-3. View traces by session ID or timestamp
-4. Drill down to see:
-   - **Full tool I/O**: Complete input/output for each tool execution
-   - **Generation content**: Claude's responses with token breakdown
-   - **Cost tracking**: Total cost and per-generation costs
-   - **Session metrics**: Total tokens, turns, duration
+3. Filter by:
+   - **Session ID**: View all turns for a specific session
+   - **Model tag**: Filter by `model:claude-sonnet-4-5@20250929` etc.
+   - **User**: Track usage by user_id
+4. Observe:
+   - **Sequential turns**: `claude_turn_1`, `claude_turn_2`, etc. in order
+   - **Tool visibility**: See which tools were used (without inflating costs)
+   - **Accurate costs**: Token counts only on turn generations
+   - **Model metadata**: Which model was used for each session
 
 ## Configuration Details
 
@@ -203,6 +212,22 @@ kubectl rollout restart deployment ambient-operator -n ambient-code
 **Platform-wide configuration**: All projects share the same Langfuse instance and keys.
 
 **Per-project configuration**: Each project namespace can have its own `ambient-non-vertex-integrations` secret with different Langfuse keys for per-project isolation and cost tracking.
+
+## Implementation Details
+
+### Our Approach
+
+The vTeam Langfuse integration uses a **hybrid tracking approach**:
+
+1. **Turn-level generations** (`claude_turn_X`): Track actual API calls with token/cost data
+2. **Tool spans** (`tool_*`): Provide visibility without token data (prevents double counting)
+3. **Session context**: Use `propagate_attributes` to ensure consistent metadata across all observations
+
+### Key Fixes Applied
+
+- **Sequential turn numbering**: Fixed bug where turn count would jump (e.g., 1→30) due to incorrect tool counting
+- **Model metadata tracking**: Model information now propagated at session level via tags and metadata
+- **No token inflation**: Tool spans don't report usage, preventing cost duplication
 
 ## Why Langfuse?
 
