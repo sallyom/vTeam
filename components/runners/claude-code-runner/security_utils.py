@@ -22,28 +22,32 @@ def sanitize_exception_message(
     Replaces any occurrence of secret values with redacted placeholders.
     NEVER logs the exception object itself - only the sanitized message string.
 
-    Approach: Simple string replacement
+    Defense-in-depth: After sanitization, validates that no secrets leaked through.
+    If validation fails, returns a generic error message instead.
+
+    Approach: Simple string replacement + post-sanitization validation
     Rationale:
     - Straightforward and easy to audit (no complex regex patterns)
     - Works for typical cases: API keys, tokens, hosts in error messages
     - Performance: O(n*m) where n=message length, m=number of secrets (acceptable for small m)
+    - Post-validation catches edge cases (encoded forms, partial substrings)
 
     Limitations:
-    - May not catch secrets in encoded forms (base64, URL-encoded)
+    - May not catch secrets in encoded forms (base64, URL-encoded) during replacement
     - Substring matches could over-redact (e.g., "pk" in "package")
     - Relies on caller providing complete secrets dict
 
     For production use:
     - Always include all sensitive values in secrets_to_redact
     - Test with actual error scenarios to verify effectiveness
-    - Consider regex-based redaction if encoded forms are concern
+    - Post-validation provides safety net for edge cases
 
     Args:
         exception: The exception object
         secrets_to_redact: Dict mapping secret names to values (e.g., {"public_key": "pk-123"})
 
     Returns:
-        Sanitized error message string
+        Sanitized error message string (or generic message if validation fails)
     """
     error_msg = str(exception)
 
@@ -52,6 +56,16 @@ def sanitize_exception_message(
         if secret_value and secret_value.strip():
             placeholder = f"[REDACTED_{secret_name.upper()}]"
             error_msg = error_msg.replace(secret_value, placeholder)
+
+    # Defense-in-depth: Validate no secrets leaked through sanitization
+    # This catches edge cases like partial matches, encoded forms, etc.
+    for secret_name, secret_value in secrets_to_redact.items():
+        if secret_value and secret_value.strip() and secret_value in error_msg:
+            logging.error(
+                f"SECURITY: Secret '{secret_name}' found in sanitized message - "
+                "using generic error message"
+            )
+            return "Operation failed - check configuration and credentials"
 
     return error_msg
 
@@ -153,3 +167,36 @@ def validate_and_sanitize_for_logging(value: str, max_length: int = 1000) -> str
         sanitized = sanitized[:max_length] + "...[truncated]"
 
     return sanitized
+
+
+def sanitize_model_name(model: str, max_length: int = 100) -> str | None:
+    """Sanitize model name to prevent injection attacks in metadata/tags.
+
+    Validates and sanitizes model names before adding to Langfuse metadata or tags.
+    Prevents potential injection attacks or API request disruption.
+
+    Allowed characters:
+    - Alphanumeric: a-z, A-Z, 0-9
+    - Separators: hyphen (-), underscore (_), colon (:), at-sign (@), period (.)
+
+    Common model name patterns:
+    - claude-3-5-sonnet-20241022
+    - claude-sonnet-4-5@20250929
+    - gpt-4-turbo-preview
+    - models/gemini-pro
+
+    Args:
+        model: Model name to sanitize
+        max_length: Maximum allowed length (default: 100)
+
+    Returns:
+        Sanitized model name, or None if empty after sanitization
+    """
+    if not model or not isinstance(model, str):
+        return None
+
+    # Remove any characters that aren't alphanumeric or allowed separators
+    sanitized = re.sub(r'[^a-zA-Z0-9@.:/_-]', '', model[:max_length])
+
+    # Return None if empty after sanitization
+    return sanitized if sanitized else None

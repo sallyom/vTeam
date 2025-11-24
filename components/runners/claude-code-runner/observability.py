@@ -48,7 +48,11 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
-from security_utils import sanitize_exception_message, with_sync_timeout
+from security_utils import (
+    sanitize_exception_message,
+    sanitize_model_name,
+    with_sync_timeout,
+)
 
 
 class ObservabilityManager:
@@ -139,12 +143,16 @@ class ObservabilityManager:
             # Build tags list
             tags = ["claude-code", f"namespace:{namespace}"]
 
-            # Add model to metadata and tags if provided
+            # Add model to metadata and tags if provided (after sanitization)
             if model:
-                metadata["model"] = model
-                # Add model as a tag for easy filtering in Langfuse UI
-                tags.append(f"model:{model}")
-                logging.info(f"Langfuse: Model '{model}' added to session metadata and tags")
+                sanitized_model = sanitize_model_name(model)
+                if sanitized_model:
+                    metadata["model"] = sanitized_model
+                    # Add model as a tag for easy filtering in Langfuse UI
+                    tags.append(f"model:{sanitized_model}")
+                    logging.info(f"Langfuse: Model '{sanitized_model}' added to session metadata and tags")
+                else:
+                    logging.warning(f"Langfuse: Model name '{model}' failed sanitization - omitting from metadata")
 
             # Enter propagate_attributes context - all traces share session_id/user_id/tags/metadata
             # Each turn will be a separate trace, automatically grouped by session_id
@@ -330,8 +338,8 @@ class ObservabilityManager:
             if self._current_turn_ctx:
                 try:
                     self._current_turn_ctx.__exit__(None, None, None)
-                except Exception:
-                    pass
+                except Exception as cleanup_error:
+                    logging.warning(f"Langfuse: Cleanup during error failed: {cleanup_error}")
             self._current_turn_generation = None
             self._current_turn_ctx = None
 
