@@ -42,24 +42,25 @@ class TestObservabilityManagerInit:
         assert manager.user_id == "user-1"
         assert manager.user_name == "John Doe"
         assert manager.langfuse_client is None
-        assert manager.langfuse_trace is None
-        assert manager._langfuse_tool_spans == {}
+        assert manager._propagate_ctx is None
+        assert manager._tool_spans == {}
 
 
 class TestLangfuseInitialization:
     """Tests for Langfuse initialization."""
 
     @pytest.mark.asyncio
-    @patch("observability.LANGFUSE_AVAILABLE", False)
     async def test_init_langfuse_unavailable(self, manager):
         """Test initialization when Langfuse SDK is not available."""
-        result = await manager.initialize("test prompt", "test-namespace")
+        # Mock the import to raise ImportError
+        with patch.dict('sys.modules', {'langfuse': None}):
+            with patch('builtins.__import__', side_effect=ImportError("No module named 'langfuse'")):
+                result = await manager.initialize("test prompt", "test-namespace")
 
         assert result is False
         assert manager.langfuse_client is None
 
     @pytest.mark.asyncio
-    @patch("observability.LANGFUSE_AVAILABLE", True)
     async def test_init_langfuse_disabled(self, manager):
         """Test initialization when LANGFUSE_ENABLED is false."""
         with patch.dict(os.environ, {"LANGFUSE_ENABLED": "false"}):
@@ -69,7 +70,6 @@ class TestLangfuseInitialization:
         assert manager.langfuse_client is None
 
     @pytest.mark.asyncio
-    @patch("observability.LANGFUSE_AVAILABLE", True)
     async def test_init_missing_public_key(self, manager, caplog):
         """Test initialization with missing LANGFUSE_PUBLIC_KEY."""
         env_vars = {
@@ -85,11 +85,10 @@ class TestLangfuseInitialization:
 
         assert result is False
         assert manager.langfuse_client is None
-        assert "LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is missing" in caplog.text
+        assert "LANGFUSE_ENABLED is true but keys are missing" in caplog.text
         assert "ambient-admin-langfuse-secret" in caplog.text
 
     @pytest.mark.asyncio
-    @patch("observability.LANGFUSE_AVAILABLE", True)
     async def test_init_missing_secret_key(self, manager, caplog):
         """Test initialization with missing LANGFUSE_SECRET_KEY."""
         env_vars = {
@@ -104,10 +103,9 @@ class TestLangfuseInitialization:
                 result = await manager.initialize("test prompt", "test-namespace")
 
         assert result is False
-        assert "LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is missing" in caplog.text
+        assert "LANGFUSE_ENABLED is true but keys are missing" in caplog.text
 
     @pytest.mark.asyncio
-    @patch("observability.LANGFUSE_AVAILABLE", True)
     async def test_init_missing_host(self, manager, caplog):
         """Test initialization with missing LANGFUSE_HOST."""
         env_vars = {
@@ -125,15 +123,18 @@ class TestLangfuseInitialization:
         assert "LANGFUSE_HOST is missing" in caplog.text
 
     @pytest.mark.asyncio
+    @patch("langfuse.propagate_attributes")
     @patch("langfuse.Langfuse")
-    async def test_init_successful(self, mock_langfuse_class, manager, caplog):
-        """Test successful Langfuse initialization with SDK v3 trace() pattern."""
+    async def test_init_successful(self, mock_langfuse_class, mock_propagate, manager, caplog):
+        """Test successful Langfuse initialization with SDK v3 propagate_attributes pattern."""
         mock_client = Mock()
-        mock_trace = Mock()
-
-        # Mock client.trace() method (SDK v3 correct pattern)
-        mock_client.trace.return_value = mock_trace
         mock_langfuse_class.return_value = mock_client
+
+        # Mock propagate_attributes context manager
+        mock_ctx = Mock()
+        mock_ctx.__enter__ = Mock()
+        mock_ctx.__exit__ = Mock()
+        mock_propagate.return_value = mock_ctx
 
         env_vars = {
             "LANGFUSE_ENABLED": "true",
@@ -148,7 +149,7 @@ class TestLangfuseInitialization:
 
         assert result is True
         assert manager.langfuse_client is not None
-        assert manager.langfuse_trace is not None
+        assert manager._propagate_ctx is not None
 
         mock_langfuse_class.assert_called_once_with(
             public_key="pk-lf-public",
@@ -156,27 +157,28 @@ class TestLangfuseInitialization:
             host="http://localhost:3000",
         )
 
-        # Verify client.trace() was called with correct params
-        mock_client.trace.assert_called_once()
-        call_kwargs = mock_client.trace.call_args[1]
-        assert call_kwargs["name"] == "claude_agent_session"
+        # Verify propagate_attributes was called
+        mock_propagate.assert_called_once()
+        call_kwargs = mock_propagate.call_args[1]
         assert call_kwargs["user_id"] == manager.user_id
         assert call_kwargs["session_id"] == manager.session_id
         assert "claude-code" in call_kwargs["tags"]
-        assert call_kwargs["input"] == {"prompt": "test prompt"}
 
-        assert "Langfuse tracing enabled" in caplog.text
+        assert "Session tracking enabled" in caplog.text
 
     @pytest.mark.asyncio
+    @patch("langfuse.propagate_attributes")
     @patch("langfuse.Langfuse")
-    async def test_init_with_user_tracking(self, mock_langfuse_class, caplog):
+    async def test_init_with_user_tracking(self, mock_langfuse_class, mock_propagate, caplog):
         """Test Langfuse initialization with user tracking."""
         mock_client = Mock()
-        mock_trace = Mock()
-
-        # Mock client.trace() method
-        mock_client.trace.return_value = mock_trace
         mock_langfuse_class.return_value = mock_client
+
+        # Mock propagate_attributes context manager
+        mock_ctx = Mock()
+        mock_ctx.__enter__ = Mock()
+        mock_ctx.__exit__ = Mock()
+        mock_propagate.return_value = mock_ctx
 
         manager = ObservabilityManager(
             session_id="session-1", user_id="user-123", user_name="Jane Doe"
@@ -194,7 +196,7 @@ class TestLangfuseInitialization:
                 result = await manager.initialize("test prompt", "test-namespace")
 
         assert result is True
-        assert "Tracking session for user Jane Doe (user-123)" in caplog.text
+        assert "session_id=session-1, user_id=user-123" in caplog.text
 
     @pytest.mark.asyncio
     @patch("langfuse.Langfuse")
@@ -215,9 +217,8 @@ class TestLangfuseInitialization:
 
         assert result is False
         assert manager.langfuse_client is None
-        assert manager.langfuse_trace is None
-        assert "Langfuse initialization failed" in caplog.text
-        assert "Observability will be disabled" in caplog.text
+        assert manager._propagate_ctx is None
+        assert "Langfuse init failed" in caplog.text
 
     @pytest.mark.asyncio
     @patch("langfuse.Langfuse")
@@ -244,26 +245,43 @@ class TestLangfuseInitialization:
         assert "[REDACTED_PUBLIC_KEY]" in caplog.text
 
 
-class TestTrackGeneration:
-    """Tests for track_generation method."""
+class TestStartTurn:
+    """Tests for start_turn method."""
 
-    def test_track_generation_no_client(self, manager):
-        """Test track_generation when Langfuse client is not initialized."""
+    def test_start_turn_no_client(self, manager):
+        """Test start_turn when Langfuse client is not initialized."""
         # Should not raise exception
-        manager.track_generation(Mock(), "claude-3-5-sonnet", 1)
+        manager.start_turn(1, "claude-3-5-sonnet")
 
-    def test_track_generation_graceful_failure(self, manager):
-        """Test track_generation handles exceptions gracefully."""
-        manager.langfuse_client = Mock()
-        manager.langfuse_trace = Mock()
-        manager.langfuse_client.start_generation.side_effect = Exception("Test error")
+    def test_start_turn_creates_generation(self, manager):
+        """Test start_turn creates a generation trace."""
+        mock_client = Mock()
+        mock_ctx = Mock()
+        mock_generation = Mock()
+        mock_ctx.__enter__ = Mock(return_value=mock_generation)
+        mock_client.start_as_current_observation.return_value = mock_ctx
 
-        # Create message that will trigger the code path
-        message = Mock()
-        message.content = []  # Empty content should return early
+        manager.langfuse_client = mock_client
 
-        # Should not raise exception even when start_generation fails
-        manager.track_generation(message, "claude-3-5-sonnet", 1)
+        manager.start_turn(1, "claude-3-5-sonnet", "Test prompt")
+
+        # Verify start_as_current_observation was called
+        mock_client.start_as_current_observation.assert_called_once()
+        call_kwargs = mock_client.start_as_current_observation.call_args[1]
+        assert call_kwargs["as_type"] == "generation"
+        assert call_kwargs["name"] == "claude_turn_1"
+        assert call_kwargs["model"] == "claude-3-5-sonnet"
+
+        assert manager._current_turn_generation is not None
+
+
+class TestEndTurn:
+    """Tests for end_turn method."""
+
+    def test_end_turn_no_generation(self, manager):
+        """Test end_turn when no turn is active."""
+        # Should not raise exception
+        manager.end_turn(1, Mock(), None)
 
 
 class TestTrackToolUse:
@@ -275,32 +293,31 @@ class TestTrackToolUse:
         manager.track_tool_use("Read", "tool-123", {"file": "test.txt"})
 
     def test_track_tool_use_creates_span(self, manager):
-        """Test track_tool_use creates tool span with SDK v3 trace.span() pattern."""
+        """Test track_tool_use creates tool span as child of current turn."""
         mock_client = Mock()
-        mock_trace = Mock()
+        mock_generation = Mock()
         mock_tool_span = Mock()
 
-        # Mock trace.span() method (SDK v3 correct pattern)
-        mock_trace.span.return_value = mock_tool_span
+        # Mock generation.start_observation() method
+        mock_generation.start_observation.return_value = mock_tool_span
 
         manager.langfuse_client = mock_client
-        manager.langfuse_trace = mock_trace
+        manager._current_turn_generation = mock_generation
 
         tool_input = {"file_path": "/test/file.txt"}
         manager.track_tool_use("Read", "tool-456", tool_input)
 
-        # Verify trace.span() was called with correct params
-        mock_trace.span.assert_called_once_with(
-            name="tool_Read",
-            input=tool_input,
-            metadata={
-                "tool_id": "tool-456",
-                "tool_name": "Read",
-            },
-        )
+        # Verify generation.start_observation() was called with correct params
+        mock_generation.start_observation.assert_called_once()
+        call_kwargs = mock_generation.start_observation.call_args[1]
+        assert call_kwargs["as_type"] == "span"
+        assert call_kwargs["name"] == "tool_Read"
+        assert call_kwargs["input"] == tool_input
+        assert call_kwargs["metadata"]["tool_id"] == "tool-456"
+        assert call_kwargs["metadata"]["tool_name"] == "Read"
 
-        assert "tool-456" in manager._langfuse_tool_spans
-        assert manager._langfuse_tool_spans["tool-456"] == mock_tool_span
+        assert "tool-456" in manager._tool_spans
+        assert manager._tool_spans["tool-456"] == mock_tool_span
 
 
 class TestTrackToolResult:
@@ -311,15 +328,12 @@ class TestTrackToolResult:
         # Should not raise exception
         manager.track_tool_result("tool-999", "result", False)
 
-    @patch("observability.Langfuse")
-    def test_track_tool_result_success(self, mock_langfuse_class):
+    def test_track_tool_result_success(self):
         """Test track_tool_result for successful tool execution."""
-        mock_client = Mock()
         mock_tool_span = Mock()
 
         manager = ObservabilityManager("session-1", "user-1", "User")
-        manager.langfuse_client = mock_client
-        manager._langfuse_tool_spans["tool-123"] = mock_tool_span
+        manager._tool_spans["tool-123"] = mock_tool_span
 
         manager.track_tool_result("tool-123", "File contents", is_error=False)
 
@@ -332,17 +346,14 @@ class TestTrackToolResult:
 
         # Verify span.end() was called
         mock_tool_span.end.assert_called_once()
-        assert "tool-123" not in manager._langfuse_tool_spans
+        assert "tool-123" not in manager._tool_spans
 
-    @patch("observability.Langfuse")
-    def test_track_tool_result_error(self, mock_langfuse_class):
+    def test_track_tool_result_error(self):
         """Test track_tool_result for failed tool execution."""
-        mock_client = Mock()
         mock_tool_span = Mock()
 
         manager = ObservabilityManager("session-1", "user-1", "User")
-        manager.langfuse_client = mock_client
-        manager._langfuse_tool_spans["tool-123"] = mock_tool_span
+        manager._tool_spans["tool-123"] = mock_tool_span
 
         manager.track_tool_result("tool-123", "Error: File not found", is_error=True)
 
@@ -363,57 +374,34 @@ class TestFinalize:
     async def test_finalize_no_client(self, manager):
         """Test finalize when Langfuse client is not initialized."""
         # Should not raise exception
-        await manager.finalize(None)
+        await manager.finalize()
 
     @pytest.mark.asyncio
     @patch("observability.with_sync_timeout")
-    async def test_finalize_with_result_payload(self, mock_timeout):
-        """Test finalize with result payload (SDK v3 trace pattern)."""
+    async def test_finalize_closes_turn(self, mock_timeout):
+        """Test finalize closes open turn."""
         mock_timeout.return_value = (True, None)
 
         mock_client = Mock()
-        mock_trace = Mock()
+        mock_ctx = Mock()
+        mock_ctx.__exit__ = Mock()
+        mock_generation = Mock()
+        mock_propagate_ctx = Mock()
+        mock_propagate_ctx.__exit__ = Mock()
 
         manager = ObservabilityManager("session-1", "user-1", "User")
         manager.langfuse_client = mock_client
-        manager.langfuse_trace = mock_trace
+        manager._current_turn_generation = mock_generation
+        manager._current_turn_ctx = mock_ctx
+        manager._propagate_ctx = mock_propagate_ctx
 
-        result_payload = {
-            "num_turns": 5,
-            "total_cost_usd": 0.01234,
-            "duration_ms": 15000,
-            "subtype": "completion",
-        }
+        await manager.finalize()
 
-        await manager.finalize(result_payload)
-
-        # SDK v3: Verify trace.update() was called with result payload
-        mock_trace.update.assert_called_once()
-        call_kwargs = mock_trace.update.call_args[1]
-        assert call_kwargs["output"] == result_payload
-        assert "num_turns" in call_kwargs["metadata"]
-        assert "total_cost_usd" in call_kwargs["metadata"]
-
+        # Verify turn context was exited
+        mock_ctx.__exit__.assert_called_once()
+        # Verify propagate context was exited
+        mock_propagate_ctx.__exit__.assert_called_once()
         # Verify flush was called
-        mock_timeout.assert_called_once()
-
-    @pytest.mark.asyncio
-    @patch("observability.with_sync_timeout")
-    async def test_finalize_without_result_payload(self, mock_timeout, caplog):
-        """Test finalize without result payload (e.g., git push) - SDK v3."""
-        mock_timeout.return_value = (True, None)
-
-        mock_client = Mock()
-        mock_trace = Mock()
-
-        manager = ObservabilityManager("session-1", "user-1", "User")
-        manager.langfuse_client = mock_client
-        manager.langfuse_trace = mock_trace
-
-        with caplog.at_level(logging.INFO):
-            await manager.finalize(None)
-
-        # Verify flush was still called (no update when no result_payload)
         mock_timeout.assert_called_once()
 
     @pytest.mark.asyncio
@@ -423,16 +411,14 @@ class TestFinalize:
         mock_timeout.return_value = (False, None)  # Timeout
 
         mock_client = Mock()
-        mock_trace = Mock()
 
         manager = ObservabilityManager("session-1", "user-1", "User")
         manager.langfuse_client = mock_client
-        manager.langfuse_trace = mock_trace
 
         with caplog.at_level(logging.ERROR):
-            await manager.finalize({"num_turns": 1})
+            await manager.finalize()
 
-        assert "flush timed out" in caplog.text
+        assert "timed out" in caplog.text
 
 
 class TestCleanupOnError:
@@ -447,24 +433,33 @@ class TestCleanupOnError:
     @pytest.mark.asyncio
     @patch("observability.with_sync_timeout")
     async def test_cleanup_on_error(self, mock_timeout):
-        """Test cleanup_on_error marks trace as error (SDK v3)."""
+        """Test cleanup_on_error marks turn as error."""
         mock_timeout.return_value = (True, None)
 
         mock_client = Mock()
-        mock_trace = Mock()
+        mock_generation = Mock()
+        mock_ctx = Mock()
+        mock_ctx.__exit__ = Mock()
+        mock_propagate_ctx = Mock()
+        mock_propagate_ctx.__exit__ = Mock()
 
         manager = ObservabilityManager("session-1", "user-1", "User")
         manager.langfuse_client = mock_client
-        manager.langfuse_trace = mock_trace
+        manager._current_turn_generation = mock_generation
+        manager._current_turn_ctx = mock_ctx
+        manager._propagate_ctx = mock_propagate_ctx
 
         error = ValueError("Session failed")
         await manager.cleanup_on_error(error)
 
-        # SDK v3: Verify trace.update() was called with error info
-        mock_trace.update.assert_called_once()
-        call_kwargs = mock_trace.update.call_args[1]
+        # Verify turn generation was marked as error
+        mock_generation.update.assert_called_once()
+        call_kwargs = mock_generation.update.call_args[1]
         assert call_kwargs["level"] == "ERROR"
-        assert call_kwargs["status_message"] == "Session failed"
+
+        # Verify contexts were exited
+        mock_ctx.__exit__.assert_called_once()
+        mock_propagate_ctx.__exit__.assert_called_once()
 
         # Verify flush was called
         mock_timeout.assert_called_once()
@@ -476,23 +471,20 @@ class TestCleanupOnError:
         mock_timeout.return_value = (False, None)  # Timeout
 
         mock_client = Mock()
-        mock_trace = Mock()
 
         manager = ObservabilityManager("session-1", "user-1", "User")
         manager.langfuse_client = mock_client
-        manager.langfuse_trace = mock_trace
 
         with caplog.at_level(logging.ERROR):
             await manager.cleanup_on_error(ValueError("test"))
 
-        assert "error cleanup flush timed out" in caplog.text
+        assert "timed out" in caplog.text
 
 
 class TestEnvironmentVariableCombinations:
     """Tests for various environment variable combinations."""
 
     @pytest.mark.asyncio
-    @patch("observability.LANGFUSE_AVAILABLE", True)
     @pytest.mark.parametrize(
         "enabled_value", ["1", "true", "True", "TRUE", "yes", "YES"]
     )
@@ -512,7 +504,6 @@ class TestEnvironmentVariableCombinations:
         assert result is False
 
     @pytest.mark.asyncio
-    @patch("observability.LANGFUSE_AVAILABLE", True)
     @pytest.mark.parametrize("enabled_value", ["0", "false", "False", "no", "NO", ""])
     async def test_langfuse_disabled_variations(self, enabled_value, manager):
         """Test that various falsy values for LANGFUSE_ENABLED work."""
