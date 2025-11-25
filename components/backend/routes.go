@@ -43,6 +43,8 @@ func registerRoutes(r *gin.Engine) {
 			projectGroup.GET("/repo/tree", handlers.GetRepoTree)
 			projectGroup.GET("/repo/blob", handlers.GetRepoBlob)
 			projectGroup.GET("/repo/branches", handlers.ListRepoBranches)
+			projectGroup.GET("/repo/seed-status", handlers.GetRepoSeedStatus)
+			projectGroup.POST("/repo/seed", handlers.SeedRepositoryEndpoint)
 
 			projectGroup.GET("/agentic-sessions", handlers.ListSessions)
 			projectGroup.POST("/agentic-sessions", handlers.CreateSession)
@@ -95,6 +97,11 @@ func registerRoutes(r *gin.Engine) {
 			projectGroup.PUT("/runner-secrets", handlers.UpdateRunnerSecrets)
 			projectGroup.GET("/integration-secrets", handlers.ListIntegrationSecrets)
 			projectGroup.PUT("/integration-secrets", handlers.UpdateIntegrationSecrets)
+
+			// GitLab authentication endpoints (project-scoped)
+			projectGroup.POST("/auth/gitlab/connect", handlers.ConnectGitLabGlobal)
+			projectGroup.GET("/auth/gitlab/status", handlers.GetGitLabStatusGlobal)
+			projectGroup.POST("/auth/gitlab/disconnect", handlers.DisconnectGitLabGlobal)
 		}
 
 		api.POST("/auth/github/install", handlers.LinkGitHubInstallationGlobal)
