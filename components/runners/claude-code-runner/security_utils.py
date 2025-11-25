@@ -61,8 +61,9 @@ def sanitize_exception_message(
     # This catches edge cases like partial matches, encoded forms, etc.
     for secret_name, secret_value in secrets_to_redact.items():
         if secret_value and secret_value.strip() and secret_value in error_msg:
+            # SECURITY: Do not log secret_name - reveals context to attackers
             logging.error(
-                f"SECURITY: Secret '{secret_name}' found in sanitized message - "
+                "SECURITY: Credential sanitization validation failed - "
                 "using generic error message"
             )
             return "Operation failed - check configuration and credentials"
