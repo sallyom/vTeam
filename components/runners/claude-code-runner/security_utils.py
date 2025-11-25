@@ -57,15 +57,12 @@ def sanitize_exception_message(
             placeholder = f"[REDACTED_{secret_name.upper()}]"
             error_msg = error_msg.replace(secret_value, placeholder)
 
-    # Defense-in-depth: Validate no secrets leaked through sanitization
+    # Validate no secrets leaked through sanitization
     # This catches edge cases like partial matches, encoded forms, etc.
     for secret_name, secret_value in secrets_to_redact.items():
         if secret_value and secret_value.strip() and secret_value in error_msg:
-            # SECURITY: Do not log secret_name - reveals context to attackers
-            logging.error(
-                "SECURITY: Credential sanitization validation failed - "
-                "using generic error message"
-            )
+            # Do not log secret_name - reveals context to attackers
+            logging.error("SECURITY: Credential sanitization validation failed")
             return "Operation failed - check configuration and credentials"
 
     return error_msg
@@ -148,7 +145,12 @@ async def with_sync_timeout(
 def validate_and_sanitize_for_logging(value: str, max_length: int = 1000) -> str:
     """Validate and sanitize string value before logging to prevent log injection.
 
-    Removes control characters and truncates to max length.
+    This function uses LENIENT validation - only removes control characters that could
+    break log parsers (newlines, ANSI escape codes). Preserves spaces, punctuation,
+    and unicode characters for better debugging visibility.
+
+    For STRICT validation (API parameters, database queries), use dedicated sanitizers
+    like _sanitize_user_context() which enforce alphanumeric-only patterns.
 
     Args:
         value: String to sanitize

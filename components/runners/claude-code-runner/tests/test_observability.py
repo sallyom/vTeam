@@ -274,6 +274,34 @@ class TestStartTurn:
 
         assert manager._current_turn_generation is not None
 
+    def test_start_turn_prevents_duplicate_traces(self, manager):
+        """Test that start_turn prevents duplicate trace creation for the same turn.
+
+        Simulates SDK behavior where multiple AssistantMessages arrive during streaming.
+        Only the first AssistantMessage should create a trace; subsequent ones should be ignored
+        until end_turn() is called.
+        """
+        mock_client = Mock()
+        mock_ctx = Mock()
+        mock_generation = Mock()
+        mock_ctx.__enter__ = Mock(return_value=mock_generation)
+        mock_client.start_as_current_observation.return_value = mock_ctx
+
+        manager.langfuse_client = mock_client
+
+        # First call to start_turn - should create a trace
+        manager.start_turn("claude-3-5-sonnet", "User input")
+        assert mock_client.start_as_current_observation.call_count == 1
+        assert manager._current_turn_generation is not None
+
+        # Second call to start_turn (same turn, streaming update) - should be ignored
+        manager.start_turn("claude-3-5-sonnet", "User input")
+        assert mock_client.start_as_current_observation.call_count == 1  # Still 1, not 2
+
+        # Third call to start_turn (still same turn) - should be ignored
+        manager.start_turn("claude-3-5-sonnet", "User input")
+        assert mock_client.start_as_current_observation.call_count == 1  # Still 1, not 3
+
 
 class TestEndTurn:
     """Tests for end_turn method."""

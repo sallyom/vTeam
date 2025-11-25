@@ -32,8 +32,6 @@ var (
 )
 
 // Kubernetes DNS-1123 label validation (namespace, service account names)
-// Must be lowercase alphanumeric or '-', max 63 chars, start/end with alphanumeric
-// Regex allows single char (e.g., "a") or multi-char with optional middle section
 var kubernetesNameRegex = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 
 // isValidKubernetesName validates that a string is a valid Kubernetes DNS-1123 label
@@ -122,6 +120,14 @@ func GetK8sClientsForRequest(c *gin.Context) (*kubernetes.Clientset, dynamic.Int
 // updateAccessKeyLastUsedAnnotation attempts to update the ServiceAccount's last-used annotation
 // when the incoming token is a ServiceAccount JWT. Uses the backend service account client strictly
 // for this telemetry update and only for SAs labeled app=ambient-access-key. Best-effort; errors ignored.
+//
+// RBAC:
+// This function intentionally uses the backend service account (K8sClientMw) instead of user credentials
+// because it updates platform-managed telemetry metadata (last-used timestamp) that users should not control.
+//
+// - Only updates ServiceAccounts with label app=ambient-access-key (line check below)
+// - Only updates the last-used-at annotation (no other metadata changes)
+// - Best-effort operation with all errors ignored (cannot disrupt user requests)
 func updateAccessKeyLastUsedAnnotation(c *gin.Context) {
 	// Parse Authorization header
 	rawAuth := c.GetHeader("Authorization")
@@ -273,10 +279,6 @@ func ValidateProjectContext() gin.HandlerFunc {
 		}
 
 		// Validate namespace name to prevent injection attacks
-		// Kubernetes namespace names must be valid DNS-1123 labels:
-		// - lowercase alphanumeric plus '-'
-		// - max 63 characters
-		// - start and end with alphanumeric
 		if !isValidKubernetesName(projectHeader) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project name format"})
 			c.Abort()

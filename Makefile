@@ -178,4 +178,4 @@ e2e-clean: ## Clean up e2e test environment
 
 deploy-langfuse-openshift: ## Deploy Langfuse to OpenShift/ROSA cluster
 	@echo "Deploying Langfuse to OpenShift cluster..."
-	@cd e2e && ./scripts/deploy-langfuse-openshift.sh
+	@cd e2e && ./scripts/deploy-langfuse.sh --openshift

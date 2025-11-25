@@ -115,9 +115,9 @@ if [[ "$USE_TEST_CREDS" =~ ^[Yy]$ ]]; then
   echo "Setting simple passwords for test environment..."
   NEXTAUTH_SECRET="test-nextauth-secret-12345678"
   SALT="test-salt-12345678"
-  POSTGRES_PASSWORD="postgres123"
-  CLICKHOUSE_PASSWORD="clickhouse123"
-  REDIS_PASSWORD="redis123"
+  POSTGRES_PASSWORD="postgres123" # notsecret
+  CLICKHOUSE_PASSWORD="clickhouse123" # notsecret
+  REDIS_PASSWORD="redis123" # notsecret
   echo "   ✓ Test credentials configured"
 else
   echo "Generating secure random credentials..."

@@ -48,6 +48,13 @@ class ClaudeCodeAdapter:
     def _sanitize_user_context(user_id: str, user_name: str) -> tuple[str, str]:
         """Validate and sanitize user context fields to prevent injection attacks.
 
+        This function enforces STRICT validation for values sent to external APIs
+        (Langfuse trace metadata, database queries, URL parameters).
+
+        Differs from validate_and_sanitize_for_logging() which is lenient and only
+        removes control characters for safe logging. This function uses strict pattern
+        matching to ensure API compatibility and prevent query injection.
+
         Returns:
             Tuple of (sanitized_user_id, sanitized_user_name)
         """

@@ -144,6 +144,9 @@ class ObservabilityManager:
             tags = ["claude-code", f"namespace:{namespace}"]
 
             # Add model to metadata and tags if provided (after sanitization)
+            # SECURITY: Model name is sanitized via sanitize_model_name() to prevent injection attacks.
+            # Only alphanumeric chars and allowed separators (-, _, :, @, ., /) are permitted.
+            # This prevents malicious tag values from disrupting Langfuse API or metadata storage.
             if model:
                 sanitized_model = sanitize_model_name(model)
                 if sanitized_model:
@@ -156,13 +159,24 @@ class ObservabilityManager:
 
             # Enter propagate_attributes context - all traces share session_id/user_id/tags/metadata
             # Each turn will be a separate trace, automatically grouped by session_id
-            self._propagate_ctx = propagate_attributes(
-                user_id=self.user_id,
-                session_id=self.session_id,
-                tags=tags,
-                metadata=metadata
-            )
-            self._propagate_ctx.__enter__()
+            # Wrap context creation and __enter__ to ensure proper cleanup on failure
+            try:
+                self._propagate_ctx = propagate_attributes(
+                    user_id=self.user_id,
+                    session_id=self.session_id,
+                    tags=tags,
+                    metadata=metadata
+                )
+                self._propagate_ctx.__enter__()
+            except Exception:
+                # Cleanup propagate context if __enter__ failed
+                if self._propagate_ctx:
+                    try:
+                        self._propagate_ctx.__exit__(None, None, None)
+                    except Exception:
+                        pass
+                    self._propagate_ctx = None
+                raise
 
             logging.info(f"Langfuse: Session tracking enabled (session_id={self.session_id}, user_id={self.user_id}, model={model})")
             return True
@@ -463,13 +477,16 @@ class ObservabilityManager:
                 logging.info("Langfuse: Session context closed")
 
             # Flush data
+            # Timeout is configurable via LANGFUSE_FLUSH_TIMEOUT (default: 30s)
+            # Increase for large traces or constrained networks to prevent data loss
+            flush_timeout = float(os.getenv("LANGFUSE_FLUSH_TIMEOUT", "30.0"))
             success, _ = await with_sync_timeout(
-                self.langfuse_client.flush, 30.0, "Langfuse flush"
+                self.langfuse_client.flush, flush_timeout, "Langfuse flush"
             )
             if success:
                 logging.info("Langfuse: Flush completed")
             else:
-                logging.error("Langfuse: Flush timed out after 30s")
+                logging.error(f"Langfuse: Flush timed out after {flush_timeout}s")
 
         except Exception as e:
             logging.error(f"Langfuse: Failed to finalize: {e}", exc_info=True)
@@ -513,11 +530,13 @@ class ObservabilityManager:
             if self._propagate_ctx:
                 self._propagate_ctx.__exit__(None, None, None)
 
+            # Timeout is configurable via LANGFUSE_FLUSH_TIMEOUT (default: 30s)
+            flush_timeout = float(os.getenv("LANGFUSE_FLUSH_TIMEOUT", "30.0"))
             success, _ = await with_sync_timeout(
-                self.langfuse_client.flush, 30.0, "Langfuse error flush"
+                self.langfuse_client.flush, flush_timeout, "Langfuse error flush"
             )
             if not success:
-                logging.error("Langfuse: Error flush timed out")
+                logging.error(f"Langfuse: Error flush timed out after {flush_timeout}s")
 
         except Exception as cleanup_err:
             logging.error(f"Langfuse: Failed to cleanup: {cleanup_err}", exc_info=True)
