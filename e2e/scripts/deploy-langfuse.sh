@@ -150,9 +150,20 @@ fi
 echo ""
 echo "Installing Langfuse with Helm..."
 echo "   (This may take 5-10 minutes...)"
+echo ""
+echo "ClickHouse configuration:"
+echo "   ✓ Internal system logging disabled (saves ~7GB+ disk space)"
+echo "   ✓ Only essential Langfuse data (traces, observations) will be stored"
+echo ""
+
+# Get script directory to find values file
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VALUES_FILE="$SCRIPT_DIR/langfuse-values-clickhouse-minimal-logging.yaml"
+
 helm upgrade --install langfuse langfuse/langfuse \
   --namespace langfuse \
   --version ">= 3.63.0" \
+  --values "$VALUES_FILE" \
   --set langfuse.nextauth.secret.value="$NEXTAUTH_SECRET" \
   --set langfuse.salt.value="$SALT" \
   --set postgresql.auth.password="$POSTGRES_PASSWORD" \
@@ -178,6 +189,7 @@ helm upgrade --install langfuse langfuse/langfuse \
   --set zookeeper.resources.requests.cpu=250m \
   --set zookeeper.resources.limits.cpu=500m \
   --set minio.enabled=true \
+  --set clickhouse.shards=1 \
   --wait \
   --timeout=10m
 

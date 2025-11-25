@@ -251,7 +251,7 @@ class TestStartTurn:
     def test_start_turn_no_client(self, manager):
         """Test start_turn when Langfuse client is not initialized."""
         # Should not raise exception
-        manager.start_turn(1, "claude-3-5-sonnet")
+        manager.start_turn("claude-3-5-sonnet")
 
     def test_start_turn_creates_generation(self, manager):
         """Test start_turn creates a generation trace."""
@@ -263,13 +263,13 @@ class TestStartTurn:
 
         manager.langfuse_client = mock_client
 
-        manager.start_turn(1, "claude-3-5-sonnet", "Test prompt")
+        manager.start_turn("claude-3-5-sonnet", "Test prompt")
 
         # Verify start_as_current_observation was called
         mock_client.start_as_current_observation.assert_called_once()
         call_kwargs = mock_client.start_as_current_observation.call_args[1]
         assert call_kwargs["as_type"] == "generation"
-        assert call_kwargs["name"] == "claude_turn_1"
+        assert call_kwargs["name"] == "claude_interaction"
         assert call_kwargs["model"] == "claude-3-5-sonnet"
 
         assert manager._current_turn_generation is not None

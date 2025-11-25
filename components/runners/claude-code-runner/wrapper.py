@@ -515,8 +515,9 @@ class ClaudeCodeAdapter:
                         if isinstance(message, AssistantMessage):
                             current_message = message
                             # Start turn tracking NOW so tools can be parented to it
-                            # Turn count will be incremented when ResultMessage arrives
-                            obs.start_turn(self._turn_count + 1, configured_model)
+                            # Turn number will be added to metadata when ResultMessage arrives with SDK's authoritative num_turns
+                            logging.info(f"Langfuse: AssistantMessage received, starting turn trace (current _turn_count={self._turn_count})")
+                            obs.start_turn(configured_model)
 
                         for block in getattr(message, 'content', []) or []:
                             if isinstance(block, TextBlock):
@@ -585,14 +586,25 @@ class ClaudeCodeAdapter:
                         # Update turn count from SDK's authoritative num_turns
                         # This ensures we stay in sync with the SDK's turn tracking
                         if sdk_num_turns is not None and sdk_num_turns > self._turn_count:
+                            old_count = self._turn_count
                             self._turn_count = sdk_num_turns
-                            logging.info(f"Updated turn count to SDK's num_turns: {self._turn_count}")
+                            logging.info(f"Updated turn count from {old_count} to SDK's num_turns: {self._turn_count}")
+                        elif sdk_num_turns is not None:
+                            logging.info(f"SDK num_turns={sdk_num_turns} matches or is less than current _turn_count={self._turn_count}, keeping current value")
 
                         # Complete turn tracking with usage data
                         # Only end turn if we have a current message (AssistantMessage was received)
                         if current_message:
+                            logging.info(f"Langfuse: Calling end_turn for turn {self._turn_count} (SDK num_turns={sdk_num_turns}) with current_message present")
                             obs.end_turn(self._turn_count, current_message, usage_raw if isinstance(usage_raw, dict) else None)
+                            logging.info(f"Langfuse: end_turn completed for turn {self._turn_count}, clearing current_message")
                             current_message = None  # Clear after tracking
+                        else:
+                            logging.warning(
+                                f"Langfuse: ResultMessage received for turn {self._turn_count} (SDK num_turns={sdk_num_turns}) "
+                                f"but no current_message stored - trace {self._turn_count} will remain incomplete. "
+                                f"This usually means AssistantMessage was not received before ResultMessage."
+                            )
 
                         result_payload = {
                             "subtype": getattr(message, 'subtype', None),

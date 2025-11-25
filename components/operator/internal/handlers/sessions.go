@@ -140,15 +140,29 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 					log.Printf("Successfully deleted job %s for stopped session", jobName)
 				}
 
-				// IMPORTANT: Do NOT explicitly delete pods here
-				// Job deletion with Foreground propagation will automatically cascade to pods
-				// Explicit pod deletion bypasses TerminationGracePeriodSeconds
-				//
-				// Kubernetes will:
-				// 1. Send SIGTERM to container for graceful shutdown
-				// 2. Wait up to TerminationGracePeriodSeconds (30s default) for graceful exit
-				// 3. Send SIGKILL if still running after grace period
-				log.Printf("Pods for job %s will be deleted automatically by Kubernetes", jobName)
+				// Then, explicitly delete all pods for this job (by job-name label)
+				podSelector := fmt.Sprintf("job-name=%s", jobName)
+				log.Printf("Deleting pods with job-name selector: %s", podSelector)
+				err = config.K8sClient.CoreV1().Pods(sessionNamespace).DeleteCollection(context.TODO(), v1.DeleteOptions{}, v1.ListOptions{
+					LabelSelector: podSelector,
+				})
+				if err != nil && !errors.IsNotFound(err) {
+					log.Printf("Failed to delete pods for job %s: %v (continuing anyway)", jobName, err)
+				} else {
+					log.Printf("Successfully deleted pods for job %s", jobName)
+				}
+
+				// Also delete any pods labeled with this session (in case owner refs are lost)
+				sessionPodSelector := fmt.Sprintf("agentic-session=%s", name)
+				log.Printf("Deleting pods with agentic-session selector: %s", sessionPodSelector)
+				err = config.K8sClient.CoreV1().Pods(sessionNamespace).DeleteCollection(context.TODO(), v1.DeleteOptions{}, v1.ListOptions{
+					LabelSelector: sessionPodSelector,
+				})
+				if err != nil && !errors.IsNotFound(err) {
+					log.Printf("Failed to delete session-labeled pods: %v (continuing anyway)", err)
+				} else {
+					log.Printf("Successfully deleted session-labeled pods")
+				}
 			} else {
 				log.Printf("Job %s already completed (Succeeded: %d, Failed: %d), no cleanup needed", jobName, job.Status.Succeeded, job.Status.Failed)
 			}
@@ -299,9 +313,9 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 
 	// Hardcoded secret names (convention over configuration)
 	const runnerSecretsName = "ambient-runner-secrets"               // ANTHROPIC_API_KEY only (ignored when Vertex enabled)
-	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, custom keys (optional, NO Langfuse keys)
+	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, custom keys (optional)
 
-	// Check if integration secrets exist (user-provided integrations like GIT_TOKEN, JIRA_*)
+	// Check if integration secrets exist (optional)
 	integrationSecretsExist := false
 	if _, err := config.K8sClient.CoreV1().Secrets(sessionNamespace).Get(context.TODO(), integrationSecretsName, v1.GetOptions{}); err == nil {
 		integrationSecretsExist = true
@@ -383,8 +397,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 				},
 				Spec: corev1.PodSpec{
 					RestartPolicy: corev1.RestartPolicyNever,
-					// Default grace period for graceful shutdown
-					TerminationGracePeriodSeconds: int64Ptr(30),
 					// Explicitly set service account for pod creation permissions
 					AutomountServiceAccountToken: boolPtr(false),
 					Volumes: []corev1.Volume{
@@ -611,7 +623,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 							}(),
 
 							// Import secrets as environment variables
-							// - integrationSecretsName: Only if exists (GIT_TOKEN, JIRA_*, custom keys - NO Langfuse keys)
+							// - integrationSecretsName: Only if exists (GIT_TOKEN, JIRA_*, custom keys)
 							// - runnerSecretsName: Only when Vertex disabled (ANTHROPIC_API_KEY)
 							// - ambient-langfuse-keys: Platform-wide Langfuse observability (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, LANGFUSE_ENABLED)
 							EnvFrom: func() []corev1.EnvFromSource {
@@ -640,10 +652,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 								} else if vertexEnabled && runnerSecretsName != "" {
 									log.Printf("Skipping runner secrets '%s' for session %s (Vertex enabled)", runnerSecretsName, name)
 								}
-
-								// Note: Platform-wide Langfuse observability keys are injected via explicit Env entries above
-								// (LANGFUSE_* env vars from ambient-admin-langfuse-secret Secret, platform-admin managed)
-								// EnvFrom is intentionally NOT used here to prevent automatic exposure of future secret keys
 
 								return sources
 							}(),

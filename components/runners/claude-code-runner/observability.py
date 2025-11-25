@@ -4,11 +4,12 @@ Observability manager for Claude Code runner - hybrid Langfuse integration.
 Provides Langfuse LLM observability for Claude sessions with trace structure:
 
 1. Turn Traces (top-level generations):
-   - Each turn is a separate trace
-   - Named: claude_turn_1, claude_turn_2, etc.
-   - Contains authoritative usage data from Claude SDK
+   - ONE trace per turn (SDK sends multiple AssistantMessages during streaming, but guard prevents duplicates)
+   - Named: "claude_interaction" (turn number stored in metadata)
+   - First AssistantMessage creates trace, subsequent ones ignored until end_turn() clears it
+   - Final trace contains authoritative turn number and usage data from ResultMessage
    - Canonical format with separate cache token tracking for accurate cost
-   - All turns grouped by session_id via propagate_attributes()
+   - All traces grouped by session_id via propagate_attributes()
 
 2. Tool Spans (observations within turn traces):
    - Named: tool_Read, tool_Write, tool_Bash, etc.
@@ -18,21 +19,20 @@ Provides Langfuse LLM observability for Claude sessions with trace structure:
 
 Architecture:
 - Session-based grouping via propagate_attributes() with session_id and user_id
-- Each turn is an independent trace (not nested under a session trace)
+- Each turn creates ONE independent trace (not nested under session)
 - Langfuse automatically aggregates tokens and costs across all traces with same session_id
-- Filter by session_id, user_id, or model in Langfuse UI
+- Filter by session_id, user_id, model, or metadata.turn in Langfuse UI
+- Sessions can be paused/resumed: each turn creates a trace regardless of session lifecycle
 
 Trace Hierarchy:
-claude_turn_1 (trace - generation)
+claude_interaction (trace - generation, metadata: {turn: 1})
 ├── tool_Read (observation - span)
 └── tool_Write (observation - span)
 
-claude_turn_2 (trace - generation)
+claude_interaction (trace - generation, metadata: {turn: 2})
 └── tool_Bash (observation - span)
 
-claude_turn_3 (trace - generation)
-
-Usage Format (turn-level only):
+Usage Format:
 {
     "input": int,  # Regular input tokens
     "output": int,  # Output tokens
@@ -183,60 +183,61 @@ class ObservabilityManager:
             self._propagate_ctx = None
             return False
 
-    def start_turn(self, turn_count: int, model: str, user_input: str | None = None) -> None:
+    def start_turn(self, model: str, user_input: str | None = None) -> None:
         """Start tracking a new turn as a top-level trace.
 
         Creates the turn generation as a TRACE (not an observation) so that each turn
         appears as a separate trace in Langfuse. Tools will be observations within the trace.
 
-        Note: Cannot use 'with' context managers due to async streaming architecture.
+        Prevents duplicate traces when SDK sends multiple AssistantMessages per turn during
+        streaming. Only the first AssistantMessage creates a trace; subsequent ones are ignored
+        until end_turn() clears the current trace.
+
+        Cannot use 'with' context managers due to async streaming architecture.
         Messages arrive asynchronously (AssistantMessage → ToolUseBlocks → ResultMessage)
         and the turn context must stay open across multiple async loop iterations.
 
         Args:
-            turn_count: Current turn number
             model: Model name (e.g., "claude-3-5-sonnet-20241022")
             user_input: Optional actual user input/prompt (if available)
         """
         if not self.langfuse_client:
             return
 
-        # Guard: Don't create a new turn if one is already active
-        # This prevents duplicate traces when AssistantMessage arrives multiple times
+        # Guard: Prevent creating duplicate traces for the same turn
+        # SDK sends multiple AssistantMessages during streaming - only create trace once
         if self._current_turn_generation:
-            logging.debug(f"Langfuse: Turn already active, skipping start_turn for turn {turn_count}")
+            logging.debug("Langfuse: Trace already active for current turn, skipping duplicate start_turn")
             return
 
         try:
-            # Build metadata
-            metadata = {"turn": turn_count}
-
             # Use pending initial prompt for turn 1 if available
-            if user_input is None and turn_count == 1 and self._pending_initial_prompt:
+            if user_input is None and self._pending_initial_prompt:
                 user_input = self._pending_initial_prompt
                 self._pending_initial_prompt = None  # Clear after use
-                logging.debug("Langfuse: Using pending initial prompt for turn 1")
+                logging.debug("Langfuse: Using pending initial prompt")
 
-            # Use actual user input if provided, otherwise use placeholder
+            # Use actual user input if provided, otherwise use generic placeholder
             if user_input:
                 input_content = [{"role": "user", "content": user_input}]
-                logging.info(f"Langfuse: Starting turn {turn_count} trace with model={model} and actual user input")
+                logging.info(f"Langfuse: Starting turn trace with model={model} and actual user input")
             else:
-                input_content = [{"role": "user", "content": f"Turn {turn_count}"}]
-                logging.info(f"Langfuse: Starting turn {turn_count} trace with model={model}")
+                input_content = [{"role": "user", "content": "User input"}]
+                logging.info(f"Langfuse: Starting turn trace with model={model}")
 
             # Create generation as a TRACE using start_as_current_observation()
-            # This makes claude_turn_X a top-level trace, not an observation
+            # Name doesn't include turn number - that will be added to metadata in end_turn()
+            # This makes the trace a top-level observation, not nested
             # Tools will automatically become child observations of this trace
             self._current_turn_ctx = self.langfuse_client.start_as_current_observation(
                 as_type="generation",
-                name=f"claude_turn_{turn_count}",
+                name="claude_interaction",  # Generic name, turn number added in metadata
                 input=input_content,
                 model=model,
-                metadata=metadata,
+                metadata={},  # Turn number will be added in end_turn()
             )
             self._current_turn_generation = self._current_turn_ctx.__enter__()
-            logging.debug(f"Langfuse: Turn {turn_count} trace started, ready for tool spans")
+            logging.info(f"Langfuse: Created new trace (model={model})")
 
         except Exception as e:
             logging.error(f"Langfuse: Failed to start turn: {e}", exc_info=True)
@@ -244,10 +245,11 @@ class ObservabilityManager:
     def end_turn(self, turn_count: int, message: Any, usage: dict | None = None) -> None:
         """Complete turn tracking with output and usage data (called when ResultMessage arrives).
 
-        Updates the turn generation with the assistant's output and usage metrics, then closes it.
+        Updates the turn generation with the assistant's output, usage metrics, and SDK's
+        authoritative turn number in metadata, then closes it.
 
         Args:
-            turn_count: Current turn number
+            turn_count: Current turn number (from SDK's authoritative num_turns in ResultMessage)
             message: AssistantMessage from Claude SDK
             usage: Usage dict from ResultMessage with input_tokens, output_tokens, cache tokens, etc.
         """
@@ -291,8 +293,12 @@ class ObservabilityManager:
                 if cache_creation > 0:
                     usage_details_dict["cache_creation_input_tokens"] = cache_creation
 
-            # Update with output and usage_details (SDK v3 requires 'usage_details' parameter)
-            update_params = {"output": output_text}
+            # Update with output, usage_details, and turn number in metadata
+            # SDK v3 requires 'usage_details' parameter for usage tracking
+            update_params = {
+                "output": output_text,
+                "metadata": {"turn": turn_count}  # Add SDK's authoritative turn number
+            }
             if usage_details_dict:
                 update_params["usage_details"] = usage_details_dict
             self._current_turn_generation.update(**update_params)
@@ -310,7 +316,7 @@ class ObservabilityManager:
             if self.langfuse_client:
                 try:
                     self.langfuse_client.flush()
-                    logging.debug(f"Langfuse: Flushed turn {turn_count} data")
+                    logging.info(f"Langfuse: Flushed turn {turn_count} data")
                 except Exception as e:
                     logging.warning(f"Langfuse: Flush failed after turn {turn_count}: {e}")
 
