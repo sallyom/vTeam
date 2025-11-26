@@ -11,7 +11,7 @@ type GitLabConnection struct {
 	UpdatedAt    time.Time `json:"updatedAt"`    // Last connection update
 }
 
-// GitLabRepository extends GitRepository for GitLab-specific attributes
+// ParsedGitLabRepo extends GitRepository for GitLab-specific attributes.
 // Internal parsed representation (not persisted to CRD)
 type ParsedGitLabRepo struct {
 	Host      string // "gitlab.com" or "gitlab.example.com"

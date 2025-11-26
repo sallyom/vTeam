@@ -19,7 +19,7 @@ const (
 )
 
 // StoreGitLabConnection stores GitLab connection metadata in a ConfigMap
-func StoreGitLabConnection(ctx context.Context, clientset *kubernetes.Clientset, namespace string, connection *types.GitLabConnection) error {
+func StoreGitLabConnection(ctx context.Context, clientset kubernetes.Interface, namespace string, connection *types.GitLabConnection) error {
 	configMapsClient := clientset.CoreV1().ConfigMaps(namespace)
 
 	// Serialize connection to JSON
@@ -68,7 +68,7 @@ func StoreGitLabConnection(ctx context.Context, clientset *kubernetes.Clientset,
 }
 
 // GetGitLabConnection retrieves GitLab connection metadata from a ConfigMap
-func GetGitLabConnection(ctx context.Context, clientset *kubernetes.Clientset, namespace, userID string) (*types.GitLabConnection, error) {
+func GetGitLabConnection(ctx context.Context, clientset kubernetes.Interface, namespace, userID string) (*types.GitLabConnection, error) {
 	configMapsClient := clientset.CoreV1().ConfigMaps(namespace)
 
 	configMap, err := configMapsClient.Get(ctx, GitLabConnectionsConfigMapName, metav1.GetOptions{})
@@ -93,7 +93,7 @@ func GetGitLabConnection(ctx context.Context, clientset *kubernetes.Clientset, n
 }
 
 // DeleteGitLabConnection removes GitLab connection metadata from a ConfigMap
-func DeleteGitLabConnection(ctx context.Context, clientset *kubernetes.Clientset, namespace, userID string) error {
+func DeleteGitLabConnection(ctx context.Context, clientset kubernetes.Interface, namespace, userID string) error {
 	configMapsClient := clientset.CoreV1().ConfigMaps(namespace)
 
 	configMap, err := configMapsClient.Get(ctx, GitLabConnectionsConfigMapName, metav1.GetOptions{})
@@ -119,7 +119,7 @@ func DeleteGitLabConnection(ctx context.Context, clientset *kubernetes.Clientset
 }
 
 // HasGitLabConnection checks if a user has a GitLab connection stored
-func HasGitLabConnection(ctx context.Context, clientset *kubernetes.Clientset, namespace, userID string) (bool, error) {
+func HasGitLabConnection(ctx context.Context, clientset kubernetes.Interface, namespace, userID string) (bool, error) {
 	configMapsClient := clientset.CoreV1().ConfigMaps(namespace)
 
 	configMap, err := configMapsClient.Get(ctx, GitLabConnectionsConfigMapName, metav1.GetOptions{})
@@ -135,7 +135,7 @@ func HasGitLabConnection(ctx context.Context, clientset *kubernetes.Clientset, n
 }
 
 // ListGitLabConnections retrieves all GitLab connections from a ConfigMap
-func ListGitLabConnections(ctx context.Context, clientset *kubernetes.Clientset, namespace string) ([]*types.GitLabConnection, error) {
+func ListGitLabConnections(ctx context.Context, clientset kubernetes.Interface, namespace string) ([]*types.GitLabConnection, error) {
 	configMapsClient := clientset.CoreV1().ConfigMaps(namespace)
 
 	configMap, err := configMapsClient.Get(ctx, GitLabConnectionsConfigMapName, metav1.GetOptions{})

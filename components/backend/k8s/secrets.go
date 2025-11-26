@@ -18,7 +18,7 @@ const (
 
 // StoreGitLabToken stores a GitLab Personal Access Token in Kubernetes Secrets
 // Uses optimistic concurrency control with retry to handle concurrent updates
-func StoreGitLabToken(ctx context.Context, clientset *kubernetes.Clientset, namespace, userID, token string) error {
+func StoreGitLabToken(ctx context.Context, clientset kubernetes.Interface, namespace, userID, token string) error {
 	secretsClient := clientset.CoreV1().Secrets(namespace)
 
 	// Retry up to 3 times with exponential backoff
@@ -88,7 +88,7 @@ func StoreGitLabToken(ctx context.Context, clientset *kubernetes.Clientset, name
 }
 
 // GetGitLabToken retrieves a GitLab Personal Access Token from Kubernetes Secrets
-func GetGitLabToken(ctx context.Context, clientset *kubernetes.Clientset, namespace, userID string) (string, error) {
+func GetGitLabToken(ctx context.Context, clientset kubernetes.Interface, namespace, userID string) (string, error) {
 	secretsClient := clientset.CoreV1().Secrets(namespace)
 
 	secret, err := secretsClient.Get(ctx, GitLabTokensSecretName, metav1.GetOptions{})
@@ -109,7 +109,7 @@ func GetGitLabToken(ctx context.Context, clientset *kubernetes.Clientset, namesp
 
 // DeleteGitLabToken removes a GitLab Personal Access Token from Kubernetes Secrets
 // Uses optimistic concurrency control with retry to handle concurrent updates
-func DeleteGitLabToken(ctx context.Context, clientset *kubernetes.Clientset, namespace, userID string) error {
+func DeleteGitLabToken(ctx context.Context, clientset kubernetes.Interface, namespace, userID string) error {
 	secretsClient := clientset.CoreV1().Secrets(namespace)
 
 	// Retry up to 3 times with exponential backoff
@@ -155,7 +155,7 @@ func DeleteGitLabToken(ctx context.Context, clientset *kubernetes.Clientset, nam
 }
 
 // HasGitLabToken checks if a user has a GitLab token stored
-func HasGitLabToken(ctx context.Context, clientset *kubernetes.Clientset, namespace, userID string) (bool, error) {
+func HasGitLabToken(ctx context.Context, clientset kubernetes.Interface, namespace, userID string) (bool, error) {
 	secretsClient := clientset.CoreV1().Secrets(namespace)
 
 	secret, err := secretsClient.Get(ctx, GitLabTokensSecretName, metav1.GetOptions{})

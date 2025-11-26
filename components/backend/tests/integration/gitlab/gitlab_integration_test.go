@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 
 	"ambient-code-backend/git"
 	"ambient-code-backend/gitlab"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -48,8 +46,9 @@ func TestGitLabIntegrationEnd2End(t *testing.T) {
 			result, err := gitlab.ValidateGitLabToken(ctx, gitlabToken, "https://gitlab.com")
 			require.NoError(t, err, "Token validation should succeed")
 			assert.True(t, result.Valid, "Token should be valid")
-			assert.NotEmpty(t, result.Username, "Username should be populated")
-			assert.NotEmpty(t, result.GitLabUserID, "GitLab user ID should be populated")
+			assert.NotNil(t, result.User, "User should be populated")
+			assert.NotEmpty(t, result.User.Username, "Username should be populated")
+			assert.NotZero(t, result.User.ID, "GitLab user ID should be populated")
 		})
 
 		// Test token storage
@@ -362,7 +361,7 @@ func TestGitLabClientLogging(t *testing.T) {
 	client := gitlab.NewClient("https://gitlab.com/api/v4", token)
 
 	// Make a simple API request
-	resp, err := client.GetCurrentUser(ctx)
+	resp, err := gitlab.GetCurrentUser(ctx, client)
 	require.NoError(t, err, "API call should succeed")
 	assert.NotNil(t, resp, "Response should not be nil")
 

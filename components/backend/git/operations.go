@@ -114,7 +114,7 @@ func GetGitHubToken(ctx context.Context, k8sClient *kubernetes.Clientset, dynCli
 }
 
 // GetGitLabToken retrieves a GitLab Personal Access Token for a user
-func GetGitLabToken(ctx context.Context, k8sClient *kubernetes.Clientset, project, userID string) (string, error) {
+func GetGitLabToken(ctx context.Context, k8sClient kubernetes.Interface, project, userID string) (string, error) {
 	if k8sClient == nil {
 		log.Printf("Cannot read GitLab token: k8s client is nil")
 		return "", fmt.Errorf("no GitLab credentials available. Please connect your GitLab account")
@@ -817,40 +817,44 @@ func DetectPushError(repoURL, stderr, stdout string) error {
 
 	// Check for authentication/permission errors
 	if strings.Contains(combined, "403") || strings.Contains(combined, "forbidden") {
-		if provider == types.ProviderGitLab {
-			return fmt.Errorf("GitLab push failed: Insufficient permissions. Ensure your GitLab token has 'write_repository' scope. You can update your token by reconnecting your GitLab account with the required permissions")
-		} else if provider == types.ProviderGitHub {
-			return fmt.Errorf("GitHub push failed: Insufficient permissions. Check that your GitHub App installation has write access to this repository")
+		switch provider {
+		case types.ProviderGitLab:
+			return fmt.Errorf("GitLab push failed: insufficient permissions. Ensure your GitLab token has 'write_repository' scope. You can update your token by reconnecting your GitLab account with the required permissions")
+		case types.ProviderGitHub:
+			return fmt.Errorf("GitHub push failed: insufficient permissions. Check that your GitHub App installation has write access to this repository")
+		default:
+			return fmt.Errorf("push failed: insufficient permissions (403 Forbidden)")
 		}
-		return fmt.Errorf("Push failed: Insufficient permissions (403 Forbidden)")
 	}
 
 	// Check for authentication failures
 	if strings.Contains(combined, "401") || strings.Contains(combined, "unauthorized") || strings.Contains(combined, "authentication failed") {
-		if provider == types.ProviderGitLab {
-			return fmt.Errorf("GitLab push failed: Authentication failed. Your GitLab token may be invalid or expired. Please reconnect your GitLab account")
-		} else if provider == types.ProviderGitHub {
-			return fmt.Errorf("GitHub push failed: Authentication failed. Check your GitHub App installation")
+		switch provider {
+		case types.ProviderGitLab:
+			return fmt.Errorf("GitLab push failed: authentication failed. Your GitLab token may be invalid or expired. Please reconnect your GitLab account")
+		case types.ProviderGitHub:
+			return fmt.Errorf("GitHub push failed: authentication failed. Check your GitHub App installation")
+		default:
+			return fmt.Errorf("push failed: authentication failed (401 Unauthorized)")
 		}
-		return fmt.Errorf("Push failed: Authentication failed (401 Unauthorized)")
 	}
 
 	// Check for network errors
 	if strings.Contains(combined, "could not resolve host") || strings.Contains(combined, "connection refused") {
-		return fmt.Errorf("Push failed: Unable to connect to %s. Check network connectivity", extractHostFromURL(repoURL))
+		return fmt.Errorf("push failed: unable to connect to %s. Check network connectivity", extractHostFromURL(repoURL))
 	}
 
 	// Check for rate limiting
 	if strings.Contains(combined, "429") || strings.Contains(combined, "rate limit") {
 		if provider == types.ProviderGitLab {
-			return fmt.Errorf("GitLab push failed: Rate limit exceeded. Please wait a few minutes before retrying")
+			return fmt.Errorf("GitLab push failed: rate limit exceeded. Please wait a few minutes before retrying")
 		}
-		return fmt.Errorf("Push failed: API rate limit exceeded. Please wait before retrying")
+		return fmt.Errorf("push failed: API rate limit exceeded. Please wait before retrying")
 	}
 
 	// Check for repository not found
 	if strings.Contains(combined, "404") || strings.Contains(combined, "not found") || strings.Contains(combined, "repository not found") {
-		return fmt.Errorf("Push failed: Repository not found. Verify the repository URL: %s", repoURL)
+		return fmt.Errorf("push failed: repository not found. Verify the repository URL: %s", repoURL)
 	}
 
 	// Return original error if no pattern matched
@@ -861,7 +865,7 @@ func DetectPushError(repoURL, stderr, stdout string) error {
 	if len(errMsg) > 500 {
 		errMsg = errMsg[:500] + "..."
 	}
-	return fmt.Errorf("Push failed: %s", errMsg)
+	return fmt.Errorf("push failed: %s", errMsg)
 }
 
 // extractHostFromURL extracts the host from a git URL for error messages
@@ -1491,13 +1495,8 @@ func validateGitLabPushAccess(ctx context.Context, repoURL, gitlabToken string) 
 
 	// GitLab access levels: 10=Guest, 20=Reporter, 30=Developer, 40=Maintainer, 50=Owner
 	// Need at least Developer (30) to push
-	hasAccess := false
-	if projectInfo.Permissions.ProjectAccess != nil && projectInfo.Permissions.ProjectAccess.AccessLevel >= 30 {
-		hasAccess = true
-	}
-	if projectInfo.Permissions.GroupAccess != nil && projectInfo.Permissions.GroupAccess.AccessLevel >= 30 {
-		hasAccess = true
-	}
+	hasAccess := (projectInfo.Permissions.ProjectAccess != nil && projectInfo.Permissions.ProjectAccess.AccessLevel >= 30) ||
+		(projectInfo.Permissions.GroupAccess != nil && projectInfo.Permissions.GroupAccess.AccessLevel >= 30)
 
 	if !hasAccess {
 		return fmt.Errorf("you don't have push access to %s. You need at least Developer (30) access level. Please check your permissions in GitLab", repoURL)
