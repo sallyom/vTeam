@@ -80,15 +80,17 @@ type FileContent struct {
 	SHA      string `json:"sha,omitempty"`
 }
 
-// Helper functions for pointer types
+// BoolPtr returns a pointer to the given bool value.
 func BoolPtr(b bool) *bool {
 	return &b
 }
 
+// StringPtr returns a pointer to the given string value.
 func StringPtr(s string) *string {
 	return &s
 }
 
+// IntPtr returns a pointer to the given int value.
 func IntPtr(i int) *int {
 	return &i
 }
