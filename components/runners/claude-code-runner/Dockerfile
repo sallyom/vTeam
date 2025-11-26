@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y \
     git \
     curl \
     jq \
-    gh \ 
+    gh \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -20,7 +20,7 @@ RUN cd /app/runner-shell && pip install --no-cache-dir .
 COPY claude-code-runner /app/claude-runner
 
 # Install runner wrapper as a package (pulls dependencies like claude-agent-sdk)
-RUN pip install --no-cache-dir /app/claude-runner \
+RUN pip install --no-cache-dir /app/claude-runner[observability] \
     && pip install --no-cache-dir aiofiles
 
 # Set environment variables

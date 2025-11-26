@@ -180,6 +180,14 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 			// Continue - session cleanup is still successful
 		}
 
+		// Cleanup Langfuse secret when session is stopped
+		// This only deletes secrets copied by the operator (with CopiedFromAnnotation).
+		// The platform-wide ambient-admin-langfuse-secret in the operator namespace is never deleted.
+		if err := deleteAmbientLangfuseSecret(deleteCtx, sessionNamespace); err != nil {
+			log.Printf("Warning: Failed to cleanup ambient-admin-langfuse-secret from %s: %v", sessionNamespace, err)
+			// Continue - session cleanup is still successful
+		}
+
 		return nil
 	}
 
@@ -290,6 +298,33 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		log.Printf("Vertex AI disabled (CLAUDE_CODE_USE_VERTEX=0), skipping %s secret copy", types.AmbientVertexSecretName)
 	}
 
+	// Check for Langfuse secret in the operator's namespace and copy it if enabled
+	ambientLangfuseSecretCopied := false
+	langfuseEnabled := os.Getenv("LANGFUSE_ENABLED") != "" && os.Getenv("LANGFUSE_ENABLED") != "0" && os.Getenv("LANGFUSE_ENABLED") != "false"
+
+	if langfuseEnabled {
+		if langfuseSecret, err := config.K8sClient.CoreV1().Secrets(operatorNamespace).Get(context.TODO(), "ambient-admin-langfuse-secret", v1.GetOptions{}); err == nil {
+			// Secret exists in operator namespace, copy it to the session namespace
+			log.Printf("Found ambient-admin-langfuse-secret in %s, copying to %s", operatorNamespace, sessionNamespace)
+			// Create context with timeout for secret copy operation
+			copyCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := copySecretToNamespace(copyCtx, langfuseSecret, sessionNamespace, currentObj); err != nil {
+				log.Printf("Warning: Failed to copy Langfuse secret: %v. Langfuse observability will be disabled for this session.", err)
+			} else {
+				ambientLangfuseSecretCopied = true
+				log.Printf("Successfully copied Langfuse secret to %s", sessionNamespace)
+			}
+		} else if !errors.IsNotFound(err) {
+			log.Printf("Warning: Failed to check for Langfuse secret in %s: %v. Langfuse observability will be disabled for this session.", operatorNamespace, err)
+		} else {
+			// Langfuse enabled but secret not found - log warning and continue without Langfuse
+			log.Printf("Warning: LANGFUSE_ENABLED is set but ambient-admin-langfuse-secret not found in namespace %s. Langfuse observability will be disabled for this session.", operatorNamespace)
+		}
+	} else {
+		log.Printf("Langfuse disabled, skipping secret copy")
+	}
+
 	// Create a Kubernetes Job for this AgenticSession
 	jobName := fmt.Sprintf("%s-job", name)
 
@@ -346,6 +381,19 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 
 	// Read autoPushOnComplete flag
 	autoPushOnComplete, _, _ := unstructured.NestedBool(spec, "autoPushOnComplete")
+
+	// Extract userContext for observability and auditing
+	userID := ""
+	userName := ""
+	if userContext, found, _ := unstructured.NestedMap(spec, "userContext"); found {
+		if v, ok := userContext["userId"].(string); ok {
+			userID = strings.TrimSpace(v)
+		}
+		if v, ok := userContext["displayName"].(string); ok {
+			userName = strings.TrimSpace(v)
+		}
+	}
+	log.Printf("Session %s initiated by user: %s (userId: %s)", name, userName, userID)
 
 	// Create the Job
 	job := &batchv1.Job{
@@ -482,6 +530,64 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 									// S3 disabled; backend persists messages
 								}
 
+								// Add user context for observability and auditing (Langfuse userId, logs, etc.)
+								if userID != "" {
+									base = append(base, corev1.EnvVar{Name: "USER_ID", Value: userID})
+								}
+								if userName != "" {
+									base = append(base, corev1.EnvVar{Name: "USER_NAME", Value: userName})
+								}
+
+								// Platform-wide Langfuse observability configuration
+								// Uses secretKeyRef to prevent credential exposure in pod specs
+								// Secret is copied to session namespace from operator namespace
+								// All keys are optional to prevent pod startup failures if keys are missing
+								if ambientLangfuseSecretCopied {
+									base = append(base,
+										corev1.EnvVar{
+											Name: "LANGFUSE_ENABLED",
+											ValueFrom: &corev1.EnvVarSource{
+												SecretKeyRef: &corev1.SecretKeySelector{
+													LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-admin-langfuse-secret"},
+													Key:                  "LANGFUSE_ENABLED",
+													Optional:             boolPtr(true),
+												},
+											},
+										},
+										corev1.EnvVar{
+											Name: "LANGFUSE_HOST",
+											ValueFrom: &corev1.EnvVarSource{
+												SecretKeyRef: &corev1.SecretKeySelector{
+													LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-admin-langfuse-secret"},
+													Key:                  "LANGFUSE_HOST",
+													Optional:             boolPtr(true),
+												},
+											},
+										},
+										corev1.EnvVar{
+											Name: "LANGFUSE_PUBLIC_KEY",
+											ValueFrom: &corev1.EnvVarSource{
+												SecretKeyRef: &corev1.SecretKeySelector{
+													LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-admin-langfuse-secret"},
+													Key:                  "LANGFUSE_PUBLIC_KEY",
+													Optional:             boolPtr(true),
+												},
+											},
+										},
+										corev1.EnvVar{
+											Name: "LANGFUSE_SECRET_KEY",
+											ValueFrom: &corev1.EnvVarSource{
+												SecretKeyRef: &corev1.SecretKeySelector{
+													LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-admin-langfuse-secret"},
+													Key:                  "LANGFUSE_SECRET_KEY",
+													Optional:             boolPtr(true),
+												},
+											},
+										},
+									)
+									log.Printf("Langfuse env vars configured via secretKeyRef for session %s", name)
+								}
+
 								// Add Vertex AI configuration only if enabled
 								if vertexEnabled {
 									base = append(base,
@@ -588,6 +694,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 							// Import secrets as environment variables
 							// - integrationSecretsName: Only if exists (GIT_TOKEN, JIRA_*, custom keys)
 							// - runnerSecretsName: Only when Vertex disabled (ANTHROPIC_API_KEY)
+							// - ambient-langfuse-keys: Platform-wide Langfuse observability (LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST, LANGFUSE_ENABLED)
 							EnvFrom: func() []corev1.EnvFromSource {
 								sources := []corev1.EnvFromSource{}
 
@@ -1089,6 +1196,14 @@ func deleteJobAndPerJobService(namespace, jobName, sessionName string) error {
 		// Don't return error - this is a non-critical cleanup step
 	}
 
+	// Delete the Langfuse secret if it was copied by the operator
+	// This only deletes secrets copied by the operator (with CopiedFromAnnotation).
+	// The platform-wide ambient-admin-langfuse-secret in the operator namespace is never deleted.
+	if err := deleteAmbientLangfuseSecret(deleteCtx, namespace); err != nil {
+		log.Printf("Failed to delete ambient-admin-langfuse-secret from %s: %v", namespace, err)
+		// Don't return error - this is a non-critical cleanup step
+	}
+
 	// NOTE: PVC is kept for all sessions and only deleted via garbage collection
 	// when the session CR is deleted. This allows sessions to be restarted.
 
@@ -1366,6 +1481,33 @@ func deleteAmbientVertexSecret(ctx context.Context, namespace string) error {
 	err = config.K8sClient.CoreV1().Secrets(namespace).Delete(ctx, types.AmbientVertexSecretName, v1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete %s secret: %w", types.AmbientVertexSecretName, err)
+	}
+
+	return nil
+}
+
+// deleteAmbientLangfuseSecret deletes the ambient-admin-langfuse-secret from a namespace if it was copied
+func deleteAmbientLangfuseSecret(ctx context.Context, namespace string) error {
+	const langfuseSecretName = "ambient-admin-langfuse-secret"
+	secret, err := config.K8sClient.CoreV1().Secrets(namespace).Get(ctx, langfuseSecretName, v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// Secret doesn't exist, nothing to do
+			return nil
+		}
+		return fmt.Errorf("error checking for %s secret: %w", langfuseSecretName, err)
+	}
+
+	// Check if this was a copied secret (has the annotation)
+	if _, ok := secret.Annotations[types.CopiedFromAnnotation]; !ok {
+		log.Printf("%s secret in namespace %s was not copied by operator, not deleting", langfuseSecretName, namespace)
+		return nil
+	}
+
+	log.Printf("Deleting copied %s secret from namespace %s", langfuseSecretName, namespace)
+	err = config.K8sClient.CoreV1().Secrets(namespace).Delete(ctx, langfuseSecretName, v1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete %s secret: %w", langfuseSecretName, err)
 	}
 
 	return nil

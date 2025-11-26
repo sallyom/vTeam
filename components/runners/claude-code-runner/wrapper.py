@@ -19,9 +19,8 @@ from urllib import request as _urllib_request, error as _urllib_error
 sys.path.insert(0, '/app/runner-shell')
 
 from runner_shell.core.shell import RunnerShell
-from runner_shell.core.protocol import MessageType, SessionStatus, PartialInfo
+from runner_shell.core.protocol import MessageType, PartialInfo
 from runner_shell.core.context import RunnerContext
-
 
 class ClaudeCodeAdapter:
     """Adapter that wraps the existing Claude Code CLI for runner-shell."""
@@ -44,6 +43,50 @@ class ClaudeCodeAdapter:
         await self._initialize_workflow_if_set()
         # Validate prerequisite files exist for phase-based commands
         await self._validate_prerequisites()
+
+    @staticmethod
+    def _sanitize_user_context(user_id: str, user_name: str) -> tuple[str, str]:
+        """Validate and sanitize user context fields to prevent injection attacks.
+
+        This function enforces STRICT validation for values sent to external APIs
+        (Langfuse trace metadata, database queries, URL parameters).
+
+        Differs from validate_and_sanitize_for_logging() which is lenient and only
+        removes control characters for safe logging. This function uses strict pattern
+        matching to ensure API compatibility and prevent query injection.
+
+        Returns:
+            Tuple of (sanitized_user_id, sanitized_user_name)
+        """
+        # Validate user_id: alphanumeric, dash, underscore, at sign only
+        # Max 255 characters (email addresses can be up to 254 chars)
+        if user_id:
+            user_id = str(user_id).strip()
+            if len(user_id) > 255:
+                logging.warning(f"User ID exceeds max length (255), truncating: {len(user_id)} chars")
+                user_id = user_id[:255]
+            # Remove any characters that could cause injection issues
+            import re
+            sanitized_id = re.sub(r'[^a-zA-Z0-9@._-]', '', user_id)
+            if sanitized_id != user_id:
+                logging.warning(f"User ID contained invalid characters, sanitized from {len(user_id)} to {len(sanitized_id)} chars")
+            user_id = sanitized_id
+
+        # Validate user_name: printable ASCII, no control characters
+        # Max 255 characters
+        if user_name:
+            user_name = str(user_name).strip()
+            if len(user_name) > 255:
+                logging.warning(f"User name exceeds max length (255), truncating: {len(user_name)} chars")
+                user_name = user_name[:255]
+            # Remove control characters and non-printable characters
+            import re
+            sanitized_name = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', user_name)
+            if sanitized_name != user_name:
+                logging.warning(f"User name contained control characters, sanitized from {len(user_name)} to {len(sanitized_name)} chars")
+            user_name = sanitized_name
+
+        return user_id, user_name
 
     async def run(self):
         """Run the Claude Code CLI session."""
@@ -213,6 +256,33 @@ class ClaudeCodeAdapter:
             # NOW we can safely import the SDK with the correct environment set
             from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
 
+            from observability import ObservabilityManager
+
+            # Extract and sanitize user context for observability (used by Langfuse)
+            # This prevents trace poisoning, log injection, and other security issues
+            raw_user_id = os.getenv('USER_ID', '').strip()
+            raw_user_name = os.getenv('USER_NAME', '').strip()
+            user_id, user_name = self._sanitize_user_context(raw_user_id, raw_user_name)
+
+            # Get model configuration early for observability tracking
+            model = self.context.get_env('LLM_MODEL')
+            configured_model = model or 'claude-sonnet-4-5@20250929'  # Default model for tracking
+
+            # Map to Vertex model if using Vertex
+            if use_vertex and model:
+                configured_model = self._map_to_vertex_model(model)
+
+            # Initialize observability (Langfuse) with model metadata
+            obs = ObservabilityManager(session_id=self.context.session_id, user_id=user_id, user_name=user_name)
+            await obs.initialize(
+                prompt=prompt,
+                namespace=self.context.get_env('AGENTIC_SESSION_NAMESPACE', 'unknown'),
+                model=configured_model
+            )
+
+            # Store initial prompt for turn 1 (will be used when AssistantMessage arrives)
+            obs._pending_initial_prompt = prompt
+
             # Check if continuing from previous session
             # If PARENT_SESSION_ID is set, use SDK's built-in resume functionality
             parent_session_id = self.context.get_env('PARENT_SESSION_ID', '').strip()
@@ -380,15 +450,14 @@ class ClaudeCodeAdapter:
                     options.add_dirs = add_dirs  # type: ignore[attr-defined]
             except Exception:
                 pass
-            # Model settings from both legacy and LLM_* envs
-            model = self.context.get_env('LLM_MODEL')
+            # Model settings - use configured_model that was already set for observability
             if model:
                 try:
-                    # Map Anthropic API model names to Vertex AI model names if using Vertex
+                    # Apply the model configuration to SDK options
+                    # Note: configured_model already has Vertex mapping applied if needed
                     if use_vertex:
-                        model = self._map_to_vertex_model(model)
-                        logging.info(f"Mapped to Vertex AI model: {model}")
-                    options.model = model  # type: ignore[attr-defined]
+                        logging.info(f"Using Vertex AI model: {configured_model}")
+                    options.model = configured_model  # type: ignore[attr-defined]
                 except Exception:
                     pass
             max_tokens_env = (
@@ -412,6 +481,10 @@ class ClaudeCodeAdapter:
 
             result_payload = None
             self._turn_count = 0
+            # Store current message and usage for tracking
+            current_message = None
+            current_usage = None
+
             # Import SDK message and content types for accurate mapping
             from claude_agent_sdk import (
                 AssistantMessage,
@@ -429,7 +502,7 @@ class ClaudeCodeAdapter:
             sdk_session_id = None
 
             async def process_response_stream(client_obj):
-                nonlocal result_payload, sdk_session_id
+                nonlocal result_payload, sdk_session_id, current_message, current_usage
                 async for message in client_obj.receive_response():
                     logging.info(f"[ClaudeSDKClient]: {message}")
 
@@ -445,6 +518,14 @@ class ClaudeCodeAdapter:
                                 logging.warning(f"Failed to store SDK session ID in CR annotations: {e}")
 
                     if isinstance(message, (AssistantMessage, UserMessage)):
+                        # Store AssistantMessage for tracking after we get usage from ResultMessage
+                        if isinstance(message, AssistantMessage):
+                            current_message = message
+                            # Start turn tracking NOW so tools can be parented to it
+                            # Turn number will be added to metadata when ResultMessage arrives with SDK's authoritative num_turns
+                            logging.info(f"Langfuse: AssistantMessage received, starting turn trace (current _turn_count={self._turn_count})")
+                            obs.start_turn(configured_model)
+
                         for block in getattr(message, 'content', []) or []:
                             if isinstance(block, TextBlock):
                                 text_piece = getattr(block, 'text', None)
@@ -461,7 +542,9 @@ class ClaudeCodeAdapter:
                                     MessageType.AGENT_MESSAGE,
                                     {"tool": tool_name, "input": tool_input, "id": tool_id},
                                 )
-                                self._turn_count += 1
+                                # Don't increment turn count here - tools are part of the same turn
+                                # Track tool use in Langfuse (without usage data)
+                                obs.track_tool_use(tool_name, tool_id, tool_input)
                             elif isinstance(block, ToolResultBlock):
                                 tool_use_id = getattr(block, 'tool_use_id', None)
                                 content = getattr(block, 'content', None)
@@ -478,9 +561,11 @@ class ClaudeCodeAdapter:
                                         }
                                     },
                                 )
+                                # Track tool result in Langfuse (without usage data)
+                                obs.track_tool_result(tool_use_id, content if content is not None else result_text, is_error or False)
                                 if interactive:
                                     await self.shell._send_message(MessageType.WAITING_FOR_INPUT, {})
-                                self._turn_count += 1
+                                # Don't increment turn count here - tool results are part of the same turn
                             elif isinstance(block, ThinkingBlock):
                                 await self._send_log({"level": "debug", "message": "Model is reasoning..."})
                     elif isinstance(message, (SystemMessage)):
@@ -488,7 +573,46 @@ class ClaudeCodeAdapter:
                         if text:
                             await self._send_log({"level": "debug", "message": str(text)})
                     elif isinstance(message, (ResultMessage)):
-                        # Only surface result envelope to UI in non-interactive mode
+                        # Extract usage from ResultMessage
+                        usage_raw = getattr(message, 'usage', None)
+                        sdk_num_turns = getattr(message, 'num_turns', None)
+                        subtype = getattr(message, 'subtype', None)
+
+                        logging.info(f"ResultMessage: subtype={subtype}, num_turns={sdk_num_turns}, usage={usage_raw}")
+
+                        # Convert usage object to dict if needed
+                        if usage_raw is not None and not isinstance(usage_raw, dict):
+                            try:
+                                if hasattr(usage_raw, '__dict__'):
+                                    usage_raw = usage_raw.__dict__
+                                elif hasattr(usage_raw, 'model_dump'):
+                                    usage_raw = usage_raw.model_dump()
+                            except Exception as e:
+                                logging.warning(f"Could not convert usage object to dict: {e}")
+
+                        # Update turn count from SDK's authoritative num_turns
+                        # This ensures we stay in sync with the SDK's turn tracking
+                        if sdk_num_turns is not None and sdk_num_turns > self._turn_count:
+                            old_count = self._turn_count
+                            self._turn_count = sdk_num_turns
+                            logging.info(f"Updated turn count from {old_count} to SDK's num_turns: {self._turn_count}")
+                        elif sdk_num_turns is not None:
+                            logging.info(f"SDK num_turns={sdk_num_turns} matches or is less than current _turn_count={self._turn_count}, keeping current value")
+
+                        # Complete turn tracking with usage data
+                        # Only end turn if we have a current message (AssistantMessage was received)
+                        if current_message:
+                            logging.info(f"Langfuse: Calling end_turn for turn {self._turn_count} (SDK num_turns={sdk_num_turns}) with current_message present")
+                            obs.end_turn(self._turn_count, current_message, usage_raw if isinstance(usage_raw, dict) else None)
+                            logging.info(f"Langfuse: end_turn completed for turn {self._turn_count}, clearing current_message")
+                            current_message = None  # Clear after tracking
+                        else:
+                            logging.warning(
+                                f"Langfuse: ResultMessage received for turn {self._turn_count} (SDK num_turns={sdk_num_turns}) "
+                                f"but no current_message stored - trace {self._turn_count} will remain incomplete. "
+                                f"This usually means AssistantMessage was not received before ResultMessage."
+                            )
+
                         result_payload = {
                             "subtype": getattr(message, 'subtype', None),
                             "duration_ms": getattr(message, 'duration_ms', None),
@@ -497,9 +621,12 @@ class ClaudeCodeAdapter:
                             "num_turns": getattr(message, 'num_turns', None),
                             "session_id": getattr(message, 'session_id', None),
                             "total_cost_usd": getattr(message, 'total_cost_usd', None),
-                            "usage": getattr(message, 'usage', None),
+                            "usage": usage_raw,  # Per-query usage (will be replaced with cumulative at session end)
                             "result": getattr(message, 'result', None),
                         }
+
+                        logging.info(f"Built result_payload with per-query usage: {result_payload.get('usage')}")
+
                         if not interactive:
                             await self.shell._send_message(
                                 MessageType.AGENT_MESSAGE,
@@ -587,6 +714,9 @@ class ClaudeCodeAdapter:
             # Note: All output is streamed via WebSocket, not collected here
             await self._check_pr_intent("")
 
+            # Finalize observability (flush data to Langfuse)
+            await obs.finalize()
+
             # Return success - result_payload may be None if SDK didn't send ResultMessage
             # (which can happen legitimately for some operations like git push)
             return {
@@ -598,6 +728,9 @@ class ClaudeCodeAdapter:
             }
         except Exception as e:
             logging.error(f"Failed to run Claude Code SDK: {e}")
+            # Clean up observability spans on error path
+            if 'obs' in locals():
+                await obs.cleanup_on_error(e)
             return {
                 "success": False,
                 "error": str(e)
@@ -1532,17 +1665,47 @@ class ClaudeCodeAdapter:
             return url
 
     def _redact_secrets(self, text: str) -> str:
-        """Redact tokens and secrets from text for safe logging."""
+        """Redact tokens and secrets from text for safe logging.
+
+        Protects:
+        - GitHub tokens (ghp_, ghs_, gho_, ghu_)
+        - Anthropic API keys (sk-ant-)
+        - Langfuse keys (pk-lf-, sk-lf-)
+        - URL-embedded credentials
+        - Environment variable assignments
+        """
         if not text:
             return text
+
         # Redact GitHub tokens (ghs_, ghp_, gho_, ghu_ prefixes)
         text = re.sub(r'gh[pousr]_[a-zA-Z0-9]{36,255}', 'gh*_***REDACTED***', text)
+
+        # Redact Anthropic API keys (sk-ant- prefix, typically ~100 chars)
+        text = re.sub(r'sk-ant-[a-zA-Z0-9\-_]{30,200}', 'sk-ant-***REDACTED***', text)
+
+        # Redact Langfuse public keys (pk-lf- prefix)
+        text = re.sub(r'pk-lf-[a-zA-Z0-9\-_]{10,100}', 'pk-lf-***REDACTED***', text)
+
+        # Redact Langfuse secret keys (sk-lf- prefix)
+        text = re.sub(r'sk-lf-[a-zA-Z0-9\-_]{10,100}', 'sk-lf-***REDACTED***', text)
+
         # Redact x-access-token: patterns in URLs
         text = re.sub(r'x-access-token:[^@\s]+@', 'x-access-token:***REDACTED***@', text)
+
         # Redact oauth tokens in URLs
         text = re.sub(r'oauth2:[^@\s]+@', 'oauth2:***REDACTED***@', text)
+
         # Redact basic auth credentials
         text = re.sub(r'://[^:@\s]+:[^@\s]+@', '://***REDACTED***@', text)
+
+        # Redact environment variable assignments (KEY=value format in logs)
+        # Covers: ANTHROPIC_API_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, etc.
+        text = re.sub(
+            r'(ANTHROPIC_API_KEY|LANGFUSE_SECRET_KEY|LANGFUSE_PUBLIC_KEY|BOT_TOKEN|GIT_TOKEN)\s*=\s*[^\s\'"]+',
+            r'\1=***REDACTED***',
+            text
+        )
+
         return text
 
     async def _get_sdk_session_id(self, session_name: str) -> str:
