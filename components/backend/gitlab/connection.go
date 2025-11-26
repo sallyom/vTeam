@@ -14,12 +14,12 @@ import (
 
 // ConnectionManager handles GitLab connection operations
 type ConnectionManager struct {
-	clientset *kubernetes.Clientset
+	clientset kubernetes.Interface
 	namespace string
 }
 
 // NewConnectionManager creates a new connection manager
-func NewConnectionManager(clientset *kubernetes.Clientset, namespace string) *ConnectionManager {
+func NewConnectionManager(clientset kubernetes.Interface, namespace string) *ConnectionManager {
 	return &ConnectionManager{
 		clientset: clientset,
 		namespace: namespace,

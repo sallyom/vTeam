@@ -114,7 +114,7 @@ func GetGitHubToken(ctx context.Context, k8sClient *kubernetes.Clientset, dynCli
 }
 
 // GetGitLabToken retrieves a GitLab Personal Access Token for a user
-func GetGitLabToken(ctx context.Context, k8sClient *kubernetes.Clientset, project, userID string) (string, error) {
+func GetGitLabToken(ctx context.Context, k8sClient kubernetes.Interface, project, userID string) (string, error) {
 	if k8sClient == nil {
 		log.Printf("Cannot read GitLab token: k8s client is nil")
 		return "", fmt.Errorf("no GitLab credentials available. Please connect your GitLab account")
