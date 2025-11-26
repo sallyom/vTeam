@@ -313,7 +313,7 @@ export default function ProjectSessionDetailPage({
       fileOps.currentSubPath
         ? `${selectedDirectory.path}/${fileOps.currentSubPath}`
         : selectedDirectory.path,
-      { enabled: openAccordionItems.includes("directories") },
+      { enabled: openAccordionItems.includes("file-explorer") },
     );
 
   // Artifacts file operations
