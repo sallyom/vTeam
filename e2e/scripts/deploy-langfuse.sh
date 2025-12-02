@@ -107,26 +107,90 @@ echo "   User: $CLUSTER_USER"
 echo "   Cluster: $CLUSTER_URL"
 echo ""
 
-# Prompt for credentials or use defaults for testing
-read -p "Use simple test passwords? (y/n, default: y): " USE_TEST_CREDS
-USE_TEST_CREDS=${USE_TEST_CREDS:-y}
+# Check if credentials file already exists
+if [ -f langfuse-credentials.env ]; then
+  echo "Found existing langfuse-credentials.env"
+  read -p "Use existing credentials? (y/n, default: y): " USE_EXISTING_CREDS
+  USE_EXISTING_CREDS=${USE_EXISTING_CREDS:-y}
 
-if [[ "$USE_TEST_CREDS" =~ ^[Yy]$ ]]; then
-  echo "Setting simple passwords for test environment..."
-  NEXTAUTH_SECRET="test-nextauth-secret-12345678"
-  SALT="test-salt-12345678"
-  POSTGRES_PASSWORD="postgres123" # notsecret
-  CLICKHOUSE_PASSWORD="clickhouse123" # notsecret
-  REDIS_PASSWORD="redis123" # notsecret
-  echo "   ✓ Test credentials configured"
+  if [[ "$USE_EXISTING_CREDS" =~ ^[Yy]$ ]]; then
+    echo "Loading credentials from langfuse-credentials.env..."
+    source langfuse-credentials.env
+    echo "   ✓ Existing credentials loaded"
+    SKIP_CREDS_SAVE=true
+  else
+    echo "Generating new credentials..."
+    read -p "Use simple test passwords? (y/n, default: y): " USE_TEST_CREDS
+    USE_TEST_CREDS=${USE_TEST_CREDS:-y}
+
+    if [[ "$USE_TEST_CREDS" =~ ^[Yy]$ ]]; then
+      echo "Setting simple passwords for test environment..."
+      NEXTAUTH_SECRET="test-nextauth-secret-12345678" # notsecret
+      SALT="test-salt-12345678" # notsecret
+      POSTGRES_PASSWORD="postgres123" # notsecret
+      CLICKHOUSE_PASSWORD="clickhouse123" # notsecret
+      REDIS_PASSWORD="redis123" # notsecret
+      echo "   ✓ Test credentials configured"
+    else
+      echo "Generating secure random credentials..."
+      NEXTAUTH_SECRET=$(openssl rand -hex 32)
+      SALT=$(openssl rand -hex 32)
+      POSTGRES_PASSWORD=$(openssl rand -hex 16)
+      CLICKHOUSE_PASSWORD=$(openssl rand -hex 16)
+      REDIS_PASSWORD=$(openssl rand -hex 16)
+      echo "   ✓ Secure credentials generated (using hex encoding to avoid special characters)"
+    fi
+    SKIP_CREDS_SAVE=false
+  fi
 else
-  echo "Generating secure random credentials..."
-  NEXTAUTH_SECRET=$(openssl rand -hex 32)
-  SALT=$(openssl rand -hex 32)
-  POSTGRES_PASSWORD=$(openssl rand -base64 32)
-  CLICKHOUSE_PASSWORD=$(openssl rand -base64 32)
-  REDIS_PASSWORD=$(openssl rand -base64 32)
-  echo "   ✓ Secure credentials generated"
+  # No existing credentials file - prompt for new ones
+  read -p "Use simple test passwords? (y/n, default: y): " USE_TEST_CREDS
+  USE_TEST_CREDS=${USE_TEST_CREDS:-y}
+
+  if [[ "$USE_TEST_CREDS" =~ ^[Yy]$ ]]; then
+    echo "Setting simple passwords for test environment..."
+    NEXTAUTH_SECRET="test-nextauth-secret-12345678" # notsecret
+    SALT="test-salt-12345678" # notsecret
+    POSTGRES_PASSWORD="postgres123" # notsecret
+    CLICKHOUSE_PASSWORD="clickhouse123" # notsecret
+    REDIS_PASSWORD="redis123" # notsecret
+    echo "   ✓ Test credentials configured"
+  else
+    echo "Generating secure random credentials..."
+    NEXTAUTH_SECRET=$(openssl rand -hex 32)
+    SALT=$(openssl rand -hex 32)
+    POSTGRES_PASSWORD=$(openssl rand -hex 16)
+    CLICKHOUSE_PASSWORD=$(openssl rand -hex 16)
+    REDIS_PASSWORD=$(openssl rand -hex 16)
+    echo "   ✓ Secure credentials generated (using hex encoding to avoid special characters)"
+  fi
+  SKIP_CREDS_SAVE=false
+fi
+
+# Save credentials early (before deployment in case it fails)
+echo ""
+if [ "$SKIP_CREDS_SAVE" = "true" ]; then
+  echo "   ℹ️  Using existing credentials file - skipping save"
+else
+  echo "Saving credentials to langfuse-credentials.env..."
+  cat > langfuse-credentials.env <<EOF
+# Langfuse Deployment Credentials
+# IMPORTANT: Keep this file secure and never commit to version control!
+# Generated: $(date)
+
+# Authentication Secrets
+NEXTAUTH_SECRET=$NEXTAUTH_SECRET
+SALT=$SALT
+
+# Database Passwords
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD
+REDIS_PASSWORD=$REDIS_PASSWORD
+
+# Note: Access URLs will be added after deployment completes
+EOF
+  chmod 600 langfuse-credentials.env
+  echo "   ✓ Credentials saved to langfuse-credentials.env (file permissions set to 600)"
 fi
 
 # Add Langfuse Helm repository
@@ -162,7 +226,6 @@ VALUES_FILE="$SCRIPT_DIR/langfuse-values-clickhouse-minimal-logging.yaml"
 
 helm upgrade --install langfuse langfuse/langfuse \
   --namespace langfuse \
-  --version ">= 3.63.0" \
   --values "$VALUES_FILE" \
   --set langfuse.nextauth.secret.value="$NEXTAUTH_SECRET" \
   --set langfuse.salt.value="$SALT" \
@@ -170,6 +233,7 @@ helm upgrade --install langfuse langfuse/langfuse \
   --set clickhouse.auth.password="$CLICKHOUSE_PASSWORD" \
   --set redis.auth.password="$REDIS_PASSWORD" \
   --set langfuse.ingress.enabled=false \
+  --set image.pullPolicy=IfNotPresent \
   --set resources.limits.cpu=1000m \
   --set resources.limits.memory=2Gi \
   --set resources.requests.cpu=500m \
@@ -180,6 +244,8 @@ helm upgrade --install langfuse langfuse/langfuse \
   --set clickhouse.resources.limits.memory=2Gi \
   --set clickhouse.resources.requests.cpu=500m \
   --set clickhouse.resources.limits.cpu=1 \
+  --set clickhouse.persistence.size=20Gi \
+  --set postgresql.primary.persistence.size=20Gi \
   --set postgresql.primary.podAntiAffinityPreset=none \
   --set redis.master.podAntiAffinityPreset=none \
   --set zookeeper.replicas=1 \
@@ -189,11 +255,31 @@ helm upgrade --install langfuse langfuse/langfuse \
   --set zookeeper.resources.requests.cpu=250m \
   --set zookeeper.resources.limits.cpu=500m \
   --set minio.enabled=true \
+  --set minio.persistence.size=20Gi \
   --set clickhouse.shards=1 \
   --wait \
   --timeout=10m
 
 echo "   ✓ Langfuse installed"
+
+# Link Docker Hub pull secret to service accounts (if it exists)
+echo ""
+if $CLI get secret dockerhub-pull-secret -n langfuse &>/dev/null; then
+  echo "Linking Docker Hub pull secret to service accounts..."
+  for sa in default langfuse langfuse-clickhouse langfuse-postgresql langfuse-redis-primary langfuse-s3 langfuse-zookeeper; do
+    if $CLI get serviceaccount $sa -n langfuse &>/dev/null; then
+      $CLI secrets link $sa dockerhub-pull-secret --for=pull -n langfuse &>/dev/null || true
+    fi
+  done
+  echo "   ✓ Docker Hub pull secret linked to service accounts"
+
+  # Delete pods to force recreation with pull secret
+  echo "   Deleting pods to apply pull secret..."
+  $CLI delete pods --all -n langfuse &>/dev/null || true
+  sleep 5
+else
+  echo "   ℹ️  No dockerhub-pull-secret found - skipping (may encounter rate limiting)"
+fi
 
 # Wait for all pods to be ready
 echo ""
@@ -410,31 +496,19 @@ EOF
   echo "   Or configure DNS to point $INGRESS_HOST to your Ingress controller"
 fi
 
-# Save credentials
+# Update credentials file with URLs
 echo ""
-echo "Saving credentials to langfuse-credentials.env..."
-cat > langfuse-credentials.env <<EOF
-# Langfuse Deployment Credentials
-# IMPORTANT: Keep this file secure and never commit to version control!
+echo "Updating langfuse-credentials.env with access URLs..."
+cat >> langfuse-credentials.env <<EOF
 
 # Platform
 PLATFORM=$PLATFORM_NAME
-
-# Authentication Secrets
-NEXTAUTH_SECRET=$NEXTAUTH_SECRET
-SALT=$SALT
-
-# Database Passwords
-POSTGRES_PASSWORD=$POSTGRES_PASSWORD
-CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD
-REDIS_PASSWORD=$REDIS_PASSWORD
 
 # Access URLs
 LANGFUSE_URL=$LANGFUSE_URL
 LANGFUSE_INTERNAL_URL=http://langfuse-web.langfuse.svc.cluster.local:3000
 EOF
-chmod 600 langfuse-credentials.env
-echo "   ✓ Credentials saved to langfuse-credentials.env (file permissions set to 600)"
+echo "   ✓ Access URLs added to langfuse-credentials.env"
 
 # Print status
 echo ""

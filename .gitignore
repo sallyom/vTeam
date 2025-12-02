@@ -128,3 +128,4 @@ e2e/cypress/videos/
 # Langfuse secrets and deployment credentials
 e2e/.env.langfuse
 e2e/langfuse/.env.langfuse-keys
+langfuse-credentials.env
