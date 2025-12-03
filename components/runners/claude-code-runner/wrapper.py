@@ -817,6 +817,15 @@ class ClaudeCodeAdapter:
                     name = (r.get('name') or '').strip()
                     inp = r.get('input') or {}
                     url = (inp.get('url') or '').strip()
+
+                    # Check for enhanced repository options
+                    has_enhanced_options = (
+                        inp.get('baseBranch') or
+                        inp.get('featureBranch') or
+                        inp.get('sync') or
+                        'allowProtectedWork' in inp
+                    )
+
                     branch = (inp.get('branch') or '').strip() or 'main'
                     if not name or not url:
                         continue
@@ -829,14 +838,69 @@ class ClaudeCodeAdapter:
                     repo_exists = repo_dir.exists() and (repo_dir / ".git").exists()
 
                     if not repo_exists:
-                        # Clone fresh copy
-                        await self._send_log(f"📥 Cloning {name}...")
-                        logging.info(f"Cloning {name} from {url} (branch: {branch})")
-                        clone_url = self._url_with_token(url, token) if token else url
-                        await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
-                        # Update remote URL to persist token (git strips it from clone URL)
-                        await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
-                        logging.info(f"Successfully cloned {name}")
+                        # Use enhanced setup if advanced options are provided
+                        if has_enhanced_options:
+                            success = await self._setup_repository_with_options(r, repo_dir, workspace, token)
+                            if not success:
+                                continue
+                            # Enhanced setup complete - git identity will be configured below
+
+                        else:
+                            # Clone fresh copy
+                            await self._send_log(f"📥 Cloning {name}...")
+                            logging.info(f"Cloning {name} from {url} (branch: {branch})")
+                            clone_url = self._url_with_token(url, token) if token else url
+                            try:
+                                # Check if branch is protected before cloning
+                                should_create_working, target_branch = await self._handle_protected_branch(name, branch, repo_dir)
+
+                                if should_create_working:
+                                    # Clone the repo first with the base branch
+                                    await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
+                                    # Create and checkout the working branch
+                                    await self._run_cmd(["git", "checkout", "-b", target_branch], cwd=str(repo_dir))
+                                    await self._send_log(f"✓ Working branch '{target_branch}' created from '{branch}'")
+                                else:
+                                    # Clone directly to the target branch
+                                    await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
+
+                                # Update remote URL to persist token (git strips it from clone URL)
+                                await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
+                                logging.info(f"Successfully cloned {name}")
+                            except RuntimeError as clone_err:
+                                error_msg = str(clone_err).lower()
+                                if "authentication" in error_msg or "permission denied" in error_msg or "could not read" in error_msg:
+                                    await self._send_log(f"⚠️  Authentication failed for {name} - continuing without this repository")
+                                    logging.warning(f"Authentication error cloning {name}: {clone_err}")
+                                    continue
+                                elif "not found" in error_msg or "does not exist" in error_msg:
+                                    # Branch doesn't exist - offer to create it
+                                    logging.info(f"Branch '{branch}' not found in {name} - prompting user")
+                                    should_create, base_branch, final_branch = await self._prompt_create_branch(name, branch, repo_dir, clone_url, workspace)
+
+                                    if should_create and base_branch:
+                                        try:
+                                            # Clone with the base branch
+                                            await self._send_log(f"📥 Cloning {name} from base branch '{base_branch}'...")
+                                            await self._run_cmd(["git", "clone", "--branch", base_branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
+                                            # Create the new branch
+                                            await self._run_cmd(["git", "checkout", "-b", final_branch], cwd=str(repo_dir))
+                                            await self._send_log(f"✅ Created new branch '{final_branch}' from '{base_branch}'")
+                                            # Update remote URL
+                                            await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
+                                            logging.info(f"Successfully created branch {final_branch} in {name}")
+                                        except RuntimeError as create_err:
+                                            await self._send_log(f"⚠️  Failed to create branch: {create_err} - continuing without {name}")
+                                            logging.warning(f"Branch creation error for {name}: {create_err}")
+                                            continue
+                                    else:
+                                        await self._send_log(f"⚠️  Skipping {name}")
+                                        logging.info(f"User chose to skip {name}")
+                                        continue
+                                else:
+                                    await self._send_log(f"⚠️  Failed to clone {name}: {clone_err} - continuing without this repository")
+                                    logging.warning(f"Clone error for {name}: {clone_err}")
+                                    continue
                     elif reusing_workspace:
                         # Reusing workspace - preserve local changes from previous session
                         await self._send_log(f"✓ Preserving {name} (continuation)")
@@ -893,10 +957,57 @@ class ClaudeCodeAdapter:
                 await self._send_log("📥 Cloning input repository...")
                 logging.info(f"Cloning from {input_repo} (branch: {input_branch})")
                 clone_url = self._url_with_token(input_repo, token) if token else input_repo
-                await self._run_cmd(["git", "clone", "--branch", input_branch, "--single-branch", clone_url, str(workspace)], cwd=str(workspace.parent))
-                # Update remote URL to persist token (git strips it from clone URL)
-                await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workspace), ignore_errors=True)
-                logging.info("Successfully cloned repository")
+                try:
+                    # Check if branch is protected before cloning
+                    should_create_working, target_branch = await self._handle_protected_branch("repository", input_branch, workspace)
+
+                    if should_create_working:
+                        # Clone the repo first with the base branch
+                        await self._run_cmd(["git", "clone", "--branch", input_branch, "--single-branch", clone_url, str(workspace)], cwd=str(workspace.parent))
+                        # Create and checkout the working branch
+                        await self._run_cmd(["git", "checkout", "-b", target_branch], cwd=str(workspace))
+                        await self._send_log(f"✓ Working branch '{target_branch}' created from '{input_branch}'")
+                    else:
+                        # Clone directly to the target branch
+                        await self._run_cmd(["git", "clone", "--branch", input_branch, "--single-branch", clone_url, str(workspace)], cwd=str(workspace.parent))
+
+                    # Update remote URL to persist token (git strips it from clone URL)
+                    await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workspace), ignore_errors=True)
+                    logging.info("Successfully cloned repository")
+                except RuntimeError as clone_err:
+                    error_msg = str(clone_err).lower()
+                    if "authentication" in error_msg or "permission denied" in error_msg or "could not read" in error_msg:
+                        await self._send_log(f"⚠️  Authentication failed - session will continue without repository context")
+                        logging.warning(f"Authentication error cloning repository: {clone_err}")
+                        return
+                    elif "not found" in error_msg or "does not exist" in error_msg:
+                        # Branch doesn't exist - offer to create it
+                        logging.info(f"Branch '{input_branch}' not found - prompting user")
+                        should_create, base_branch, final_branch = await self._prompt_create_branch("repository", input_branch, workspace, clone_url, workspace.parent)
+
+                        if should_create and base_branch:
+                            try:
+                                # Clone with the base branch
+                                await self._send_log(f"📥 Cloning repository from base branch '{base_branch}'...")
+                                await self._run_cmd(["git", "clone", "--branch", base_branch, "--single-branch", clone_url, str(workspace)], cwd=str(workspace.parent))
+                                # Create the new branch
+                                await self._run_cmd(["git", "checkout", "-b", final_branch], cwd=str(workspace))
+                                await self._send_log(f"✅ Created new branch '{final_branch}' from '{base_branch}'")
+                                # Update remote URL
+                                await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workspace), ignore_errors=True)
+                                logging.info(f"Successfully created branch {final_branch}")
+                            except RuntimeError as create_err:
+                                await self._send_log(f"⚠️  Failed to create branch: {create_err} - session will continue without repository context")
+                                logging.warning(f"Branch creation error: {create_err}")
+                                return
+                        else:
+                            await self._send_log(f"⚠️  Session will continue without repository context")
+                            logging.info(f"User chose to skip repository")
+                            return
+                    else:
+                        await self._send_log(f"⚠️  Failed to clone repository - session will continue without repository context")
+                        logging.warning(f"Clone error: {clone_err}")
+                        return
             elif reusing_workspace:
                 # Reusing workspace - preserve local changes from previous session
                 await self._send_log("✓ Preserving workspace (continuation)")
@@ -1048,8 +1159,22 @@ class ClaudeCodeAdapter:
         await self._send_log(f"📥 Cloning workflow {workflow_name}...")
         logging.info(f"Cloning workflow from {git_url} (branch: {branch})")
         clone_url = self._url_with_token(git_url, token) if token else git_url
-        await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(temp_clone_dir)], cwd=str(workspace))
-        logging.info(f"Successfully cloned workflow to temp directory")
+        try:
+            await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(temp_clone_dir)], cwd=str(workspace))
+            logging.info(f"Successfully cloned workflow to temp directory")
+        except RuntimeError as clone_err:
+            error_msg = str(clone_err).lower()
+            if "authentication" in error_msg or "permission denied" in error_msg or "could not read" in error_msg:
+                await self._send_log(f"⚠️  Authentication failed for workflow {workflow_name} - workflow not available")
+                logging.warning(f"Authentication error cloning workflow: {clone_err}")
+            elif "not found" in error_msg or "does not exist" in error_msg:
+                await self._send_log(f"⚠️  Branch '{branch}' not found for workflow {workflow_name} - workflow not available")
+                logging.warning(f"Branch not found for workflow: {clone_err}")
+            else:
+                await self._send_log(f"⚠️  Failed to clone workflow {workflow_name} - workflow not available")
+                logging.warning(f"Workflow clone error: {clone_err}")
+            # Workflow unavailable - session continues without it
+            return
 
         # Extract subdirectory if path is specified
         if path and path.strip():
@@ -1708,6 +1833,296 @@ class ClaudeCodeAdapter:
         )
 
         return text
+
+    def _is_protected_branch(self, branch: str) -> bool:
+        """Check if a branch name matches protected branch patterns.
+
+        Protected branches include:
+        - main, master, develop, dev
+        - production, prod, staging, stage
+        - release branches (release/*, releases/*)
+
+        Returns True if the branch is protected.
+        """
+        if not branch or not isinstance(branch, str):
+            return False
+
+        branch_lower = branch.strip().lower()
+
+        # Exact matches for common protected branches
+        protected_names = {
+            'main', 'master', 'develop', 'dev', 'development',
+            'production', 'prod', 'staging', 'stage',
+            'qa', 'test', 'stable'
+        }
+
+        if branch_lower in protected_names:
+            return True
+
+        # Pattern matches for release branches
+        protected_prefixes = ['release/', 'releases/', 'hotfix/', 'hotfixes/']
+        if any(branch_lower.startswith(prefix) for prefix in protected_prefixes):
+            return True
+
+        return False
+
+    async def _handle_protected_branch(self, repo_name: str, branch: str, repo_dir: Path) -> tuple[bool, str]:
+        """Handle protected branch detection and prompt user for action.
+
+        Args:
+            repo_name: Name of the repository
+            branch: Branch name being checked out
+            repo_dir: Path to the repository directory
+
+        Returns:
+            Tuple of (should_create_working_branch, working_branch_name)
+        """
+        if not self._is_protected_branch(branch):
+            # Not a protected branch - safe to use directly
+            return False, branch
+
+        # Protected branch detected - send warning to user
+        await self._send_log(f"⚠️  '{branch}' is a protected branch in {repo_name}")
+        await self._send_log(f"💡 Options:")
+        await self._send_log(f"   1. Create a working branch (recommended for changes)")
+        await self._send_log(f"   2. Use as context only (read-only access)")
+
+        # For now, automatically create a working branch with a clear name
+        # Future enhancement: Add interactive prompt via WebSocket
+        working_branch = f"work/{branch}/{self.context.session_id[:8]}"
+
+        await self._send_log(f"🔀 Creating working branch: {working_branch}")
+        logging.info(f"Creating working branch {working_branch} from protected branch {branch}")
+
+        return True, working_branch
+
+    async def _setup_sync_remote(self, repo_dir: Path, sync_config: dict, token: str) -> bool:
+        """Configure and sync with upstream/sync repository.
+
+        Args:
+            repo_dir: Path to the repository directory
+            sync_config: Dict with 'url' and 'branch' for sync repo
+            token: Authentication token
+
+        Returns:
+            True if sync was successful, False otherwise
+        """
+        sync_url_raw = (sync_config.get('url') or '').strip()
+        sync_branch = (sync_config.get('branch') or '').strip() or 'main'
+
+        if not sync_url_raw:
+            return False
+
+        try:
+            await self._send_log(f"🔄 Configuring sync remote...")
+            logging.info(f"Setting up sync remote: {sync_url_raw} (branch: {sync_branch})")
+
+            # Add sync remote with token
+            sync_url = self._url_with_token(sync_url_raw, token) if token else sync_url_raw
+            await self._run_cmd(["git", "remote", "remove", "sync-repo"], cwd=str(repo_dir), ignore_errors=True)
+            await self._run_cmd(["git", "remote", "add", "sync-repo", sync_url], cwd=str(repo_dir))
+
+            # Fetch from sync remote
+            await self._send_log(f"📥 Fetching from sync repository...")
+            await self._run_cmd(["git", "fetch", "sync-repo", sync_branch], cwd=str(repo_dir))
+
+            # Rebase current branch onto sync-repo/branch
+            await self._send_log(f"🔀 Rebasing onto sync-repo/{sync_branch}...")
+            await self._run_cmd(["git", "rebase", f"sync-repo/{sync_branch}"], cwd=str(repo_dir))
+
+            await self._send_log(f"✅ Synced with upstream repository")
+            logging.info(f"Successfully synced with {sync_url_raw}")
+            return True
+
+        except RuntimeError as e:
+            await self._send_log(f"⚠️  Sync failed: {e}")
+            logging.warning(f"Failed to sync with upstream: {e}")
+            return False
+
+    async def _setup_repository_with_options(self, repo_config: dict, repo_dir: Path, workspace: Path, token: str) -> bool:
+        """Setup repository with advanced options (base branch, feature branch, sync repo).
+
+        Args:
+            repo_config: Repository configuration with input/output/sync
+            repo_dir: Path to the repository directory
+            workspace: Workspace path
+            token: Authentication token
+
+        Returns:
+            True if setup was successful, False otherwise
+        """
+        name = (repo_config.get('name') or '').strip()
+        inp = repo_config.get('input') or {}
+        url = (inp.get('url') or '').strip()
+        base_branch = (inp.get('baseBranch') or inp.get('branch') or '').strip() or 'main'
+        feature_branch = (inp.get('featureBranch') or '').strip()
+        allow_protected_work = inp.get('allowProtectedWork', False)
+        sync_config = inp.get('sync') or {}
+
+        if not url:
+            return False
+
+        clone_url = self._url_with_token(url, token) if token else url
+
+        try:
+            # Step 1: Clone the repository with the base branch
+            await self._send_log(f"📥 Cloning {name} (base: {base_branch})...")
+            logging.info(f"Cloning {name} from {url} (base branch: {base_branch})")
+
+            try:
+                await self._run_cmd(["git", "clone", "--branch", base_branch, clone_url, str(repo_dir)], cwd=str(workspace))
+            except RuntimeError as clone_err:
+                # Base branch doesn't exist - try to create it
+                error_msg = str(clone_err).lower()
+                if "not found" in error_msg or "does not exist" in error_msg:
+                    should_create, detected_base, _ = await self._prompt_create_branch(name, base_branch, repo_dir, clone_url, workspace)
+                    if should_create and detected_base:
+                        # Clone with detected base and create the requested base branch
+                        await self._run_cmd(["git", "clone", "--branch", detected_base, clone_url, str(repo_dir)], cwd=str(workspace))
+                        await self._run_cmd(["git", "checkout", "-b", base_branch], cwd=str(repo_dir))
+                        await self._send_log(f"✅ Created base branch '{base_branch}' from '{detected_base}'")
+                    else:
+                        return False
+                else:
+                    raise
+
+            # Update remote URL to persist token
+            await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
+
+            # Step 2: Setup sync remote if configured
+            if sync_config.get('url'):
+                await self._setup_sync_remote(repo_dir, sync_config, token)
+
+            # Step 3: Handle feature branch or protected base branch
+            if feature_branch:
+                # User wants to work on a specific feature branch
+                await self._send_log(f"🌿 Setting up feature branch: {feature_branch}")
+
+                # Check if feature branch already exists
+                branch_list = await self._run_cmd(["git", "branch", "-a"], cwd=str(repo_dir), capture_stdout=True)
+
+                if feature_branch in branch_list or f"remotes/origin/{feature_branch}" in branch_list:
+                    # Feature branch exists - check it out
+                    await self._run_cmd(["git", "checkout", feature_branch], cwd=str(repo_dir))
+                    await self._send_log(f"✓ Checked out existing feature branch '{feature_branch}'")
+                else:
+                    # Feature branch doesn't exist - create it from current HEAD (which is base_branch)
+                    await self._run_cmd(["git", "checkout", "-b", feature_branch], cwd=str(repo_dir))
+                    await self._send_log(f"✓ Created new feature branch '{feature_branch}' from '{base_branch}'")
+
+                logging.info(f"Working on feature branch: {feature_branch}")
+
+            elif self._is_protected_branch(base_branch) and not allow_protected_work:
+                # Base branch is protected and user hasn't explicitly allowed work on it
+                await self._send_log(f"⚠️  '{base_branch}' is a protected branch")
+                await self._send_log(f"💡 Creating a working branch to preserve {base_branch}")
+
+                working_branch = f"work/{base_branch}/{self.context.session_id[:8]}"
+                await self._run_cmd(["git", "checkout", "-b", working_branch], cwd=str(repo_dir))
+                await self._send_log(f"✓ Working on branch '{working_branch}'")
+
+                logging.info(f"Created working branch {working_branch} from protected base {base_branch}")
+
+            else:
+                # Either not protected or user explicitly allowed work on protected branch
+                if self._is_protected_branch(base_branch) and allow_protected_work:
+                    await self._send_log(f"⚠️  Working directly on protected branch '{base_branch}' (as requested)")
+                    logging.warning(f"User chose to work directly on protected branch: {base_branch}")
+                else:
+                    await self._send_log(f"✓ Working on base branch '{base_branch}'")
+
+            return True
+
+        except Exception as e:
+            await self._send_log(f"⚠️  Failed to setup {name}: {e}")
+            logging.error(f"Repository setup failed for {name}: {e}")
+            return False
+
+    async def _prompt_create_branch(self, repo_name: str, branch: str, repo_dir: Path, clone_url: str, workspace: Path) -> tuple[bool, str, str]:
+        """Prompt user to create a new branch when it doesn't exist.
+
+        Args:
+            repo_name: Name of the repository
+            branch: Branch name that doesn't exist
+            repo_dir: Path to the repository directory
+            clone_url: URL for cloning the repository
+            workspace: Workspace path
+
+        Returns:
+            Tuple of (should_create_branch, base_branch, final_branch_name)
+        """
+        # Send interactive prompt to user
+        await self._send_log(f"❓ Branch '{branch}' doesn't exist in {repo_name}")
+        await self._send_log(f"")
+        await self._send_log(f"Would you like to:")
+        await self._send_log(f"  1️⃣  Create '{branch}' as a new feature branch")
+        await self._send_log(f"  2️⃣  Continue without this repository")
+        await self._send_log(f"")
+        await self._send_log(f"If you choose option 1, I'll ask which branch to base it on.")
+
+        # For non-interactive sessions, default to option 2 (skip the repo)
+        interactive = str(self.context.get_env('INTERACTIVE', 'false')).strip().lower() in ('1', 'true', 'yes')
+
+        if not interactive:
+            await self._send_log(f"⚠️  Non-interactive session - continuing without {repo_name}")
+            logging.info(f"Non-interactive session: skipping non-existent branch {branch}")
+            return False, "", branch
+
+        # In interactive mode, send a special message type that triggers UI prompt
+        # The backend should handle this and send back a response
+        await self.shell._send_message(
+            MessageType.SYSTEM_MESSAGE,
+            {
+                "type": "branch_creation_prompt",
+                "repo_name": repo_name,
+                "requested_branch": branch,
+                "options": ["create", "skip"]
+            }
+        )
+
+        # Wait for user response (with timeout)
+        # For MVP, we'll auto-suggest common base branches
+        await self._send_log(f"")
+        await self._send_log(f"💡 Suggestion: Most feature branches are based on 'main', 'master', or 'develop'")
+        await self._send_log(f"")
+
+        # Detect available base branches by cloning with depth 1
+        base_branch_candidates = ['main', 'master', 'develop', 'dev']
+        detected_base = None
+
+        await self._send_log(f"🔍 Detecting available base branches...")
+
+        for candidate in base_branch_candidates:
+            try:
+                # Try shallow clone to check if branch exists
+                test_dir = workspace / f".branch-test-{repo_name}-{candidate}"
+                await self._run_cmd(
+                    ["git", "clone", "--depth", "1", "--branch", candidate, "--single-branch", clone_url, str(test_dir)],
+                    cwd=str(workspace),
+                    capture_stdout=True
+                )
+                # Branch exists - clean up and use it
+                import shutil
+                shutil.rmtree(test_dir, ignore_errors=True)
+                detected_base = candidate
+                await self._send_log(f"✓ Found base branch: '{candidate}'")
+                break
+            except RuntimeError:
+                # Branch doesn't exist, try next one
+                import shutil
+                shutil.rmtree(workspace / f".branch-test-{repo_name}-{candidate}", ignore_errors=True)
+                continue
+
+        if not detected_base:
+            await self._send_log(f"⚠️  No standard base branch found (main/master/develop/dev)")
+            await self._send_log(f"⚠️  Continuing without {repo_name}")
+            return False, "", branch
+
+        # Auto-create the branch based on detected base
+        await self._send_log(f"")
+        await self._send_log(f"✅ Creating '{branch}' based on '{detected_base}'")
+
+        return True, detected_base, branch
 
     async def _get_sdk_session_id(self, session_name: str) -> str:
         """Fetch the SDK session ID (UUID) from the parent session's CR status."""

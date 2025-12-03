@@ -64,7 +64,7 @@ import { SessionHeader } from "./session-header";
 import { getPhaseColor } from "@/utils/session-helpers";
 
 // Extracted components
-import { AddContextModal } from "./components/modals/add-context-modal";
+import { AddContextModal, RepositoryConfig } from "./components/modals/add-context-modal";
 import { CustomWorkflowDialog } from "./components/modals/custom-workflow-dialog";
 import { ManageRemoteDialog } from "./components/modals/manage-remote-dialog";
 import { CommitChangesDialog } from "./components/modals/commit-changes-dialog";
@@ -183,12 +183,19 @@ export default function ProjectSessionDetailPage({
 
   // Repo management mutations
   const addRepoMutation = useMutation({
-    mutationFn: async (repo: {
-      url: string;
-      branch: string;
-      output?: { url: string; branch: string };
-    }) => {
+    mutationFn: async (config: RepositoryConfig) => {
       setRepoChanging(true);
+
+      // Transform RepositoryConfig to API format
+      const repo = {
+        url: config.url,
+        branch: config.baseBranch || config.featureBranch || 'main', // fallback for backward compatibility
+        baseBranch: config.baseBranch,
+        featureBranch: config.featureBranch,
+        allowProtectedWork: config.allowProtectedWork,
+        sync: config.sync,
+      };
+
       const response = await fetch(
         `/api/projects/${projectName}/agentic-sessions/${sessionName}/repos`,
         {
@@ -1337,8 +1344,8 @@ export default function ProjectSessionDetailPage({
       <AddContextModal
         open={contextModalOpen}
         onOpenChange={setContextModalOpen}
-        onAddRepository={async (url, branch) => {
-          await addRepoMutation.mutateAsync({ url, branch });
+        onAddRepository={async (config: RepositoryConfig) => {
+          await addRepoMutation.mutateAsync(config);
           setContextModalOpen(false);
         }}
         isLoading={addRepoMutation.isPending}
