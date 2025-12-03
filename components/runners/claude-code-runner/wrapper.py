@@ -796,7 +796,11 @@ class ClaudeCodeAdapter:
         }
 
     async def _prepare_workspace(self):
-        """Clone input repo/branch into workspace and configure git remotes."""
+        """Verify workspace exists and log expected repositories.
+
+        Git cloning is now handled by the backend via the context management API.
+        The runner simply expects repositories to already be present in the workspace.
+        """
         workspace = Path(self.context.workspace_path)
         workspace.mkdir(parents=True, exist_ok=True)
 
@@ -809,126 +813,22 @@ class ClaudeCodeAdapter:
             await self._send_log(f"♻️ Reusing workspace from session {parent_session_id[:8]}")
             logging.info("Preserving existing workspace state for continuation")
 
+        # Verify expected repositories exist (cloned by backend)
         repos_cfg = self._get_repos_config()
         if repos_cfg:
-            # Multi-repo: clone each into workspace/<name>
-            try:
-                for r in repos_cfg:
-                    name = (r.get('name') or '').strip()
-                    inp = r.get('input') or {}
-                    url = (inp.get('url') or '').strip()
-                    branch = (inp.get('branch') or '').strip() or 'main'
-                    if not name or not url:
-                        continue
-                    repo_dir = workspace / name
+            await self._send_log("📂 Verifying workspace repositories...")
+            for r in repos_cfg:
+                name = (r.get('name') or '').strip()
+                if not name:
+                    continue
+                repo_dir = workspace / name
 
-                    # Fetch appropriate token for this repo's URL
-                    token = await self._fetch_token_for_url(url)
-
-                    # Check if repo already exists
-                    repo_exists = repo_dir.exists() and (repo_dir / ".git").exists()
-
-                    if not repo_exists:
-                        # Clone fresh copy
-                        await self._send_log(f"📥 Cloning {name}...")
-                        logging.info(f"Cloning {name} from {url} (branch: {branch})")
-                        clone_url = self._url_with_token(url, token) if token else url
-                        await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
-                        # Update remote URL to persist token (git strips it from clone URL)
-                        await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
-                        logging.info(f"Successfully cloned {name}")
-                    elif reusing_workspace:
-                        # Reusing workspace - preserve local changes from previous session
-                        await self._send_log(f"✓ Preserving {name} (continuation)")
-                        logging.info(f"Repo {name} exists and reusing workspace - preserving all local changes")
-                        # Update remote URL in case credentials changed
-                        await self._run_cmd(["git", "remote", "set-url", "origin", self._url_with_token(url, token) if token else url], cwd=str(repo_dir), ignore_errors=True)
-                        # Don't fetch, don't reset - keep all changes!
-                    else:
-                        # Repo exists but NOT reusing - reset to clean state
-                        await self._send_log(f"🔄 Resetting {name} to clean state")
-                        logging.info(f"Repo {name} exists but not reusing - resetting to clean state")
-                        await self._run_cmd(["git", "remote", "set-url", "origin", self._url_with_token(url, token) if token else url], cwd=str(repo_dir), ignore_errors=True)
-                        await self._run_cmd(["git", "fetch", "origin", branch], cwd=str(repo_dir))
-                        await self._run_cmd(["git", "checkout", branch], cwd=str(repo_dir))
-                        await self._run_cmd(["git", "reset", "--hard", f"origin/{branch}"], cwd=str(repo_dir))
-                        logging.info(f"Reset {name} to origin/{branch}")
-
-                    # Git identity with fallbacks
-                    user_name = os.getenv("GIT_USER_NAME", "").strip() or "Ambient Code Bot"
-                    user_email = os.getenv("GIT_USER_EMAIL", "").strip() or "bot@ambient-code.local"
-                    await self._run_cmd(["git", "config", "user.name", user_name], cwd=str(repo_dir))
-                    await self._run_cmd(["git", "config", "user.email", user_email], cwd=str(repo_dir))
-                    logging.info(f"Git identity configured: {user_name} <{user_email}>")
-
-                    # Configure output remote if present
-                    out = r.get('output') or {}
-                    out_url_raw = (out.get('url') or '').strip()
-                    if out_url_raw:
-                        out_url = self._url_with_token(out_url_raw, token) if token else out_url_raw
-                        await self._run_cmd(["git", "remote", "remove", "output"], cwd=str(repo_dir), ignore_errors=True)
-                        await self._run_cmd(["git", "remote", "add", "output", out_url], cwd=str(repo_dir))
-            except Exception as e:
-                logging.error(f"Failed to prepare multi-repo workspace: {e}")
-                await self._send_log(f"Workspace preparation failed: {e}")
-            return
-
-        # Single-repo legacy flow
-        input_repo = os.getenv("INPUT_REPO_URL", "").strip()
-        if not input_repo:
-            logging.info("No INPUT_REPO_URL configured, skipping single-repo setup")
-            return
-        input_branch = os.getenv("INPUT_BRANCH", "").strip() or "main"
-        output_repo = os.getenv("OUTPUT_REPO_URL", "").strip()
-
-        # Fetch appropriate token for this repo's URL
-        token = await self._fetch_token_for_url(input_repo)
-
-        workspace_has_git = (workspace / ".git").exists()
-        logging.info(f"Single-repo setup: workspace_has_git={workspace_has_git}, reusing={reusing_workspace}")
-
-        try:
-            if not workspace_has_git:
-                # Clone fresh copy
-                await self._send_log("📥 Cloning input repository...")
-                logging.info(f"Cloning from {input_repo} (branch: {input_branch})")
-                clone_url = self._url_with_token(input_repo, token) if token else input_repo
-                await self._run_cmd(["git", "clone", "--branch", input_branch, "--single-branch", clone_url, str(workspace)], cwd=str(workspace.parent))
-                # Update remote URL to persist token (git strips it from clone URL)
-                await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workspace), ignore_errors=True)
-                logging.info("Successfully cloned repository")
-            elif reusing_workspace:
-                # Reusing workspace - preserve local changes from previous session
-                await self._send_log("✓ Preserving workspace (continuation)")
-                logging.info("Workspace exists and reusing - preserving all local changes")
-                await self._run_cmd(["git", "remote", "set-url", "origin", self._url_with_token(input_repo, token) if token else input_repo], cwd=str(workspace), ignore_errors=True)
-                # Don't fetch, don't reset - keep all changes!
-            else:
-                # Reset to clean state
-                await self._send_log("🔄 Resetting workspace to clean state")
-                logging.info("Workspace exists but not reusing - resetting to clean state")
-                await self._run_cmd(["git", "remote", "set-url", "origin", self._url_with_token(input_repo, token) if token else input_repo], cwd=str(workspace))
-                await self._run_cmd(["git", "fetch", "origin", input_branch], cwd=str(workspace))
-                await self._run_cmd(["git", "checkout", input_branch], cwd=str(workspace))
-                await self._run_cmd(["git", "reset", "--hard", f"origin/{input_branch}"], cwd=str(workspace))
-                logging.info(f"Reset workspace to origin/{input_branch}")
-
-            # Git identity with fallbacks
-            user_name = os.getenv("GIT_USER_NAME", "").strip() or "Ambient Code Bot"
-            user_email = os.getenv("GIT_USER_EMAIL", "").strip() or "bot@ambient-code.local"
-            await self._run_cmd(["git", "config", "user.name", user_name], cwd=str(workspace))
-            await self._run_cmd(["git", "config", "user.email", user_email], cwd=str(workspace))
-            logging.info(f"Git identity configured: {user_name} <{user_email}>")
-
-            if output_repo:
-                await self._send_log("Configuring output remote...")
-                out_url = self._url_with_token(output_repo, token) if token else output_repo
-                await self._run_cmd(["git", "remote", "remove", "output"], cwd=str(workspace), ignore_errors=True)
-                await self._run_cmd(["git", "remote", "add", "output", out_url], cwd=str(workspace))
-
-        except Exception as e:
-            logging.error(f"Failed to prepare workspace: {e}")
-            await self._send_log(f"Workspace preparation failed: {e}")
+                if repo_dir.exists() and (repo_dir / ".git").exists():
+                    await self._send_log(f"✓ Repository {name} ready")
+                    logging.info(f"Repository {name} found in workspace")
+                else:
+                    # Repository missing - this is expected if user hasn't added it via Context UI yet
+                    logging.info(f"Repository {name} not found in workspace (user can add via Context UI)")
 
         # Create artifacts directory (initial working directory)
         try:
@@ -1111,72 +1011,74 @@ class ClaudeCodeAdapter:
             await self._send_log(f"❌ Workflow setup failed: {e}")
 
     async def _handle_repo_added(self, payload):
-        """Clone newly added repository and request restart."""
+        """Verify repository was added by backend and request restart.
+
+        The backend has already cloned the repository into the workspace.
+        The runner just needs to verify it exists and restart the Claude SDK
+        with updated additional_dirs.
+        """
         repo_url = str(payload.get('url') or '').strip()
         repo_branch = str(payload.get('branch') or '').strip() or 'main'
         repo_name = str(payload.get('name') or '').strip()
 
-        if not repo_url or not repo_name:
-            logging.warning("Invalid repo_added payload")
+        if not repo_name:
+            logging.warning("Invalid repo_added payload: missing repo name")
             return
 
         workspace = Path(self.context.workspace_path)
         repo_dir = workspace / repo_name
 
-        if repo_dir.exists():
-            await self._send_log(f"Repository {repo_name} already exists")
+        # Verify backend cloned the repository
+        if not repo_dir.exists() or not (repo_dir / ".git").exists():
+            logging.warning(f"Repository {repo_name} not found in workspace - backend may not have cloned it yet")
+            await self._send_log(f"⚠️ Repository {repo_name} not found in workspace")
             return
 
-        # Fetch appropriate token based on repo URL
-        token = await self._fetch_token_for_url(repo_url)
-        clone_url = self._url_with_token(repo_url, token) if token else repo_url
-
-        await self._send_log(f"📥 Cloning {repo_name}...")
-        await self._run_cmd(["git", "clone", "--branch", repo_branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
-        
-        # Configure git identity
-        user_name = os.getenv("GIT_USER_NAME", "").strip() or "Ambient Code Bot"
-        user_email = os.getenv("GIT_USER_EMAIL", "").strip() or "bot@ambient-code.local"
-        await self._run_cmd(["git", "config", "user.name", user_name], cwd=str(repo_dir))
-        await self._run_cmd(["git", "config", "user.email", user_email], cwd=str(repo_dir))
-        
-        await self._send_log(f"✅ Repository {repo_name} added")
+        await self._send_log(f"✅ Repository {repo_name} detected")
+        logging.info(f"Repository {repo_name} added to workspace by backend")
 
         # Update REPOS_JSON env var
         repos_cfg = self._get_repos_config()
         repos_cfg.append({'name': repo_name, 'input': {'url': repo_url, 'branch': repo_branch}})
         os.environ['REPOS_JSON'] = _json.dumps(repos_cfg)
 
-        # Request restart to update additional directories
+        # Request restart to update additional directories for Claude SDK
         self._restart_requested = True
+        await self._send_log(f"🔄 Restarting session to include {repo_name}...")
 
     async def _handle_repo_removed(self, payload):
-        """Remove repository and request restart."""
+        """Verify repository was removed by backend and request restart.
+
+        The backend has already removed the repository from the workspace.
+        The runner just needs to verify it's gone and restart the Claude SDK
+        with updated additional_dirs.
+        """
         repo_name = str(payload.get('name') or '').strip()
 
         if not repo_name:
-            logging.warning("Invalid repo_removed payload")
+            logging.warning("Invalid repo_removed payload: missing repo name")
             return
 
         workspace = Path(self.context.workspace_path)
         repo_dir = workspace / repo_name
 
-        if not repo_dir.exists():
-            await self._send_log(f"Repository {repo_name} not found")
+        # Verify backend removed the repository
+        if repo_dir.exists():
+            logging.warning(f"Repository {repo_name} still exists in workspace - backend may not have removed it yet")
+            await self._send_log(f"⚠️ Repository {repo_name} still exists in workspace")
             return
 
-        await self._send_log(f"🗑️ Removing {repo_name}...")
-        shutil.rmtree(repo_dir)
+        await self._send_log(f"✅ Repository {repo_name} removed")
+        logging.info(f"Repository {repo_name} removed from workspace by backend")
 
         # Update REPOS_JSON env var
         repos_cfg = self._get_repos_config()
         repos_cfg = [r for r in repos_cfg if r.get('name') != repo_name]
         os.environ['REPOS_JSON'] = _json.dumps(repos_cfg)
 
-        await self._send_log(f"✅ Repository {repo_name} removed")
-
-        # Request restart to update additional directories
+        # Request restart to update additional directories for Claude SDK
         self._restart_requested = True
+        await self._send_log(f"🔄 Restarting session without {repo_name}...")
 
     async def _push_results_if_any(self):
         """Commit and push changes to output repo/branch if configured."""

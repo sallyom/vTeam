@@ -323,10 +323,33 @@ type CloneOptions struct {
 
 ## Next Steps
 
-### Phase 2: Runner Simplification
-1. Remove all git clone logic from `components/runners/claude-code-runner/wrapper.py`
-2. Simplify `_prepare_workspace()` to just verify directories exist
-3. Update `_handle_repo_added/removed` to trigger SDK restart with updated additional_dirs
+### Phase 2: Runner Simplification ✅ COMPLETED
+The runner has been simplified to remove all Git operations and rely on backend-cloned repositories:
+
+**Changes Made:**
+1. **`_prepare_workspace()`** - Reduced from ~250 lines to ~40 lines
+   - Removed all git clone logic
+   - Now just verifies workspace exists and logs expected repositories
+   - Creates artifacts directory for session output
+
+2. **`_handle_repo_added()`** - Updated to work with backend-cloned repos
+   - Removed git clone commands
+   - Verifies repository exists in workspace (cloned by backend)
+   - Updates REPOS_JSON environment variable
+   - Requests Claude SDK restart to include new repository in additional_dirs
+
+3. **`_handle_repo_removed()`** - Updated to work with backend approach
+   - Removed filesystem deletion (backend handles this)
+   - Verifies repository was removed from workspace
+   - Updates REPOS_JSON environment variable
+   - Requests Claude SDK restart to exclude repository from additional_dirs
+
+**Runner Architecture:**
+- Runner is now completely git-agnostic
+- Expects all repositories to be pre-cloned by backend API
+- Uses WebSocket notifications to detect context changes
+- Restarts Claude SDK with updated `additional_dirs` when repos added/removed
+- No knowledge of branches, remotes, or git operations
 
 ### Phase 3: Frontend Integration
 1. Update frontend to call new `/repos` endpoints
