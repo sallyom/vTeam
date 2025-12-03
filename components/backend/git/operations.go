@@ -1893,3 +1893,214 @@ func contains(slice []string, str string) bool {
 	}
 	return false
 }
+
+// CloneOptions represents options for cloning a repository with enhanced features
+type CloneOptions struct {
+	URL                string // Repository URL
+	BaseBranch         string // Primary branch to clone from (default: main)
+	FeatureBranch      string // Optional working branch to create/checkout
+	AllowProtectedWork bool   // Allow direct work on protected branches
+	SyncURL            string // Optional upstream/sync repository URL
+	SyncBranch         string // Branch to sync from upstream (default: main)
+	Token              string // Authentication token
+	DestinationDir     string // Where to clone the repository
+	SessionID          string // Session ID for working branch naming
+}
+
+// CloneWithOptions clones a repository with enhanced options for backend context management
+func CloneWithOptions(ctx context.Context, opts CloneOptions) error {
+	// Validate required options
+	if opts.URL == "" {
+		return fmt.Errorf("repository URL is required")
+	}
+	if opts.DestinationDir == "" {
+		return fmt.Errorf("destination directory is required")
+	}
+	if opts.BaseBranch == "" {
+		opts.BaseBranch = "main"
+	}
+
+	// Check if destination already exists
+	if _, err := os.Stat(opts.DestinationDir); err == nil {
+		return fmt.Errorf("destination directory already exists: %s", opts.DestinationDir)
+	}
+
+	// Prepare clone URL with token
+	cloneURL := opts.URL
+	if opts.Token != "" {
+		cloneURL = addTokenToURL(opts.URL, opts.Token)
+	}
+
+	// Clone repository
+	log.Printf("Cloning repository from %s (branch: %s) to %s", opts.URL, opts.BaseBranch, opts.DestinationDir)
+	cmd := exec.CommandContext(ctx, "git", "clone", "--branch", opts.BaseBranch, "--single-branch", cloneURL, opts.DestinationDir)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		outStr := string(out)
+		if strings.Contains(outStr, "not found") || strings.Contains(outStr, "does not exist") {
+			return fmt.Errorf("branch %s not found in repository", opts.BaseBranch)
+		}
+		if strings.Contains(outStr, "authentication") || strings.Contains(outStr, "Permission denied") {
+			return fmt.Errorf("authentication failed for repository")
+		}
+		return fmt.Errorf("failed to clone repository: %w (output: %s)", err, outStr)
+	}
+
+	// Update remote URL to persist token
+	if opts.Token != "" {
+		cmd = exec.CommandContext(ctx, "git", "remote", "set-url", "origin", cloneURL)
+		cmd.Dir = opts.DestinationDir
+		if err := cmd.Run(); err != nil {
+			log.Printf("Warning: failed to update remote URL: %v", err)
+		}
+	}
+
+	// Configure git identity
+	cmd = exec.CommandContext(ctx, "git", "config", "user.name", "Ambient Code Bot")
+	cmd.Dir = opts.DestinationDir
+	_ = cmd.Run() // Best effort
+
+	cmd = exec.CommandContext(ctx, "git", "config", "user.email", "bot@ambient-code.local")
+	cmd.Dir = opts.DestinationDir
+	_ = cmd.Run() // Best effort
+
+	// Handle feature branch or protected base branch
+	if opts.FeatureBranch != "" {
+		// Check if feature branch exists remotely
+		cmd = exec.CommandContext(ctx, "git", "ls-remote", "--heads", "origin", opts.FeatureBranch)
+		cmd.Dir = opts.DestinationDir
+		out, _ := cmd.CombinedOutput()
+
+		if len(strings.TrimSpace(string(out))) > 0 {
+			// Feature branch exists - check it out
+			cmd = exec.CommandContext(ctx, "git", "checkout", opts.FeatureBranch)
+			cmd.Dir = opts.DestinationDir
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("failed to checkout feature branch %s: %w", opts.FeatureBranch, err)
+			}
+			log.Printf("Checked out existing feature branch: %s", opts.FeatureBranch)
+		} else {
+			// Feature branch doesn't exist - create it
+			cmd = exec.CommandContext(ctx, "git", "checkout", "-b", opts.FeatureBranch)
+			cmd.Dir = opts.DestinationDir
+			if err := cmd.Run(); err != nil {
+				return fmt.Errorf("failed to create feature branch %s: %w", opts.FeatureBranch, err)
+			}
+			log.Printf("Created new feature branch: %s", opts.FeatureBranch)
+		}
+	} else if isProtectedBranch(opts.BaseBranch) && !opts.AllowProtectedWork {
+		// Base branch is protected and user hasn't explicitly allowed work on it
+		workingBranch := fmt.Sprintf("work/%s/%s", opts.BaseBranch, opts.SessionID[:8])
+		cmd = exec.CommandContext(ctx, "git", "checkout", "-b", workingBranch)
+		cmd.Dir = opts.DestinationDir
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to create working branch %s: %w", workingBranch, err)
+		}
+		log.Printf("Created working branch %s from protected branch %s", workingBranch, opts.BaseBranch)
+	}
+
+	// Setup sync remote if configured
+	if opts.SyncURL != "" {
+		if opts.SyncBranch == "" {
+			opts.SyncBranch = "main"
+		}
+
+		syncURL := opts.SyncURL
+		if opts.Token != "" {
+			syncURL = addTokenToURL(opts.SyncURL, opts.Token)
+		}
+
+		// Add sync remote
+		cmd = exec.CommandContext(ctx, "git", "remote", "add", "sync-repo", syncURL)
+		cmd.Dir = opts.DestinationDir
+		if err := cmd.Run(); err != nil {
+			log.Printf("Warning: failed to add sync remote: %v", err)
+		} else {
+			// Fetch from sync remote
+			cmd = exec.CommandContext(ctx, "git", "fetch", "sync-repo", opts.SyncBranch)
+			cmd.Dir = opts.DestinationDir
+			if err := cmd.Run(); err != nil {
+				log.Printf("Warning: failed to fetch from sync remote: %v", err)
+			} else {
+				// Rebase onto sync-repo/branch
+				cmd = exec.CommandContext(ctx, "git", "rebase", fmt.Sprintf("sync-repo/%s", opts.SyncBranch))
+				cmd.Dir = opts.DestinationDir
+				if err := cmd.Run(); err != nil {
+					log.Printf("Warning: failed to rebase onto sync remote: %v", err)
+				} else {
+					log.Printf("Successfully synced with upstream repository")
+				}
+			}
+		}
+	}
+
+	log.Printf("Successfully cloned and configured repository at %s", opts.DestinationDir)
+	return nil
+}
+
+// isProtectedBranch checks if a branch name matches protected branch patterns
+func isProtectedBranch(branch string) bool {
+	if branch == "" {
+		return false
+	}
+
+	branchLower := strings.ToLower(strings.TrimSpace(branch))
+
+	// Exact matches for common protected branches
+	protectedNames := map[string]bool{
+		"main":        true,
+		"master":      true,
+		"develop":     true,
+		"dev":         true,
+		"development": true,
+		"production":  true,
+		"prod":        true,
+		"staging":     true,
+		"stage":       true,
+		"qa":          true,
+		"test":        true,
+		"stable":      true,
+	}
+
+	if protectedNames[branchLower] {
+		return true
+	}
+
+	// Pattern matches for release branches
+	protectedPrefixes := []string{"release/", "releases/", "hotfix/", "hotfixes/"}
+	for _, prefix := range protectedPrefixes {
+		if strings.HasPrefix(branchLower, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// addTokenToURL adds authentication token to a Git URL
+func addTokenToURL(repoURL, token string) string {
+	if token == "" || !strings.HasPrefix(repoURL, "http") {
+		return repoURL
+	}
+
+	parsed, err := url.Parse(repoURL)
+	if err != nil {
+		return repoURL
+	}
+
+	// Determine auth format based on hostname
+	hostname := parsed.Hostname()
+	var auth string
+	if strings.Contains(strings.ToLower(hostname), "gitlab") {
+		auth = fmt.Sprintf("oauth2:%s", token)
+	} else {
+		auth = fmt.Sprintf("x-access-token:%s", token)
+	}
+
+	// Remove existing auth if present
+	parsed.User = nil
+
+	// Add new auth
+	parsed.User = url.UserPassword(auth, "")
+
+	return parsed.String()
+}

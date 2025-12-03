@@ -108,6 +108,37 @@ type WorkflowSelection struct {
 	Path   string `json:"path,omitempty"`
 }
 
+// Enhanced repository types for backend context management
+
+// RepositorySync represents sync/upstream repository configuration
+type RepositorySync struct {
+	URL    string `json:"url"`
+	Branch string `json:"branch,omitempty"`
+}
+
+// RepositoryInput represents enhanced input repository configuration
+type RepositoryInput struct {
+	URL                string          `json:"url" binding:"required"`
+	Branch             string          `json:"branch,omitempty"`            // Legacy field
+	BaseBranch         string          `json:"baseBranch,omitempty"`        // Primary branch to clone from
+	FeatureBranch      string          `json:"featureBranch,omitempty"`     // Optional working branch
+	AllowProtectedWork bool            `json:"allowProtectedWork,omitempty"` // Allow direct work on protected branch
+	Sync               *RepositorySync `json:"sync,omitempty"`              // Optional upstream/sync repository
+}
+
+// RepositoryOutput represents output repository configuration
+type RepositoryOutput struct {
+	URL    string `json:"url"`
+	Branch string `json:"branch,omitempty"`
+}
+
+// Repository represents a complete repository configuration
+type Repository struct {
+	Name   string            `json:"name"`
+	Input  RepositoryInput   `json:"input"`
+	Output *RepositoryOutput `json:"output,omitempty"`
+}
+
 // Mixed Provider Support Types
 
 // ProviderResult contains the result of operations for a specific provider

@@ -76,8 +76,10 @@ func registerRoutes(r *gin.Engine) {
 			projectGroup.DELETE("/agentic-sessions/:sessionName/content-pod", handlers.DeleteContentPod)
 			projectGroup.POST("/agentic-sessions/:sessionName/workflow", handlers.SelectWorkflow)
 			projectGroup.GET("/agentic-sessions/:sessionName/workflow/metadata", handlers.GetWorkflowMetadata)
-			projectGroup.POST("/agentic-sessions/:sessionName/repos", handlers.AddRepo)
-			projectGroup.DELETE("/agentic-sessions/:sessionName/repos/:repoName", handlers.RemoveRepo)
+			// Context management endpoints (git operations performed by backend)
+			projectGroup.GET("/agentic-sessions/:sessionName/repos", handlers.ListSessionRepositories)
+			projectGroup.POST("/agentic-sessions/:sessionName/repos", handlers.AddRepositoryToSession)
+			projectGroup.DELETE("/agentic-sessions/:sessionName/repos/:repoName", handlers.RemoveRepositoryFromSession)
 
 			projectGroup.GET("/sessions/:sessionId/ws", websocket.HandleSessionWebSocket)
 			projectGroup.GET("/sessions/:sessionId/messages", websocket.GetSessionMessagesWS)
