@@ -16,6 +16,10 @@ import type {
   CloneAgenticSessionResponse,
   Message,
   GetSessionMessagesResponse,
+  AddRepositoryRequest,
+  AddRepositoryResponse,
+  RemoveRepositoryResponse,
+  ListRepositoriesResponse,
 } from '@/types/api';
 
 /**
@@ -212,4 +216,48 @@ export async function deleteContentPod(
   sessionName: string
 ): Promise<void> {
   await apiClient.delete(`/projects/${projectName}/agentic-sessions/${sessionName}/content-pod`);
+}
+
+/**
+ * Backend Context Management API
+ * Add/remove repositories dynamically during a session
+ */
+
+/**
+ * List repositories in a session
+ */
+export async function listSessionRepositories(
+  projectName: string,
+  sessionName: string
+): Promise<ListRepositoriesResponse> {
+  return apiClient.get(`/projects/${projectName}/agentic-sessions/${sessionName}/repos`);
+}
+
+/**
+ * Add a repository to a session
+ * Backend will clone the repository into the session workspace
+ */
+export async function addSessionRepository(
+  projectName: string,
+  sessionName: string,
+  data: AddRepositoryRequest
+): Promise<AddRepositoryResponse> {
+  return apiClient.post<AddRepositoryResponse, AddRepositoryRequest>(
+    `/projects/${projectName}/agentic-sessions/${sessionName}/repos`,
+    data
+  );
+}
+
+/**
+ * Remove a repository from a session
+ * Backend will remove the repository from the session workspace
+ */
+export async function removeSessionRepository(
+  projectName: string,
+  sessionName: string,
+  repoName: string
+): Promise<RemoveRepositoryResponse> {
+  return apiClient.delete(
+    `/projects/${projectName}/agentic-sessions/${sessionName}/repos/${repoName}`
+  );
 }

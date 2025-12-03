@@ -37,7 +37,11 @@ export type LLMSettings = {
 
 export type SessionRepoInput = {
   url: string;
-  branch?: string;
+  branch?: string; // Legacy field
+  baseBranch?: string; // Primary branch to clone from
+  featureBranch?: string; // Optional working branch
+  allowProtectedWork?: boolean; // Allow direct work on protected branches
+  sync?: RepositorySync; // Optional upstream/sync repository
 };
 
 export type SessionRepoOutput = {
@@ -45,12 +49,40 @@ export type SessionRepoOutput = {
   branch?: string;
 };
 
+export type RepositorySync = {
+  url: string;
+  branch?: string;
+};
+
 export type SessionRepoStatus = 'pushed' | 'abandoned';
 
 export type SessionRepo = {
+  name?: string; // Repository name (for backend context management)
   input: SessionRepoInput;
   output?: SessionRepoOutput;
   status?: SessionRepoStatus;
+};
+
+// Backend context management API types
+export type AddRepositoryRequest = {
+  name: string;
+  input: SessionRepoInput;
+  output?: SessionRepoOutput;
+};
+
+export type AddRepositoryResponse = {
+  message: string;
+  name: string;
+  path: string;
+};
+
+export type RemoveRepositoryResponse = {
+  message: string;
+  name: string;
+};
+
+export type ListRepositoriesResponse = {
+  repos: Array<SessionRepo & { cloned: boolean }>;
 };
 
 export type AgenticSessionSpec = {

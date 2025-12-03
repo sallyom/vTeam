@@ -92,6 +92,8 @@ import {
   useSendControlMessage,
   useSessionK8sResources,
   useContinueSession,
+  useAddSessionRepository,
+  useRemoveSessionRepository,
 } from "@/services/queries";
 import {
   useWorkspaceList,
@@ -103,7 +105,6 @@ import {
   useOOTBWorkflows,
   useWorkflowMetadata,
 } from "@/services/queries/use-workflows";
-import { useMutation } from "@tanstack/react-query";
 
 export default function ProjectSessionDetailPage({
   params,
@@ -122,7 +123,7 @@ export default function ProjectSessionDetailPage({
     "workflows",
   ]);
   const [contextModalOpen, setContextModalOpen] = useState(false);
-  const [repoChanging, setRepoChanging] = useState(false);
+  // Repo changing state is now handled by the mutation hooks (addRepoMutation.isPending, removeRepoMutation.isPending)
   const [firstMessageLoaded, setFirstMessageLoaded] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -181,88 +182,9 @@ export default function ProjectSessionDetailPage({
     onWorkflowActivated: refetchSession,
   });
 
-  // Repo management mutations
-  const addRepoMutation = useMutation({
-    mutationFn: async (repo: {
-      url: string;
-      branch: string;
-      output?: { url: string; branch: string };
-    }) => {
-      setRepoChanging(true);
-      const response = await fetch(
-        `/api/projects/${projectName}/agentic-sessions/${sessionName}/repos`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(repo),
-        },
-      );
-      if (!response.ok) throw new Error("Failed to add repository");
-      const result = await response.json();
-      return { ...result, inputRepo: repo };
-    },
-    onSuccess: async (data) => {
-      successToast("Repository cloning...");
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      await refetchSession();
-
-      if (data.name && data.inputRepo) {
-        try {
-          await fetch(
-            `/api/projects/${projectName}/agentic-sessions/${sessionName}/git/configure-remote`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                path: data.name,
-                remoteUrl: data.inputRepo.url,
-                branch: data.inputRepo.branch || "main",
-              }),
-            },
-          );
-
-          const newRemotes = { ...directoryRemotes };
-          newRemotes[data.name] = {
-            url: data.inputRepo.url,
-            branch: data.inputRepo.branch || "main",
-          };
-          setDirectoryRemotes(newRemotes);
-        } catch (err) {
-          console.error("Failed to configure remote:", err);
-        }
-      }
-
-      setRepoChanging(false);
-      successToast("Repository added successfully");
-    },
-    onError: (error: Error) => {
-      setRepoChanging(false);
-      errorToast(error.message || "Failed to add repository");
-    },
-  });
-
-  const removeRepoMutation = useMutation({
-    mutationFn: async (repoName: string) => {
-      setRepoChanging(true);
-      const response = await fetch(
-        `/api/projects/${projectName}/agentic-sessions/${sessionName}/repos/${repoName}`,
-        { method: "DELETE" },
-      );
-      if (!response.ok) throw new Error("Failed to remove repository");
-      return response.json();
-    },
-    onSuccess: async () => {
-      successToast("Repository removing...");
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      await refetchSession();
-      setRepoChanging(false);
-      successToast("Repository removed successfully");
-    },
-    onError: (error: Error) => {
-      setRepoChanging(false);
-      errorToast(error.message || "Failed to remove repository");
-    },
-  });
+  // Repo management mutations (using new backend context management API)
+  const addRepoMutation = useAddSessionRepository();
+  const removeRepoMutation = useRemoveSessionRepository();
 
   // Fetch OOTB workflows
   const { data: ootbWorkflows = [] } = useOOTBWorkflows(projectName);
@@ -864,7 +786,11 @@ export default function ProjectSessionDetailPage({
                       repositories={session?.spec?.repos || []}
                       onAddRepository={() => setContextModalOpen(true)}
                       onRemoveRepository={(repoName) =>
-                        removeRepoMutation.mutate(repoName)
+                        removeRepoMutation.mutate({
+                          projectName,
+                          sessionName,
+                          repoName,
+                        })
                       }
                     />
 
@@ -1274,7 +1200,7 @@ export default function ProjectSessionDetailPage({
                     )}
 
                     {/* Repository change overlay */}
-                    {repoChanging && (
+                    {(addRepoMutation.isPending || removeRepoMutation.isPending) && (
                       <div className="absolute inset-0 bg-background/90 backdrop-blur-sm z-10 flex items-center justify-center rounded-lg">
                         <Alert className="max-w-md mx-4">
                           <Loader2 className="h-4 w-4 animate-spin" />
@@ -1338,8 +1264,22 @@ export default function ProjectSessionDetailPage({
         open={contextModalOpen}
         onOpenChange={setContextModalOpen}
         onAddRepository={async (url, branch) => {
-          await addRepoMutation.mutateAsync({ url, branch });
+          // Derive repository name from URL
+          const repoName = url.split('/').pop()?.replace('.git', '') || `repo-${Date.now()}`;
+
+          await addRepoMutation.mutateAsync({
+            projectName,
+            sessionName,
+            data: {
+              name: repoName,
+              input: {
+                url,
+                baseBranch: branch || 'main',
+              },
+            },
+          });
           setContextModalOpen(false);
+          successToast(`Repository ${repoName} is being cloned...`);
         }}
         isLoading={addRepoMutation.isPending}
       />

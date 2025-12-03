@@ -316,3 +316,77 @@ export function useContinueSession() {
     },
   });
 }
+
+/**
+ * Backend Context Management Hooks
+ * For dynamically adding/removing repositories during a session
+ */
+
+/**
+ * Hook to list repositories in a session
+ */
+export function useSessionRepositories(projectName: string, sessionName: string) {
+  return useQuery({
+    queryKey: [...sessionKeys.detail(projectName, sessionName), 'repositories'] as const,
+    queryFn: () => sessionsApi.listSessionRepositories(projectName, sessionName),
+    enabled: !!projectName && !!sessionName,
+  });
+}
+
+/**
+ * Hook to add a repository to a session
+ */
+export function useAddSessionRepository() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      projectName,
+      sessionName,
+      data,
+    }: {
+      projectName: string;
+      sessionName: string;
+      data: import('@/types/api').AddRepositoryRequest;
+    }) => sessionsApi.addSessionRepository(projectName, sessionName, data),
+    onSuccess: (_response, { projectName, sessionName }) => {
+      // Invalidate repositories list
+      queryClient.invalidateQueries({
+        queryKey: [...sessionKeys.detail(projectName, sessionName), 'repositories'] as const,
+      });
+      // Invalidate session details to refetch spec.repos
+      queryClient.invalidateQueries({
+        queryKey: sessionKeys.detail(projectName, sessionName),
+      });
+    },
+  });
+}
+
+/**
+ * Hook to remove a repository from a session
+ */
+export function useRemoveSessionRepository() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      projectName,
+      sessionName,
+      repoName,
+    }: {
+      projectName: string;
+      sessionName: string;
+      repoName: string;
+    }) => sessionsApi.removeSessionRepository(projectName, sessionName, repoName),
+    onSuccess: (_response, { projectName, sessionName }) => {
+      // Invalidate repositories list
+      queryClient.invalidateQueries({
+        queryKey: [...sessionKeys.detail(projectName, sessionName), 'repositories'] as const,
+      });
+      // Invalidate session details to refetch spec.repos
+      queryClient.invalidateQueries({
+        queryKey: sessionKeys.detail(projectName, sessionName),
+      });
+    },
+  });
+}
