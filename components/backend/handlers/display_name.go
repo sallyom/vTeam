@@ -24,9 +24,10 @@ const (
 	// anthropicAPIKeyField is the secret field containing the Anthropic API key
 	anthropicAPIKeyField = "ANTHROPIC_API_KEY"
 	// haiku model for quick, cheap name generation (standard API)
-	haiku3Model = "claude-3-5-haiku-20241022"
-	// haiku model for Vertex AI (requires version suffix)
-	haiku3ModelVertex = "claude-3-5-haiku-v2@20241022"
+	haiku3Model = "claude-haiku-4-5-20251001"
+	// haiku model for Vertex AI - use claude-haiku-4-5 which supports global region
+	// See: https://platform.claude.com/docs/en/build-with-claude/claude-on-vertex-ai
+	haiku3ModelVertex = "claude-haiku-4-5@20251001"
 	// Maximum display name length
 	maxDisplayNameLength = 50
 	// Timeout for API call
@@ -139,21 +140,24 @@ func getAnthropicClient(ctx context.Context, projectName string) (anthropic.Clie
 		region := os.Getenv("CLOUD_ML_REGION")
 		gcpProjectID := os.Getenv("ANTHROPIC_VERTEX_PROJECT_ID")
 
-		if region == "" {
-			region = "us-central1" // Default region
+		// Default to us-east5 - claude-haiku-4-5 is not available in global region
+		// See: https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/claude
+		if region == "" || region == "global" {
+			region = "us-east5"
 		}
 		if gcpProjectID == "" {
-			return anthropic.Client{}, false, fmt.Errorf("ANTHROPIC_VERTEX_PROJECT_ID is required when CLAUDE_CODE_USE_VERTEX=1")
+			return anthropic.Client{}, false, fmt.Errorf("ANTHROPIC_VERTEX_PROJECT_ID is required when CLAUDE_CODE_USE_VERTEX=1 (check backend deployment env vars)")
 		}
 
 		log.Printf("DisplayNameGen: Using Vertex AI for %s (region: %s, project: %s)", projectName, region, gcpProjectID)
+		// Must pass OAuth scope for Vertex AI - without it, auth fails with "invalid_scope" error
 		client := anthropic.NewClient(
-			vertex.WithGoogleAuth(ctx, region, gcpProjectID),
+			vertex.WithGoogleAuth(ctx, region, gcpProjectID, "https://www.googleapis.com/auth/cloud-platform"),
 		)
 		return client, true, nil
 	}
 
-	// Fall back to API key from project secret
+	// Vertex not enabled - use API key from project secret
 	apiKey, err := getAPIKeyFromSecret(ctx, projectName)
 	if err != nil {
 		return anthropic.Client{}, false, fmt.Errorf("failed to get API key: %w", err)
