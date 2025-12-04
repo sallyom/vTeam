@@ -22,16 +22,24 @@ from runner_shell.core.shell import RunnerShell
 from runner_shell.core.protocol import MessageType, PartialInfo
 from runner_shell.core.context import RunnerContext
 
+
+class PrerequisiteError(RuntimeError):
+    """Raised when slash-command prerequisites are missing."""
+    pass
+
+
 class ClaudeCodeAdapter:
     """Adapter that wraps the existing Claude Code CLI for runner-shell."""
 
     def __init__(self):
         self.context = None
         self.shell = None
+        self.last_exit_code = 1
         self.claude_process = None
         self._incoming_queue: "asyncio.Queue[dict]" = asyncio.Queue()
         self._restart_requested = False
         self._first_run = True  # Track if this is the first SDK run or a mid-session restart
+        self._skip_resume_on_restart = False  # When true, don't try to resume SDK session
 
     async def initialize(self, context: RunnerContext):
         """Initialize the adapter with context."""
@@ -42,7 +50,12 @@ class ClaudeCodeAdapter:
         # Initialize workflow if ACTIVE_WORKFLOW env vars are set
         await self._initialize_workflow_if_set()
         # Validate prerequisite files exist for phase-based commands
-        await self._validate_prerequisites()
+        try:
+            await self._validate_prerequisites()
+        except PrerequisiteError as exc:
+            self.last_exit_code = 2
+            logging.error("Prerequisite validation failed during initialization: %s", exc)
+            raise
 
     @staticmethod
     def _sanitize_user_context(user_id: str, user_name: str) -> tuple[str, str]:
@@ -97,21 +110,12 @@ class ClaudeCodeAdapter:
             await self._wait_for_ws_connection()
 
             # Get prompt from environment
-            prompt = self.context.get_env("PROMPT", "")
+            prompt = self.context.get_env("INITIAL_PROMPT", "")
             if not prompt:
                 prompt = self.context.get_metadata("prompt", "Hello! How can I help you today?")
 
             # Send progress update
             await self._send_log("Starting Claude Code session...")
-
-            # Mark CR Running (best-effort)
-            try:
-                await self._update_cr_status({
-                    "phase": "Running",
-                    "message": "Runner started",
-                })
-            except Exception as _:
-                logging.debug("CR status update (Running) skipped")
 
             # Append token to websocket URL if available (to pass SA token to backend)
             try:
@@ -132,6 +136,7 @@ class ClaudeCodeAdapter:
                 # Check if restart was requested (workflow changed)
                 if self._restart_requested:
                     self._restart_requested = False
+                    self._skip_resume_on_restart = True  # Don't try to resume - session is invalidated
                     await self._send_log("🔄 Restarting Claude with new workflow...")
                     logging.info("Restarting Claude SDK due to workflow change")
                     # Loop will call _run_claude_agent_sdk again with updated env vars
@@ -140,70 +145,32 @@ class ClaudeCodeAdapter:
                 # Normal exit - no restart requested
                 break
 
-            # Send completion
-            await self._send_log("Claude Code session completed")
+            success = not (isinstance(result, dict) and result.get("success") is False)
+            if success:
+                await self._send_log("Claude Code session completed")
+            else:
+                await self._send_log("Claude Code session completed with issues")
 
-            # Optional auto-push on completion (default: disabled)
             try:
                 auto_push = str(self.context.get_env('AUTO_PUSH_ON_COMPLETE', 'false')).strip().lower() in ('1','true','yes')
             except Exception:
                 auto_push = False
-            if auto_push:
+            if auto_push and success:
                 await self._push_results_if_any()
 
-            # CR status update based on result - MUST complete before pod exits
-            try:
-                if isinstance(result, dict) and result.get("success"):
-                    logging.info(f"Updating CR status to Completed (result.success={result.get('success')})")
-                    result_summary = ""
-                    if isinstance(result.get("result"), dict):
-                        # Prefer subtype and output if present
-                        subtype = result["result"].get("subtype")
-                        if subtype:
-                            result_summary = f"Completed with subtype: {subtype}"
-                    stdout_text = result.get("stdout") or ""
-                    # Use BLOCKING call to ensure completion before container exits
-                    await self._update_cr_status({
-                        "phase": "Completed",
-                        "completionTime": self._utc_iso(),
-                        "message": "Runner completed",
-                        "subtype": (result.get("result") or {}).get("subtype", "success"),
-                        "is_error": False,
-                        "num_turns": getattr(self, "_turn_count", 0),
-                        "session_id": self.context.session_id,
-                        "result": stdout_text[:10000],
-                    }, blocking=True)
-                    logging.info("CR status update to Completed completed")
-                elif isinstance(result, dict) and not result.get("success"):
-                    # Handle failure case (e.g., SDK crashed without ResultMessage)
-                    error_msg = result.get("error", "Unknown error")
-                    # Use BLOCKING call to ensure completion before container exits
-                    await self._update_cr_status({
-                        "phase": "Failed",
-                        "completionTime": self._utc_iso(),
-                        "message": error_msg,
-                        "is_error": True,
-                        "num_turns": getattr(self, "_turn_count", 0),
-                        "session_id": self.context.session_id,
-                    }, blocking=True)
-            except Exception as e:
-                logging.error(f"CR status update exception: {e}")
-
+            self.last_exit_code = 0 if success else 1
             return result
 
+        except PrerequisiteError as e:
+            self.last_exit_code = 2
+            logging.error(f"Prerequisite validation failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+            }
         except Exception as e:
+            self.last_exit_code = 1
             logging.error(f"Claude Code adapter failed: {e}")
-            # Best-effort CR failure update
-            try:
-                await self._update_cr_status({
-                    "phase": "Failed",
-                    "completionTime": self._utc_iso(),
-                    "message": f"Runner failed: {e}",
-                    "is_error": True,
-                    "session_id": self.context.session_id,
-                })
-            except Exception:
-                logging.debug("CR status update (Failed) skipped")
             return {
                 "success": False,
                 "error": str(e)
@@ -425,24 +392,21 @@ class ClaudeCodeAdapter:
                 system_prompt=system_prompt_config
                 )
 
-            # Use SDK's built-in session resumption if continuing
-            # The CLI stores session state in /app/.claude which is now persisted in PVC
-            # We need to get the SDK's UUID session ID, not our K8s session name
-            if is_continuation and parent_session_id:
+            # Use SDK's built-in continue_conversation feature
+            # The CLI stores session state in /app/.claude which is persisted in PVC
+            # This automatically resumes the conversation without needing to track session IDs
+            # Always enable on restarts so conversation context is preserved
+            if not self._first_run or is_continuation:
                 try:
-                    # Fetch the SDK session ID from the parent session's CR status
-                    sdk_resume_id = await self._get_sdk_session_id(parent_session_id)
-                    if sdk_resume_id:
-                        options.resume = sdk_resume_id  # type: ignore[attr-defined]
-                        options.fork_session = False  # type: ignore[attr-defined]
-                        logging.info(f"Enabled SDK session resumption: resume={sdk_resume_id[:8]}, fork=False")
-                        await self._send_log(f"🔄 Resuming SDK session {sdk_resume_id[:8]}")
-                    else:
-                        logging.warning(f"Parent session {parent_session_id} has no stored SDK session ID, starting fresh")
-                        await self._send_log("⚠️ No SDK session ID found, starting fresh")
+                    options.continue_conversation = True  # type: ignore[attr-defined]
+                    logging.info("Enabled continue_conversation for session resumption")
+                    await self._send_log("🔄 Continuing conversation from previous state")
                 except Exception as e:
-                    logging.warning(f"Failed to set resume options: {e}")
-                    await self._send_log(f"⚠️ SDK resume failed: {e}")
+                    logging.warning(f"Failed to set continue_conversation: {e}")
+            
+            # Reset skip flag if it was set
+            if self._skip_resume_on_restart:
+                self._skip_resume_on_restart = False
 
             # Best-effort set add_dirs if supported by SDK version
             try:
@@ -633,11 +597,33 @@ class ClaudeCodeAdapter:
                                 {"type": "result.message", "payload": result_payload},
                             )
 
-            # Use async with - SDK will automatically resume if options.resume is set
-            async with ClaudeSDKClient(options=options) as client:
-                if is_continuation and parent_session_id:
-                    await self._send_log("✅ SDK resuming session with full context")
-                    logging.info(f"SDK is handling session resumption for {parent_session_id}")
+            # Use async with - SDK will use continue_conversation to resume from local state
+            # Wrap in retry logic to handle conversation not found errors
+            def create_sdk_client(opts, disable_continue=False):
+                """Create SDK client, optionally disabling continue_conversation on retry."""
+                if disable_continue and hasattr(opts, 'continue_conversation'):
+                    opts.continue_conversation = False  # type: ignore[attr-defined]
+                return ClaudeSDKClient(options=opts)
+
+            # First attempt - may fail if conversation state is corrupted
+            try:
+                client_ctx = create_sdk_client(options)
+                client = await client_ctx.__aenter__()
+            except Exception as resume_error:
+                error_str = str(resume_error).lower()
+                if "no conversation found" in error_str or "session" in error_str:
+                    logging.warning(f"Conversation continuation failed: {resume_error}")
+                    await self._send_log("⚠️ Could not continue conversation, starting fresh...")
+                    # Retry without continue_conversation
+                    client_ctx = create_sdk_client(options, disable_continue=True)
+                    client = await client_ctx.__aenter__()
+                else:
+                    raise
+
+            try:
+                if not self._first_run:
+                    await self._send_log("✅ Continuing conversation")
+                    logging.info("SDK continuing conversation from local state")
 
                 async def process_one_prompt(text: str):
                     await self.shell._send_message(MessageType.AGENT_RUNNING, {})
@@ -710,6 +696,9 @@ class ClaudeCodeAdapter:
                                 await self._send_log({"level": "warn", "message": f"interrupt.failed: {e}"})
                         else:
                             await self._send_log({"level": "debug", "message": f"ignored.message: {mtype_raw}"})
+            finally:
+                # Clean up the SDK client context
+                await client_ctx.__aexit__(None, None, None)
 
             # Note: All output is streamed via WebSocket, not collected here
             await self._check_pr_intent("")
@@ -940,7 +929,7 @@ class ClaudeCodeAdapter:
 
     async def _validate_prerequisites(self):
         """Validate prerequisite files exist for phase-based slash commands."""
-        prompt = self.context.get_env("PROMPT", "")
+        prompt = self.context.get_env("INITIAL_PROMPT", "")
         if not prompt:
             return
 
@@ -975,17 +964,7 @@ class ClaudeCodeAdapter:
                 if not found:
                     error_message = f"❌ {error_msg}"
                     await self._send_log(error_message)
-                    # Mark session as failed
-                    try:
-                        await self._update_cr_status({
-                            "phase": "Failed",
-                            "completionTime": self._utc_iso(),
-                            "message": error_msg,
-                            "is_error": True,
-                        })
-                    except Exception:
-                        logging.debug("CR status update (Failed) skipped")
-                    raise RuntimeError(error_msg)
+                    raise PrerequisiteError(error_msg)
 
                 break  # Only check the first matching command
 
@@ -1519,41 +1498,6 @@ class ClaudeCodeAdapter:
             await loop.run_in_executor(None, _do)
         except Exception as e:
             logging.error(f"Failed to update annotation: {e}")
-
-    async def _update_cr_status(self, fields: dict, blocking: bool = False):
-        """Update CR status. Set blocking=True for critical final updates before container exit."""
-        url = self._compute_status_url()
-        if not url:
-            return
-        data = _json.dumps(fields).encode('utf-8')
-        req = _urllib_request.Request(url, data=data, headers={'Content-Type': 'application/json'}, method='PUT')
-        # Propagate runner token if present
-        token = (os.getenv('BOT_TOKEN') or '').strip()
-        if token:
-            req.add_header('Authorization', f'Bearer {token}')
-
-        def _do():
-            try:
-                with _urllib_request.urlopen(req, timeout=10) as resp:
-                    _ = resp.read()
-                logging.info(f"CR status update successful to {fields.get('phase', 'unknown')}")
-                return True
-            except _urllib_error.HTTPError as he:
-                logging.error(f"CR status HTTPError: {he.code} - {he.read().decode('utf-8', errors='replace')}")
-                return False
-            except Exception as e:
-                logging.error(f"CR status update failed: {e}")
-                return False
-
-        if blocking:
-            # Synchronous blocking call - ensures completion before container exit
-            logging.info(f"BLOCKING CR status update to {fields.get('phase', 'unknown')}")
-            success = _do()
-            logging.info(f"BLOCKING update {'succeeded' if success else 'failed'}")
-        else:
-            # Async call for non-critical updates
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _do)
 
     async def _run_cmd(self, cmd, cwd=None, capture_stdout=False, ignore_errors=False):
         """Run a subprocess command asynchronously."""
@@ -2156,14 +2100,15 @@ async def main():
 
     try:
         await shell.start()
-        logging.info("Claude Code runner session completed successfully")
-        return 0
+        logging.info("Claude Code runner session completed")
+        return getattr(adapter, "last_exit_code", 0)
     except KeyboardInterrupt:
         logging.info("Claude Code runner session interrupted")
         return 130
     except Exception as e:
         logging.error(f"Claude Code runner session failed: {e}")
-        return 1
+        exit_code = getattr(adapter, "last_exit_code", 1)
+        return exit_code or 1
 
 
 if __name__ == '__main__':
