@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Checkbox } from "@/components/ui/checkbox";
 import type { AddRepositoryRequest } from "@/types/api";
 
 type AddContextModalProps = {
@@ -29,11 +28,7 @@ export function AddContextModal({
 
   // Advanced options
   const [featureBranch, setFeatureBranch] = useState("");
-  const [allowProtectedWork, setAllowProtectedWork] = useState(false);
   const [syncUrl, setSyncUrl] = useState("");
-  const [syncBranch, setSyncBranch] = useState("main");
-  const [outputUrl, setOutputUrl] = useState("");
-  const [outputBranch, setOutputBranch] = useState("");
 
   const handleSubmit = async () => {
     if (!repoUrl.trim()) return;
@@ -54,42 +49,29 @@ export function AddContextModal({
       data.input.featureBranch = featureBranch.trim();
     }
 
-    // Add protected branch override if enabled
-    if (allowProtectedWork) {
-      data.input.allowProtectedWork = true;
-    }
-
     // Add sync/upstream configuration
     if (syncUrl.trim()) {
       data.input.sync = {
         url: syncUrl.trim(),
-        branch: syncBranch.trim() || 'main',
+        branch: baseBranch.trim() || 'main',
       };
     }
 
-    // Add output repository (fork/target)
-    if (outputUrl.trim()) {
-      data.output = {
-        url: outputUrl.trim(),
-        branch: outputBranch.trim() || baseBranch.trim() || 'main',
-      };
+    try {
+      await onAddRepository(data);
+      // Reset form on success
+      resetForm();
+    } catch (error) {
+      // Error handling is done by the parent component
+      console.error('Failed to add repository:', error);
     }
-
-    await onAddRepository(data);
-
-    // Reset form
-    resetForm();
   };
 
   const resetForm = () => {
     setRepoUrl("");
     setBaseBranch("main");
     setFeatureBranch("");
-    setAllowProtectedWork(false);
     setSyncUrl("");
-    setSyncBranch("main");
-    setOutputUrl("");
-    setOutputBranch("");
     setShowAdvanced(false);
   };
 
@@ -162,7 +144,7 @@ export function AddContextModal({
           {showAdvanced && (
             <div className="space-y-4 border-l-2 border-muted pl-4">
               <div className="space-y-2">
-                <Label htmlFor="feature-branch">Feature Branch (optional)</Label>
+                <Label htmlFor="feature-branch">Working Branch (optional)</Label>
                 <Input
                   id="feature-branch"
                   placeholder="feature/my-feature"
@@ -170,81 +152,21 @@ export function AddContextModal({
                   onChange={(e) => setFeatureBranch(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Create or checkout a specific working branch
+                  Create or checkout a specific branch for your changes
                 </p>
               </div>
 
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="allow-protected"
-                  checked={allowProtectedWork}
-                  onCheckedChange={(checked) => setAllowProtectedWork(checked === true)}
+              <div className="space-y-3 pt-2 border-t pt-4">
+                <Label htmlFor="sync-url">Upstream Repository (optional)</Label>
+                <Input
+                  id="sync-url"
+                  placeholder="https://github.com/upstream/repo"
+                  value={syncUrl}
+                  onChange={(e) => setSyncUrl(e.target.value)}
                 />
-                <div className="grid gap-1.5 leading-none">
-                  <label
-                    htmlFor="allow-protected"
-                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                  >
-                    Allow work on protected branches
-                  </label>
-                  <p className="text-xs text-muted-foreground">
-                    By default, a working branch is created for protected branches (main, master, develop, etc.)
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3 pt-2">
-                <Label className="text-sm font-semibold">Sync/Upstream Repository</Label>
-                <div className="space-y-2">
-                  <Label htmlFor="sync-url" className="text-xs font-normal">Upstream URL (optional)</Label>
-                  <Input
-                    id="sync-url"
-                    placeholder="https://github.com/upstream/repo"
-                    value={syncUrl}
-                    onChange={(e) => setSyncUrl(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Repository to sync from (for forks)
-                  </p>
-                </div>
-                {syncUrl.trim() && (
-                  <div className="space-y-2">
-                    <Label htmlFor="sync-branch" className="text-xs font-normal">Sync Branch</Label>
-                    <Input
-                      id="sync-branch"
-                      placeholder="main"
-                      value={syncBranch}
-                      onChange={(e) => setSyncBranch(e.target.value)}
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-3 pt-2">
-                <Label className="text-sm font-semibold">Output Repository</Label>
-                <div className="space-y-2">
-                  <Label htmlFor="output-url" className="text-xs font-normal">Target URL (optional)</Label>
-                  <Input
-                    id="output-url"
-                    placeholder="https://github.com/user/fork"
-                    value={outputUrl}
-                    onChange={(e) => setOutputUrl(e.target.value)}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Repository to push changes to (for forks)
-                  </p>
-                </div>
-                {outputUrl.trim() && (
-                  <div className="space-y-2">
-                    <Label htmlFor="output-branch" className="text-xs font-normal">Target Branch</Label>
-                    <Input
-                      id="output-branch"
-                      placeholder={baseBranch || "main"}
-                      value={outputBranch}
-                      onChange={(e) => setOutputBranch(e.target.value)}
-                    />
-                  </div>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  If this repository is a fork, specify the upstream repository to sync changes from
+                </p>
               </div>
             </div>
           )}

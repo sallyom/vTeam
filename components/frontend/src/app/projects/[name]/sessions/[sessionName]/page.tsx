@@ -1264,13 +1264,21 @@ export default function ProjectSessionDetailPage({
         open={contextModalOpen}
         onOpenChange={setContextModalOpen}
         onAddRepository={async (data) => {
-          await addRepoMutation.mutateAsync({
-            projectName,
-            sessionName,
-            data,
-          });
-          setContextModalOpen(false);
-          successToast(`Repository ${data.name} is being cloned...`);
+          try {
+            await addRepoMutation.mutateAsync({
+              projectName,
+              sessionName,
+              data,
+            });
+            setContextModalOpen(false);
+            successToast(`Repository ${data.name} is being cloned...`);
+          } catch (error) {
+            errorToast(
+              error instanceof Error
+                ? error.message
+                : 'Failed to add repository'
+            );
+          }
         }}
         isLoading={addRepoMutation.isPending}
       />
