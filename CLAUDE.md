@@ -985,6 +985,15 @@ The MkDocs site (`mkdocs.yml`) provides:
   - Production: Jira integration, OpenShift deployment, scaling
 - **Reference**: Agent personas, API endpoints, configuration schema, glossary
 
+### Documentation Standards
+
+**Default to improving existing documentation** rather than creating new files. When adding or updating documentation (standalone files like `.md`, design docs, guides):
+
+- **Prefer inline updates**: Improve existing markdown files or code comments
+- **Colocate new docs**: When feasible, documentation should live in the subdirectory that has the relevant code (e.g., `components/backend/README.md`) not at the top level
+- **Avoid top-level proliferation**: Only create top-level docs for cross-cutting concerns (architecture, security, deployment)
+- **Follow established patterns**: See `docs/amber-quickstart.md` and `components/backend/README.md` for examples of well-organized documentation
+
 ### Director Training Labs
 
 Special lab track for leadership training located in `docs/labs/director-training/`:
