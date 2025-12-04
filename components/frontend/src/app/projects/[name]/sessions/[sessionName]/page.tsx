@@ -1264,7 +1264,9 @@ export default function ProjectSessionDetailPage({
         open={contextModalOpen}
         onOpenChange={setContextModalOpen}
         onAddRepository={async (data) => {
+          console.log('page.tsx - Received repository data from modal:', JSON.stringify(data, null, 2));
           try {
+            console.log('page.tsx - Calling addRepoMutation with:', { projectName, sessionName, data });
             await addRepoMutation.mutateAsync({
               projectName,
               sessionName,
@@ -1273,6 +1275,7 @@ export default function ProjectSessionDetailPage({
             setContextModalOpen(false);
             successToast(`Repository ${data.name} is being cloned...`);
           } catch (error) {
+            console.error('page.tsx - addRepoMutation failed:', error);
             errorToast(
               error instanceof Error
                 ? error.message

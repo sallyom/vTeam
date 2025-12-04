@@ -242,6 +242,10 @@ export async function addSessionRepository(
   sessionName: string,
   data: AddRepositoryRequest
 ): Promise<AddRepositoryResponse> {
+  console.log('addSessionRepository - Sending to API:', {
+    url: `/projects/${projectName}/agentic-sessions/${sessionName}/repos`,
+    data: JSON.stringify(data, null, 2)
+  });
   return apiClient.post<AddRepositoryResponse, AddRepositoryRequest>(
     `/projects/${projectName}/agentic-sessions/${sessionName}/repos`,
     data

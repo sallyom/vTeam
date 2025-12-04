@@ -57,6 +57,9 @@ export function AddContextModal({
       };
     }
 
+    // Debug: log what we're sending
+    console.log('AddContextModal - Submitting repository data:', JSON.stringify(data, null, 2));
+
     try {
       await onAddRepository(data);
       // Reset form on success
