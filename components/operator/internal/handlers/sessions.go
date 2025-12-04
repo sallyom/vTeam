@@ -810,21 +810,27 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	const runnerSecretsName = "ambient-runner-secrets"               // ANTHROPIC_API_KEY only (ignored when Vertex enabled)
 	const integrationSecretsName = "ambient-non-vertex-integrations" // GIT_*, JIRA_*, custom keys (optional)
 
-	// Check if integration secrets exist (optional)
-	if _, err := config.K8sClient.CoreV1().Secrets(sessionNamespace).Get(context.TODO(), runnerSecretsName, v1.GetOptions{}); err != nil {
-		if !errors.IsNotFound(err) {
-			log.Printf("Error checking runner secret %s: %v", runnerSecretsName, err)
-		} else {
-			log.Printf("Runner secret %s missing in %s", runnerSecretsName, sessionNamespace)
+	// Only check for runner secrets when Vertex is disabled
+	// When Vertex is enabled, ambient-vertex secret is used instead
+	if !vertexEnabled {
+		if _, err := config.K8sClient.CoreV1().Secrets(sessionNamespace).Get(context.TODO(), runnerSecretsName, v1.GetOptions{}); err != nil {
+			if !errors.IsNotFound(err) {
+				log.Printf("Error checking runner secret %s: %v", runnerSecretsName, err)
+			} else {
+				log.Printf("Runner secret %s missing in %s (Vertex disabled)", runnerSecretsName, sessionNamespace)
+			}
+			statusPatch.AddCondition(conditionUpdate{
+				Type:    conditionSecretsReady,
+				Status:  "False",
+				Reason:  "RunnerSecretMissing",
+				Message: fmt.Sprintf("Secret %s missing", runnerSecretsName),
+			})
+			_ = statusPatch.Apply()
+			return fmt.Errorf("runner secret %s missing in namespace %s", runnerSecretsName, sessionNamespace)
 		}
-		statusPatch.AddCondition(conditionUpdate{
-			Type:    conditionSecretsReady,
-			Status:  "False",
-			Reason:  "RunnerSecretMissing",
-			Message: fmt.Sprintf("Secret %s missing", runnerSecretsName),
-		})
-		_ = statusPatch.Apply()
-		return fmt.Errorf("runner secret %s missing in namespace %s", runnerSecretsName, sessionNamespace)
+		log.Printf("Found runner secret %s in %s (Vertex disabled)", runnerSecretsName, sessionNamespace)
+	} else {
+		log.Printf("Vertex AI enabled, skipping runner secret %s validation", runnerSecretsName)
 	}
 
 	integrationSecretsExist := false
