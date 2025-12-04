@@ -42,7 +42,16 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v5
-      
+
+    - name: Validate AGENTS.md symlink
+      run: |
+        echo "Validating AGENTS.md → CLAUDE.md symlink..."
+        [ -L AGENTS.md ] || (echo "❌ AGENTS.md is not a symlink" && exit 1)
+        [ "$(readlink AGENTS.md)" = "CLAUDE.md" ] || (echo "❌ AGENTS.md points to wrong target" && exit 1)
+        [ -f CLAUDE.md ] || (echo "❌ CLAUDE.md does not exist" && exit 1)
+        diff -q AGENTS.md CLAUDE.md > /dev/null || (echo "❌ AGENTS.md content differs from CLAUDE.md" && exit 1)
+        echo "✅ AGENTS.md symlink is valid"
+
     - name: Set up Node.js
       uses: actions/setup-node@v6
       with:
