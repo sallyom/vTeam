@@ -1263,23 +1263,14 @@ export default function ProjectSessionDetailPage({
       <AddContextModal
         open={contextModalOpen}
         onOpenChange={setContextModalOpen}
-        onAddRepository={async (url, branch) => {
-          // Derive repository name from URL
-          const repoName = url.split('/').pop()?.replace('.git', '') || `repo-${Date.now()}`;
-
+        onAddRepository={async (data) => {
           await addRepoMutation.mutateAsync({
             projectName,
             sessionName,
-            data: {
-              name: repoName,
-              input: {
-                url,
-                baseBranch: branch || 'main',
-              },
-            },
+            data,
           });
           setContextModalOpen(false);
-          successToast(`Repository ${repoName} is being cloned...`);
+          successToast(`Repository ${data.name} is being cloned...`);
         }}
         isLoading={addRepoMutation.isPending}
       />
