@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"ambient-code-backend/git"
 	"ambient-code-backend/types"
 
 	"github.com/gin-gonic/gin"
@@ -75,108 +74,51 @@ func AddRepositoryToSession(c *gin.Context) {
 		}
 	}
 
-	// Allow adding repos in Running, Pending, or Paused states
+	// Allow adding repos in Pending or Running states (not Completed/Failed/Stopped)
 	allowedPhases := map[string]bool{
 		"Pending": true,
 		"Running": true,
-		"Paused":  true,
 	}
 	if !allowedPhases[phase] {
 		c.JSON(http.StatusConflict, gin.H{
-			"error": fmt.Sprintf("Cannot add repository to session in %s phase", phase),
+			"error": fmt.Sprintf("Cannot add repository to session in %s phase. Session must be Pending or Running.", phase),
 		})
 		return
 	}
 
-	// Get workspace path for this session
-	// Backend mounts /workspace, session workspace is at /workspace/sessions/{sessionName}/workspace
-	stateBaseDir := os.Getenv("STATE_BASE_DIR")
-	if stateBaseDir == "" {
-		stateBaseDir = "/workspace"
-	}
-	sessionWorkspacePath := filepath.Join(stateBaseDir, "sessions", sessionName, "workspace")
-
-	// Create workspace directory if it doesn't exist (e.g., for Pending sessions)
-	if _, err := os.Stat(sessionWorkspacePath); os.IsNotExist(err) {
-		log.Printf("Creating session workspace directory: %s", sessionWorkspacePath)
-		if err := os.MkdirAll(sessionWorkspacePath, 0755); err != nil {
-			log.Printf("Failed to create workspace directory: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize session workspace"})
-			return
-		}
-	}
-
-	// Get user ID from context (set by auth middleware)
-	userID, _ := c.Get("userID")
-	userIDStr := ""
-	if uid, ok := userID.(string); ok {
-		userIDStr = uid
-	}
-
-	// Get authentication token for the repository
+	// Build repository for CR spec
 	ctx := c.Request.Context()
-	token, err := git.GetGitHubToken(ctx, reqK8s, reqDyn, projectName, userIDStr)
-	if err != nil {
-		log.Printf("Failed to get GitHub token for project %s: %v", projectName, err)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "No GitHub credentials available"})
-		return
-	}
 
-	// Determine base branch (prefer baseBranch, fall back to branch, default to main)
-	baseBranch := strings.TrimSpace(req.Input.BaseBranch)
-	if baseBranch == "" {
-		baseBranch = strings.TrimSpace(req.Input.Branch)
-	}
-	if baseBranch == "" {
-		baseBranch = "main"
-	}
-
-	// Prepare clone options
-	opts := git.CloneOptions{
-		URL:                strings.TrimSpace(req.Input.URL),
-		BaseBranch:         baseBranch,
-		FeatureBranch:      strings.TrimSpace(req.Input.FeatureBranch),
-		AllowProtectedWork: req.Input.AllowProtectedWork,
-		Token:              token,
-		DestinationDir:     filepath.Join(sessionWorkspacePath, req.Name),
-		SessionID:          sessionName,
-	}
-
-	// Add sync configuration if provided
-	if req.Input.Sync != nil && strings.TrimSpace(req.Input.Sync.URL) != "" {
-		opts.SyncURL = strings.TrimSpace(req.Input.Sync.URL)
-		opts.SyncBranch = strings.TrimSpace(req.Input.Sync.Branch)
-		if opts.SyncBranch == "" {
-			opts.SyncBranch = "main"
-		}
-	}
-
-	// Clone repository
-	log.Printf("Cloning repository %s for session %s/%s", req.Name, projectName, sessionName)
-	if err := git.CloneWithOptions(ctx, opts); err != nil {
-		log.Printf("Failed to clone repository %s: %v", req.Name, err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to clone repository: %v", err),
-		})
-		return
-	}
-
-	// Update session CR's spec.repos array using backend service account
-	// (we've already verified user has access via reqDyn, now use elevated privileges to write)
+	// Convert AddRepositoryRequest to Repository type
 	newRepo := types.Repository{
 		Name:   req.Name,
 		Input:  req.Input,
 		Output: req.Output,
 	}
 
+	// Add repository to session CR's spec.repos array
+	// Runner/operator will handle the actual cloning
+	log.Printf("Adding repository %s to session %s/%s CR spec", req.Name, projectName, sessionName)
 	if err := addRepoToSessionSpec(ctx, projectName, sessionName, newRepo); err != nil {
 		log.Printf("Failed to update session spec with new repo: %v", err)
-		// Repository is cloned but spec not updated - log warning but continue
-		log.Printf("Warning: Repository %s cloned but not added to session spec", req.Name)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to add repository to session: %v", err),
+		})
+		return
 	}
 
+	log.Printf("Repository %s added to session %s/%s spec successfully", req.Name, projectName, sessionName)
+
 	// Notify runner via WebSocket that context changed (if session is running)
+	// Runner will clone the repository when it detects the spec change
 	if phase == "Running" {
+		baseBranch := req.Input.BaseBranch
+		if baseBranch == "" {
+			baseBranch = req.Input.Branch
+		}
+		if baseBranch == "" {
+			baseBranch = "main"
+		}
 		notifyRunnerContextChanged(sessionName, "repo_added", map[string]interface{}{
 			"name":   req.Name,
 			"url":    req.Input.URL,
