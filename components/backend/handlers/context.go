@@ -96,11 +96,14 @@ func AddRepositoryToSession(c *gin.Context) {
 	}
 	sessionWorkspacePath := filepath.Join(stateBaseDir, "sessions", sessionName, "workspace")
 
-	// Verify workspace directory exists
+	// Create workspace directory if it doesn't exist (e.g., for Pending sessions)
 	if _, err := os.Stat(sessionWorkspacePath); os.IsNotExist(err) {
-		log.Printf("Session workspace does not exist: %s", sessionWorkspacePath)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Session workspace not initialized"})
-		return
+		log.Printf("Creating session workspace directory: %s", sessionWorkspacePath)
+		if err := os.MkdirAll(sessionWorkspacePath, 0755); err != nil {
+			log.Printf("Failed to create workspace directory: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialize session workspace"})
+			return
+		}
 	}
 
 	// Get user ID from context (set by auth middleware)
