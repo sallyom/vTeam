@@ -20,6 +20,7 @@ import {
   MessageSquare,
   SlidersHorizontal,
   ArrowLeft,
+  Upload,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -65,6 +66,7 @@ import { getPhaseColor } from "@/utils/session-helpers";
 
 // Extracted components
 import { AddContextModal } from "./components/modals/add-context-modal";
+import { UploadFileModal } from "./components/modals/upload-file-modal";
 import { CustomWorkflowDialog } from "./components/modals/custom-workflow-dialog";
 import { ManageRemoteDialog } from "./components/modals/manage-remote-dialog";
 import { CommitChangesDialog } from "./components/modals/commit-changes-dialog";
@@ -117,6 +119,7 @@ export default function ProjectSessionDetailPage({
   const [backHref, setBackHref] = useState<string | null>(null);
   const [openAccordionItems, setOpenAccordionItems] = useState<string[]>(["workflows"]);
   const [contextModalOpen, setContextModalOpen] = useState(false);
+  const [uploadFileModalOpen, setUploadFileModalOpen] = useState(false);
   const [repoChanging, setRepoChanging] = useState(false);
   const [firstMessageLoaded, setFirstMessageLoaded] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -252,6 +255,46 @@ export default function ProjectSessionDetailPage({
     onError: (error: Error) => {
       setRepoChanging(false);
       errorToast(error.message || "Failed to remove repository");
+    },
+  });
+
+  // File upload mutation
+  const uploadFileMutation = useMutation({
+    mutationFn: async (source: { type: 'local' | 'url', file?: File, url?: string, filename?: string }) => {
+      const formData = new FormData();
+      formData.append('type', source.type);
+
+      if (source.type === 'local' && source.file) {
+        formData.append('file', source.file);
+        formData.append('filename', source.file.name);
+      } else if (source.type === 'url' && source.url && source.filename) {
+        formData.append('url', source.url);
+        formData.append('filename', source.filename);
+      }
+
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/workspace/upload`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to upload file");
+      }
+
+      return response.json();
+    },
+    onSuccess: async (data) => {
+      successToast(`File "${data.filename}" uploaded successfully to /workspace`);
+      setUploadFileModalOpen(false);
+      // Optionally refresh workspace view
+      await refetchArtifactsFiles();
+    },
+    onError: (error: Error) => {
+      errorToast(error.message || "Failed to upload file");
     },
   });
 
@@ -599,7 +642,7 @@ export default function ProjectSessionDetailPage({
         <div className="flex-shrink-0 bg-card border-b">
           <div className="px-6 py-4">
             <div className="space-y-3 md:space-y-0">
-              {/* Top row: Back button / Breadcrumb + Kebab menu */}
+              {/* Top row: Back button / Breadcrumb + Upload Button + Kebab menu */}
               <div className="flex items-center justify-between">
                 {/* Mobile: Back button + Session name */}
                 <div className="flex items-center gap-3 md:hidden">
@@ -651,28 +694,38 @@ export default function ProjectSessionDetailPage({
                   />
                 </div>
 
-                {/* Kebab menu (both mobile and desktop) */}
-                <SessionHeader
-                  session={session}
-                  projectName={projectName}
-                  actionLoading={
-                    stopMutation.isPending
-                      ? "stopping"
-                      : deleteMutation.isPending
-                        ? "deleting"
-                        : continueMutation.isPending
-                          ? "resuming"
-                          : null
-                  }
-                  onRefresh={refetchSession}
-                  onStop={handleStop}
-                  onContinue={handleContinue}
-                  onDelete={handleDelete}
-                  durationMs={durationMs}
-                  k8sResources={k8sResources}
-                  messageCount={messages.length}
-                  renderMode="kebab-only"
-                />
+                {/* Upload File Button + Kebab menu (both mobile and desktop) */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setUploadFileModalOpen(true)}
+                  >
+                    <Upload className="h-4 w-4 mr-2" />
+                    <span className="hidden sm:inline">Upload File</span>
+                  </Button>
+                  <SessionHeader
+                    session={session}
+                    projectName={projectName}
+                    actionLoading={
+                      stopMutation.isPending
+                        ? "stopping"
+                        : deleteMutation.isPending
+                          ? "deleting"
+                          : continueMutation.isPending
+                            ? "resuming"
+                            : null
+                    }
+                    onRefresh={refetchSession}
+                    onStop={handleStop}
+                    onContinue={handleContinue}
+                    onDelete={handleDelete}
+                    durationMs={durationMs}
+                    k8sResources={k8sResources}
+                    messageCount={messages.length}
+                    renderMode="kebab-only"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -1240,7 +1293,20 @@ export default function ProjectSessionDetailPage({
           await addRepoMutation.mutateAsync({ url, branch });
           setContextModalOpen(false);
         }}
+        onUploadFile={() => {
+          setContextModalOpen(false);
+          setUploadFileModalOpen(true);
+        }}
         isLoading={addRepoMutation.isPending}
+      />
+
+      <UploadFileModal
+        open={uploadFileModalOpen}
+        onOpenChange={setUploadFileModalOpen}
+        onUploadFile={async (source) => {
+          await uploadFileMutation.mutateAsync(source);
+        }}
+        isLoading={uploadFileMutation.isPending}
       />
 
       <CustomWorkflowDialog

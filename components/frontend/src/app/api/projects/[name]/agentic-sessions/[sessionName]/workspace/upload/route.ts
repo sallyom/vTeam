@@ -1,0 +1,119 @@
+import { buildForwardHeadersAsync } from '@/lib/auth'
+import { BACKEND_URL } from '@/lib/config';
+import { NextRequest } from 'next/server';
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ name: string; sessionName: string }> },
+) {
+  const { name, sessionName } = await params
+  const headers = await buildForwardHeadersAsync(request)
+
+  try {
+    const formData = await request.formData()
+    const uploadType = formData.get('type') as string
+
+    if (uploadType === 'local') {
+      // Handle local file upload
+      const file = formData.get('file') as File
+      if (!file) {
+        return new Response(JSON.stringify({ error: 'No file provided' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+
+      const filename = formData.get('filename') as string || file.name
+      const fileBuffer = await file.arrayBuffer()
+
+      // Upload to workspace using the PUT endpoint
+      const resp = await fetch(
+        `${BACKEND_URL}/projects/${encodeURIComponent(name)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(filename)}`,
+        {
+          method: 'PUT',
+          headers: {
+            ...headers,
+            'Content-Type': file.type || 'application/octet-stream',
+          },
+          body: fileBuffer,
+        }
+      )
+
+      if (!resp.ok) {
+        const errorText = await resp.text()
+        return new Response(JSON.stringify({ error: 'Failed to upload file', details: errorText }), {
+          status: resp.status,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+
+      return new Response(JSON.stringify({ success: true, filename }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+    } else if (uploadType === 'url') {
+      // Handle URL-based file upload
+      const fileUrl = formData.get('url') as string
+      const filename = formData.get('filename') as string
+
+      if (!fileUrl || !filename) {
+        return new Response(JSON.stringify({ error: 'URL and filename are required' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+
+      // Download the file from URL
+      const fileResp = await fetch(fileUrl)
+      if (!fileResp.ok) {
+        return new Response(JSON.stringify({ error: 'Failed to download file from URL' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+
+      const fileBuffer = await fileResp.arrayBuffer()
+      const contentType = fileResp.headers.get('content-type') || 'application/octet-stream'
+
+      // Upload to workspace using the PUT endpoint
+      const resp = await fetch(
+        `${BACKEND_URL}/projects/${encodeURIComponent(name)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(filename)}`,
+        {
+          method: 'PUT',
+          headers: {
+            ...headers,
+            'Content-Type': contentType,
+          },
+          body: fileBuffer,
+        }
+      )
+
+      if (!resp.ok) {
+        const errorText = await resp.text()
+        return new Response(JSON.stringify({ error: 'Failed to upload file', details: errorText }), {
+          status: resp.status,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+
+      return new Response(JSON.stringify({ success: true, filename }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+    } else {
+      return new Response(JSON.stringify({ error: 'Invalid upload type' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    }
+
+  } catch (error) {
+    console.error('File upload error:', error)
+    return new Response(JSON.stringify({ error: 'Internal server error', details: String(error) }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    })
+  }
+}

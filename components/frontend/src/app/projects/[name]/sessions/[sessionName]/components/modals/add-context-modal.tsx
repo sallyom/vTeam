@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Info } from "lucide-react";
+import { Loader2, Info, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ type AddContextModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onAddRepository: (url: string, branch: string) => Promise<void>;
+  onUploadFile?: () => void;
   isLoading?: boolean;
 };
 
@@ -19,6 +20,7 @@ export function AddContextModal({
   open,
   onOpenChange,
   onAddRepository,
+  onUploadFile,
   isLoading = false,
 }: AddContextModalProps) {
   const [contextUrl, setContextUrl] = useState("");
@@ -51,10 +53,25 @@ export function AddContextModal({
         </DialogHeader>
         
         <div className="space-y-4">
+          {onUploadFile && (
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onUploadFile}
+                disabled={isLoading}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Upload File
+              </Button>
+            </div>
+          )}
+
           <Alert>
             <Info className="h-4 w-4" />
             <AlertDescription>
-              Note: additional data sources like Jira, Google Drive, files, and MCP Servers are on the roadmap!
+              Note: additional data sources like Jira, Google Drive, and MCP Servers are on the roadmap!
             </AlertDescription>
           </Alert>
 
