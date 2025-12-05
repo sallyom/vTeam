@@ -301,7 +301,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	// - Pending sessions (for pre-upload before runner starts)
 	// - Stopped/Completed/Failed sessions (for post-session workspace access)
 	// Do NOT create temp pods for Running/Creating sessions (they have ambient-content service)
-	if phase == "Pending" || phase == "Stopped" || phase == "Completed" || phase == "Failed" {
+	if phase == "Stopped" || phase == "Completed" || phase == "Failed" {
 		if tempContentRequested {
 			// User wants workspace access - ensure temp pod exists
 			if err := reconcileTempContentPodWithPatch(sessionNamespace, name, tempPodName, currentObj, statusPatch); err != nil {
@@ -331,6 +331,33 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 			}
 		}
 		return nil
+	}
+
+	// For Pending sessions: allow temp pod creation for file uploads, but don't return early
+	// This ensures Job creation can proceed when user starts the session
+	if phase == "Pending" {
+		if tempContentRequested {
+			// User wants to upload files - ensure temp pod exists
+			if err := reconcileTempContentPodWithPatch(sessionNamespace, name, tempPodName, currentObj, statusPatch); err != nil {
+				log.Printf("[TempPod] Failed to reconcile temp pod for Pending session: %v", err)
+			}
+			// Apply status changes but CONTINUE to allow Job creation logic below
+			if statusPatch.HasChanges() {
+				if err := statusPatch.Apply(); err != nil {
+					log.Printf("[TempPod] Warning: failed to apply status patch: %v", err)
+				}
+			}
+			// Do NOT return - continue to Job creation logic
+		} else {
+			// Temp pod not requested - delete if it exists
+			_, err := config.K8sClient.CoreV1().Pods(sessionNamespace).Get(context.TODO(), tempPodName, v1.GetOptions{})
+			if err == nil {
+				log.Printf("[TempPod] Deleting temp pod from Pending session: %s", tempPodName)
+				if err := config.K8sClient.CoreV1().Pods(sessionNamespace).Delete(context.TODO(), tempPodName, v1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+					log.Printf("[TempPod] Failed to delete temp pod: %v", err)
+				}
+			}
+		}
 	}
 
 	// === CONTINUE WITH PHASE-BASED RECONCILIATION ===
@@ -773,6 +800,19 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		}
 	} else {
 		log.Printf("Langfuse disabled, skipping secret copy")
+	}
+
+	// CRITICAL: Delete temp content pod before creating Job to avoid PVC mount conflict
+	// The PVC is ReadWriteOnce, so only one pod can mount it at a time
+	tempPodName = fmt.Sprintf("temp-content-%s", name)
+	if _, err := config.K8sClient.CoreV1().Pods(sessionNamespace).Get(context.TODO(), tempPodName, v1.GetOptions{}); err == nil {
+		log.Printf("[PVCConflict] Deleting temp pod %s before creating Job (ReadWriteOnce PVC)", tempPodName)
+		if err := config.K8sClient.CoreV1().Pods(sessionNamespace).Delete(context.TODO(), tempPodName, v1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+			log.Printf("[PVCConflict] Warning: failed to delete temp pod: %v", err)
+		}
+		// Clear temp pod annotations since we're starting the session
+		_ = clearAnnotation(sessionNamespace, name, tempContentRequestedAnnotation)
+		_ = clearAnnotation(sessionNamespace, name, tempContentLastAccessedAnnotation)
 	}
 
 	// Create a Kubernetes Job for this AgenticSession
