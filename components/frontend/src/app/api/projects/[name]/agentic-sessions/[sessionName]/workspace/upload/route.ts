@@ -26,18 +26,42 @@ export async function POST(
       const filename = formData.get('filename') as string || file.name
       const fileBuffer = await file.arrayBuffer()
 
-      // Upload to workspace using the PUT endpoint
-      const resp = await fetch(
-        `${BACKEND_URL}/projects/${encodeURIComponent(name)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(filename)}`,
-        {
-          method: 'PUT',
-          headers: {
-            ...headers,
-            'Content-Type': file.type || 'application/octet-stream',
-          },
-          body: fileBuffer,
+      // Upload to workspace/file-uploads directory using the PUT endpoint
+      // Retry logic: if backend returns 202 (content service starting), retry up to 3 times
+      let resp: Response | null = null
+      let retries = 0
+      const maxRetries = 3
+      const retryDelay = 2000 // 2 seconds
+
+      while (retries <= maxRetries) {
+        resp = await fetch(
+          `${BACKEND_URL}/projects/${encodeURIComponent(name)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/file-uploads/${encodeURIComponent(filename)}`,
+          {
+            method: 'PUT',
+            headers: {
+              ...headers,
+              'Content-Type': file.type || 'application/octet-stream',
+            },
+            body: fileBuffer,
+          }
+        )
+
+        // If 202 Accepted (content service starting), wait and retry
+        if (resp.status === 202 && retries < maxRetries) {
+          retries++
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          continue
         }
-      )
+
+        break
+      }
+
+      if (!resp) {
+        return new Response(JSON.stringify({ error: 'Upload failed - no response from server' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
 
       if (!resp.ok) {
         const errorText = await resp.text()
@@ -76,18 +100,42 @@ export async function POST(
       const fileBuffer = await fileResp.arrayBuffer()
       const contentType = fileResp.headers.get('content-type') || 'application/octet-stream'
 
-      // Upload to workspace using the PUT endpoint
-      const resp = await fetch(
-        `${BACKEND_URL}/projects/${encodeURIComponent(name)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/${encodeURIComponent(filename)}`,
-        {
-          method: 'PUT',
-          headers: {
-            ...headers,
-            'Content-Type': contentType,
-          },
-          body: fileBuffer,
+      // Upload to workspace/file-uploads directory using the PUT endpoint
+      // Retry logic: if backend returns 202 (content service starting), retry up to 3 times
+      let resp: Response | null = null
+      let retries = 0
+      const maxRetries = 3
+      const retryDelay = 2000 // 2 seconds
+
+      while (retries <= maxRetries) {
+        resp = await fetch(
+          `${BACKEND_URL}/projects/${encodeURIComponent(name)}/agentic-sessions/${encodeURIComponent(sessionName)}/workspace/file-uploads/${encodeURIComponent(filename)}`,
+          {
+            method: 'PUT',
+            headers: {
+              ...headers,
+              'Content-Type': contentType,
+            },
+            body: fileBuffer,
+          }
+        )
+
+        // If 202 Accepted (content service starting), wait and retry
+        if (resp.status === 202 && retries < maxRetries) {
+          retries++
+          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          continue
         }
-      )
+
+        break
+      }
+
+      if (!resp) {
+        return new Response(JSON.stringify({ error: 'Upload failed - no response from server' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
 
       if (!resp.ok) {
         const errorText = await resp.text()

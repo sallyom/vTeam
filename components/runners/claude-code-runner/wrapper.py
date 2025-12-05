@@ -933,6 +933,14 @@ class ClaudeCodeAdapter:
         except Exception as e:
             logging.warning(f"Failed to create artifacts directory: {e}")
 
+        # Create file-uploads directory for uploaded files
+        try:
+            file_uploads_dir = workspace / "file-uploads"
+            file_uploads_dir.mkdir(parents=True, exist_ok=True)
+            logging.info("Created file-uploads directory")
+        except Exception as e:
+            logging.warning(f"Failed to create file-uploads directory: {e}")
+
     async def _validate_prerequisites(self):
         """Validate prerequisite files exist for phase-based slash commands."""
         prompt = self.context.get_env("INITIAL_PROMPT", "")

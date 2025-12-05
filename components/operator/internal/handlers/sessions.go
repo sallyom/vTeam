@@ -292,13 +292,16 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	}
 
 	// === TEMP CONTENT POD RECONCILIATION ===
-	// Manage temporary content pods for workspace access on stopped sessions
+	// Manage temporary content pods for workspace access when runner is not active
 
 	tempContentRequested := annotations != nil && annotations[tempContentRequestedAnnotation] == "true"
 	tempPodName := fmt.Sprintf("temp-content-%s", name)
 
-	// Only manage temp pods for stopped/completed/failed sessions
-	if phase == "Stopped" || phase == "Completed" || phase == "Failed" {
+	// Manage temp pods for:
+	// - Pending sessions (for pre-upload before runner starts)
+	// - Stopped/Completed/Failed sessions (for post-session workspace access)
+	// Do NOT create temp pods for Running/Creating sessions (they have ambient-content service)
+	if phase == "Pending" || phase == "Stopped" || phase == "Completed" || phase == "Failed" {
 		if tempContentRequested {
 			// User wants workspace access - ensure temp pod exists
 			if err := reconcileTempContentPodWithPatch(sessionNamespace, name, tempPodName, currentObj, statusPatch); err != nil {

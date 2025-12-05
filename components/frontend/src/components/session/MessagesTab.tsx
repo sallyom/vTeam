@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { MessageSquare, Loader2, Settings, Terminal, Users } from "lucide-react";
+import { MessageSquare, Loader2, Settings, Terminal, Users, Upload } from "lucide-react";
 import { StreamMessage } from "@/components/ui/stream-message";
 import {
   DropdownMenu,
@@ -28,10 +28,11 @@ export type MessagesTabProps = {
   onContinue: () => void;
   workflowMetadata?: WorkflowMetadata;
   onCommandClick?: (slashCommand: string) => void;
+  onUploadFile?: () => void;
 };
 
 
-const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chatInput, setChatInput, onSendChat, onInterrupt, onEndSession, onGoToResults, onContinue, workflowMetadata, onCommandClick }) => {
+const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chatInput, setChatInput, onSendChat, onInterrupt, onEndSession, onGoToResults, onContinue, workflowMetadata, onCommandClick, onUploadFile }) => {
   const [sendingChat, setSendingChat] = useState(false);
   const [interrupting, setInterrupting] = useState(false);
   const [ending, setEnding] = useState(false);
@@ -605,6 +606,19 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chat
                         </div>
                       </PopoverContent>
                     </Popover>
+                  )}
+
+                  {/* Upload File Button */}
+                  {onUploadFile && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1.5"
+                      onClick={onUploadFile}
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Upload</span>
+                    </Button>
                   )}
                 </div>
                 <div className="flex gap-2">

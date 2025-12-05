@@ -288,7 +288,7 @@ export default function ProjectSessionDetailPage({
       return response.json();
     },
     onSuccess: async (data) => {
-      successToast(`File "${data.filename}" uploaded successfully to /workspace`);
+      successToast(`File "${data.filename}" uploaded successfully to /workspace/file-uploads`);
       setUploadFileModalOpen(false);
       // Optionally refresh workspace view
       await refetchArtifactsFiles();
@@ -1275,6 +1275,7 @@ export default function ProjectSessionDetailPage({
                         onContinue={handleContinue}
                         workflowMetadata={workflowMetadata}
                         onCommandClick={handleCommandClick}
+                        onUploadFile={() => setUploadFileModalOpen(true)}
                       />
                     </div>
                   </CardContent>
