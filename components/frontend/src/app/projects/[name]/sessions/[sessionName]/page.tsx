@@ -423,6 +423,7 @@ export default function ProjectSessionDetailPage({
   const directoryOptions = useMemo<DirectoryOption[]>(() => {
     const options: DirectoryOption[] = [
       { type: "artifacts", name: "Shared Artifacts", path: "artifacts" },
+      { type: "file-uploads", name: "Uploaded Files", path: "file-uploads" },
     ];
 
     if (session?.spec?.repos) {
@@ -907,6 +908,9 @@ export default function ProjectSessionDetailPage({
                                     <div className="flex items-center gap-2">
                                       {opt.type === "artifacts" && (
                                         <Folder className="h-3 w-3" />
+                                      )}
+                                      {opt.type === "file-uploads" && (
+                                        <Upload className="h-3 w-3" />
                                       )}
                                       {opt.type === "repo" && (
                                         <GitBranch className="h-3 w-3" />

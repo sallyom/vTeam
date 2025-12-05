@@ -617,9 +617,27 @@ class ClaudeCodeAdapter:
                 client = await client_ctx.__aenter__()
             except Exception as resume_error:
                 error_str = str(resume_error).lower()
-                if "no conversation found" in error_str or "session" in error_str:
+                if "no conversation found" in error_str or "session" in error_str or "exit code 1" in error_str:
                     logging.warning(f"Conversation continuation failed: {resume_error}")
-                    await self._send_log("⚠️ Could not continue conversation, starting fresh...")
+                    await self._send_log("⚠️ Could not continue conversation, clearing state and starting fresh...")
+
+                    # Clear corrupted conversation state
+                    claude_state_dir = Path("/app/.claude")
+                    if claude_state_dir.exists():
+                        try:
+                            import shutil
+                            shutil.rmtree(claude_state_dir)
+                            logging.info(f"Cleared corrupted conversation state at {claude_state_dir}")
+                        except Exception as clear_error:
+                            logging.warning(f"Failed to clear conversation state: {clear_error}")
+
+                    # Clear the stored SDK session ID annotation since state is invalid
+                    try:
+                        await self._update_cr_annotation("ambient-code.io/sdk-session-id", "")
+                        logging.info("Cleared corrupted SDK session ID annotation")
+                    except Exception as e:
+                        logging.warning(f"Failed to clear SDK session ID annotation: {e}")
+
                     # Retry without continue_conversation
                     client_ctx = create_sdk_client(options, disable_continue=True)
                     client = await client_ctx.__aenter__()

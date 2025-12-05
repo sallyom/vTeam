@@ -807,9 +807,34 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	tempPodName = fmt.Sprintf("temp-content-%s", name)
 	if _, err := config.K8sClient.CoreV1().Pods(sessionNamespace).Get(context.TODO(), tempPodName, v1.GetOptions{}); err == nil {
 		log.Printf("[PVCConflict] Deleting temp pod %s before creating Job (ReadWriteOnce PVC)", tempPodName)
-		if err := config.K8sClient.CoreV1().Pods(sessionNamespace).Delete(context.TODO(), tempPodName, v1.DeleteOptions{}); err != nil && !errors.IsNotFound(err) {
+
+		// Force immediate termination with zero grace period
+		gracePeriod := int64(0)
+		deleteOptions := v1.DeleteOptions{
+			GracePeriodSeconds: &gracePeriod,
+		}
+		if err := config.K8sClient.CoreV1().Pods(sessionNamespace).Delete(context.TODO(), tempPodName, deleteOptions); err != nil && !errors.IsNotFound(err) {
 			log.Printf("[PVCConflict] Warning: failed to delete temp pod: %v", err)
 		}
+
+		// Wait for temp pod to fully terminate to prevent PVC mount conflicts
+		// This is critical because ReadWriteOnce PVCs cannot be mounted by multiple pods
+		// With gracePeriod=0, this should complete in 1-3 seconds
+		log.Printf("[PVCConflict] Waiting for temp pod %s to fully terminate...", tempPodName)
+		maxWaitSeconds := 10 // Reduced from 30 since we're force-deleting
+		for i := 0; i < maxWaitSeconds*4; i++ { // Poll 4x per second for faster detection
+			_, err := config.K8sClient.CoreV1().Pods(sessionNamespace).Get(context.TODO(), tempPodName, v1.GetOptions{})
+			if errors.IsNotFound(err) {
+				elapsed := float64(i) * 0.25
+				log.Printf("[PVCConflict] Temp pod fully terminated after %.2f seconds", elapsed)
+				break
+			}
+			if i == (maxWaitSeconds*4)-1 {
+				log.Printf("[PVCConflict] Warning: temp pod still exists after %d seconds, proceeding anyway", maxWaitSeconds)
+			}
+			time.Sleep(250 * time.Millisecond) // Poll every 250ms instead of 1s
+		}
+
 		// Clear temp pod annotations since we're starting the session
 		_ = clearAnnotation(sessionNamespace, name, tempContentRequestedAnnotation)
 		_ = clearAnnotation(sessionNamespace, name, tempContentLastAccessedAnnotation)
@@ -2195,7 +2220,8 @@ func reconcileTempContentPodWithPatch(sessionNamespace, sessionName, tempPodName
 				}},
 			},
 			Spec: corev1.PodSpec{
-				RestartPolicy: corev1.RestartPolicyNever,
+				RestartPolicy:                 corev1.RestartPolicyNever,
+				TerminationGracePeriodSeconds: int64Ptr(0), // Enable instant termination
 				Containers: []corev1.Container{{
 					Name:            "content",
 					Image:           appConfig.ContentServiceImage,
