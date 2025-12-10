@@ -312,6 +312,12 @@ class ClaudeCodeAdapter:
                 if artifacts_path not in add_dirs:
                     add_dirs.append(artifacts_path)
                     logging.info("Added artifacts directory as additional directory")
+
+                # Add file-uploads directory
+                file_uploads_path = str(Path(self.context.workspace_path) / "file-uploads")
+                if file_uploads_path not in add_dirs:
+                    add_dirs.append(file_uploads_path)
+                    logging.info("Added file-uploads directory as additional directory")
             elif repos_cfg:
                 # Multi-repo mode: Prefer explicit MAIN_REPO_NAME, else use MAIN_REPO_INDEX, else default to 0
                 main_name = (os.getenv('MAIN_REPO_NAME') or '').strip()
@@ -341,6 +347,12 @@ class ClaudeCodeAdapter:
                 if artifacts_path not in add_dirs:
                     add_dirs.append(artifacts_path)
                     logging.info("Added artifacts directory as additional directory")
+
+                # Add file-uploads directory for repos mode too
+                file_uploads_path = str(Path(self.context.workspace_path) / "file-uploads")
+                if file_uploads_path not in add_dirs:
+                    add_dirs.append(file_uploads_path)
+                    logging.info("Added file-uploads directory as additional directory")
             else:
                 # No workflow and no repos: start in artifacts directory for ad-hoc work
                 cwd_path = str(Path(self.context.workspace_path) / "artifacts")
@@ -1885,6 +1897,13 @@ class ClaudeCodeAdapter:
         prompt += f"Location: {artifacts_path}\n"
         prompt += "Purpose: Create all output artifacts (documents, specs, reports) here.\n"
         prompt += "This directory persists across workflows and has its own git remote.\n\n"
+
+        # File uploads directory
+        prompt += "## Uploaded Files Directory\n"
+        prompt += "Location: file-uploads/\n"
+        prompt += "Purpose: User-uploaded files (documents, images, PDFs, specs) for context.\n"
+        prompt += "These files are uploaded by users via the UI and are available for you to read and reference.\n"
+        prompt += "This directory persists across sessions.\n\n"
 
         # Available repos
         if repos_cfg:
