@@ -2,6 +2,9 @@ import { buildForwardHeadersAsync } from '@/lib/auth';
 import { BACKEND_URL } from '@/lib/config';
 import { NextRequest } from 'next/server';
 
+// Maximum file size: 10MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ name: string; sessionName: string }> },
@@ -24,6 +27,20 @@ export async function POST(
       }
 
       const filename = (formData.get('filename') as string) || file.name;
+
+      // Check file size
+      if (file.size > MAX_FILE_SIZE) {
+        return new Response(
+          JSON.stringify({
+            error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`
+          }),
+          {
+            status: 413, // Payload Too Large
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
       const fileBuffer = await file.arrayBuffer();
 
       // Upload to workspace/file-uploads directory using the PUT endpoint
@@ -97,6 +114,20 @@ export async function POST(
       }
 
       const fileBuffer = await fileResp.arrayBuffer();
+
+      // Check file size
+      if (fileBuffer.byteLength > MAX_FILE_SIZE) {
+        return new Response(
+          JSON.stringify({
+            error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`
+          }),
+          {
+            status: 413, // Payload Too Large
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
       const contentType = fileResp.headers.get('content-type') || 'application/octet-stream';
 
       // Upload to workspace/file-uploads directory using the PUT endpoint

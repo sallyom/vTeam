@@ -16,6 +16,15 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
+// Maximum file size: 10MB (matches backend limit)
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+};
+
 type UploadFileModalProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -38,6 +47,7 @@ export function UploadFileModal({
   const [fileUrl, setFileUrl] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isStartingService, setIsStartingService] = useState(false);
+  const [fileSizeError, setFileSizeError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async () => {
@@ -76,6 +86,7 @@ export function UploadFileModal({
     setFileUrl("");
     setSelectedFile(null);
     setIsStartingService(false);
+    setFileSizeError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -85,6 +96,7 @@ export function UploadFileModal({
     setFileUrl("");
     setSelectedFile(null);
     setIsStartingService(false);
+    setFileSizeError(null);
     setActiveTab("local");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -95,7 +107,19 @@ export function UploadFileModal({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setSelectedFile(file);
+      // Check file size
+      if (file.size > MAX_FILE_SIZE) {
+        setFileSizeError(
+          `File size (${formatFileSize(file.size)}) exceeds maximum allowed size of ${formatFileSize(MAX_FILE_SIZE)}`
+        );
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+      } else {
+        setFileSizeError(null);
+        setSelectedFile(file);
+      }
     }
   };
 
@@ -113,9 +137,15 @@ export function UploadFileModal({
           <DialogTitle>Upload File</DialogTitle>
           <DialogDescription>
             Upload files to your workspace from your local machine or a URL. Files will be available in
-            the file-uploads folder.
+            the file-uploads folder. Maximum file size: {formatFileSize(MAX_FILE_SIZE)}.
           </DialogDescription>
         </DialogHeader>
+
+        {fileSizeError && (
+          <Alert variant="destructive">
+            <AlertDescription>{fileSizeError}</AlertDescription>
+          </Alert>
+        )}
 
         {isStartingService && (
           <Alert>
@@ -126,7 +156,14 @@ export function UploadFileModal({
           </Alert>
         )}
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "local" | "url")} className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => {
+            setActiveTab(v as "local" | "url");
+            setFileSizeError(null); // Clear error when switching tabs
+          }}
+          className="w-full"
+        >
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="local">
               <FileUp className="h-4 w-4 mr-2" />
