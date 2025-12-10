@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"ambient-code-backend/git"
 	"ambient-code-backend/types"
@@ -2610,11 +2612,30 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080", serviceName, project)
 	log.Printf("PutSessionWorkspaceFile: using service %s for session %s", serviceName, session)
 	payload, _ := io.ReadAll(c.Request.Body)
+
+	// Detect if content is binary and encode accordingly
+	encoding := "utf8"
+	content := string(payload)
+	contentType := c.GetHeader("Content-Type")
+
+	// Use base64 for binary content types or if content isn't valid UTF-8
+	isBinary := strings.HasPrefix(contentType, "image/") ||
+		strings.HasPrefix(contentType, "application/octet-stream") ||
+		strings.HasPrefix(contentType, "application/pdf") ||
+		strings.HasPrefix(contentType, "application/zip") ||
+		!utf8.ValidString(string(payload))
+
+	if isBinary {
+		encoding = "base64"
+		content = base64.StdEncoding.EncodeToString(payload)
+		log.Printf("PutSessionWorkspaceFile: detected binary content, using base64 encoding (contentType=%s, size=%d)", contentType, len(payload))
+	}
+
 	wreq := struct {
 		Path     string `json:"path"`
 		Content  string `json:"content"`
 		Encoding string `json:"encoding"`
-	}{Path: absPath, Content: string(payload), Encoding: "utf8"}
+	}{Path: absPath, Content: content, Encoding: encoding}
 	b, _ := json.Marshal(wreq)
 	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint+"/content/write", strings.NewReader(string(b)))
 	if strings.TrimSpace(token) != "" {
