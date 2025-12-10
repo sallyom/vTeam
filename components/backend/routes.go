@@ -122,4 +122,10 @@ func registerRoutes(r *gin.Engine) {
 
 	// Health check endpoint
 	r.GET("/health", handlers.Health)
+
+	// Generic OAuth2 callback endpoint (outside /api for MCP compatibility)
+	r.GET("/oauth2callback", handlers.HandleOAuth2Callback)
+
+	// OAuth callback status endpoint (for checking OAuth flow status)
+	r.GET("/oauth2callback/status", handlers.GetOAuthCallbackEndpoint)
 }
