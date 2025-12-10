@@ -65,6 +65,7 @@ import { getPhaseColor } from "@/utils/session-helpers";
 
 // Extracted components
 import { AddContextModal } from "./components/modals/add-context-modal";
+import { UploadFileModal } from "./components/modals/upload-file-modal";
 import { CustomWorkflowDialog } from "./components/modals/custom-workflow-dialog";
 import { ManageRemoteDialog } from "./components/modals/manage-remote-dialog";
 import { CommitChangesDialog } from "./components/modals/commit-changes-dialog";
@@ -117,6 +118,7 @@ export default function ProjectSessionDetailPage({
   const [backHref, setBackHref] = useState<string | null>(null);
   const [openAccordionItems, setOpenAccordionItems] = useState<string[]>(["workflows"]);
   const [contextModalOpen, setContextModalOpen] = useState(false);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
   const [repoChanging, setRepoChanging] = useState(false);
   const [firstMessageLoaded, setFirstMessageLoaded] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -252,6 +254,52 @@ export default function ProjectSessionDetailPage({
     onError: (error: Error) => {
       setRepoChanging(false);
       errorToast(error.message || "Failed to remove repository");
+    },
+  });
+
+  // File upload mutation
+  const uploadFileMutation = useMutation({
+    mutationFn: async (source: {
+      type: "local" | "url";
+      file?: File;
+      url?: string;
+      filename?: string;
+    }) => {
+      const formData = new FormData();
+      formData.append("type", source.type);
+
+      if (source.type === "local" && source.file) {
+        formData.append("file", source.file);
+        formData.append("filename", source.file.name);
+      } else if (source.type === "url" && source.url && source.filename) {
+        formData.append("url", source.url);
+        formData.append("filename", source.filename);
+      }
+
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/workspace/upload`,
+        {
+          method: "POST",
+          body: formData,
+        },
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Upload failed");
+      }
+
+      return response.json();
+    },
+    onSuccess: async (data) => {
+      successToast(`File "${data.filename}" uploaded successfully`);
+      // Refresh workspace to show uploaded file
+      await refetchDirectoryFiles();
+      await refetchArtifactsFiles();
+      setUploadModalOpen(false);
+    },
+    onError: (error: Error) => {
+      errorToast(error.message || "Failed to upload file");
     },
   });
 
@@ -935,14 +983,26 @@ export default function ProjectSessionDetailPage({
                                   </DropdownMenu>
                                 </div>
                               ) : (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => refetchDirectoryFiles()}
-                                  className="h-6 px-2 flex-shrink-0"
-                                >
-                                  <FolderSync className="h-3 w-3" />
-                                </Button>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setUploadModalOpen(true)}
+                                    className="h-6 px-2 flex-shrink-0"
+                                    title="Upload files"
+                                  >
+                                    <CloudUpload className="h-3 w-3" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => refetchDirectoryFiles()}
+                                    className="h-6 px-2 flex-shrink-0"
+                                    title="Refresh"
+                                  >
+                                    <FolderSync className="h-3 w-3" />
+                                  </Button>
+                                </div>
                               )}
                             </div>
 
@@ -1240,7 +1300,17 @@ export default function ProjectSessionDetailPage({
           await addRepoMutation.mutateAsync({ url, branch });
           setContextModalOpen(false);
         }}
+        onUploadFile={() => setUploadModalOpen(true)}
         isLoading={addRepoMutation.isPending}
+      />
+
+      <UploadFileModal
+        open={uploadModalOpen}
+        onOpenChange={setUploadModalOpen}
+        onUploadFile={async (source) => {
+          await uploadFileMutation.mutateAsync(source);
+        }}
+        isLoading={uploadFileMutation.isPending}
       />
 
       <CustomWorkflowDialog
