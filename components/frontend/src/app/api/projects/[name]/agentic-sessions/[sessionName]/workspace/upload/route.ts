@@ -2,8 +2,26 @@ import { buildForwardHeadersAsync } from '@/lib/auth';
 import { BACKEND_URL } from '@/lib/config';
 import { NextRequest } from 'next/server';
 
-// Maximum file size: 10MB
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+// Maximum file sizes based on type
+const MAX_DOCUMENT_SIZE = 8 * 1024 * 1024; // 8MB for documents
+const MAX_IMAGE_SIZE = 1 * 1024 * 1024; // 1MB for images
+
+// Determine if a file is an image based on content type
+const isImageFile = (contentType: string): boolean => {
+  return contentType.startsWith('image/');
+};
+
+// Get the appropriate max file size based on content type
+const getMaxFileSize = (contentType: string): number => {
+  return isImageFile(contentType) ? MAX_IMAGE_SIZE : MAX_DOCUMENT_SIZE;
+};
+
+// Format size limit for error messages
+const formatSizeLimit = (contentType: string): string => {
+  const sizeInMB = getMaxFileSize(contentType) / (1024 * 1024);
+  const fileType = isImageFile(contentType) ? 'images' : 'documents';
+  return `${sizeInMB}MB for ${fileType}`;
+};
 
 export async function POST(
   request: NextRequest,
@@ -27,12 +45,14 @@ export async function POST(
       }
 
       const filename = (formData.get('filename') as string) || file.name;
+      const contentType = file.type || 'application/octet-stream';
 
-      // Check file size
-      if (file.size > MAX_FILE_SIZE) {
+      // Check file size based on type
+      const maxSize = getMaxFileSize(contentType);
+      if (file.size > maxSize) {
         return new Response(
           JSON.stringify({
-            error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`
+            error: `File too large. Maximum size is ${formatSizeLimit(contentType)}`
           }),
           {
             status: 413, // Payload Too Large
@@ -114,12 +134,14 @@ export async function POST(
       }
 
       const fileBuffer = await fileResp.arrayBuffer();
+      const contentType = fileResp.headers.get('content-type') || 'application/octet-stream';
 
-      // Check file size
-      if (fileBuffer.byteLength > MAX_FILE_SIZE) {
+      // Check file size based on type
+      const maxSize = getMaxFileSize(contentType);
+      if (fileBuffer.byteLength > maxSize) {
         return new Response(
           JSON.stringify({
-            error: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`
+            error: `File too large. Maximum size is ${formatSizeLimit(contentType)}`
           }),
           {
             status: 413, // Payload Too Large
@@ -127,8 +149,6 @@ export async function POST(
           }
         );
       }
-
-      const contentType = fileResp.headers.get('content-type') || 'application/octet-stream';
 
       // Upload to workspace/file-uploads directory using the PUT endpoint
       // Retry logic: if backend returns 202 (content service starting), retry up to 3 times

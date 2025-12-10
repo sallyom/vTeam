@@ -16,13 +16,25 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
-// Maximum file size: 10MB (matches backend limit)
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+// Maximum file sizes based on type
+const MAX_DOCUMENT_SIZE = 8 * 1024 * 1024; // 8MB for documents
+const MAX_IMAGE_SIZE = 1 * 1024 * 1024; // 1MB for images
+
+// Determine if a file is an image based on MIME type
+const isImageFile = (fileType: string): boolean => {
+  return fileType.startsWith('image/');
+};
+
+// Get the appropriate max file size based on file type
+const getMaxFileSize = (fileType: string): number => {
+  return isImageFile(fileType) ? MAX_IMAGE_SIZE : MAX_DOCUMENT_SIZE;
+};
 
 const formatFileSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 };
 
 type UploadFileModalProps = {
@@ -107,10 +119,14 @@ export function UploadFileModal({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Check file size
-      if (file.size > MAX_FILE_SIZE) {
+      const fileType = file.type || 'application/octet-stream';
+      const maxSize = getMaxFileSize(fileType);
+      const fileTypeLabel = isImageFile(fileType) ? 'images' : 'documents';
+
+      // Check file size based on type
+      if (file.size > maxSize) {
         setFileSizeError(
-          `File size (${formatFileSize(file.size)}) exceeds maximum allowed size of ${formatFileSize(MAX_FILE_SIZE)}`
+          `File size (${formatFileSize(file.size)}) exceeds maximum allowed size of ${formatFileSize(maxSize)} for ${fileTypeLabel}`
         );
         setSelectedFile(null);
         if (fileInputRef.current) {
@@ -137,7 +153,7 @@ export function UploadFileModal({
           <DialogTitle>Upload File</DialogTitle>
           <DialogDescription>
             Upload files to your workspace from your local machine or a URL. Files will be available in
-            the file-uploads folder. Maximum file size: {formatFileSize(MAX_FILE_SIZE)}.
+            the file-uploads folder. Maximum file size: {formatFileSize(MAX_IMAGE_SIZE)} for images, {formatFileSize(MAX_DOCUMENT_SIZE)} for documents.
           </DialogDescription>
         </DialogHeader>
 
