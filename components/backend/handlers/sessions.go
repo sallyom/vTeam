@@ -2451,14 +2451,59 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 
 	// Try temp service first (for completed sessions), then regular service
 	serviceName := fmt.Sprintf("temp-content-%s", session)
-	reqK8s, _ := GetK8sClientsForRequest(c)
+	reqK8s, reqDyn := GetK8sClientsForRequest(c)
+	serviceFound := false
+
 	if reqK8s != nil {
 		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
-			// Temp service doesn't exist, use regular service
+			// Temp service doesn't exist, try regular service
 			serviceName = fmt.Sprintf("ambient-content-%s", session)
+			if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+				// Neither service exists - need to spawn temp content pod
+				log.Printf("PutSessionWorkspaceFile: No content service found for session %s, requesting temp pod", session)
+				serviceFound = false
+			} else {
+				serviceFound = true
+			}
+		} else {
+			serviceFound = true
 		}
 	} else {
 		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	// If no service exists, request temp content pod and return accepted status
+	if !serviceFound && reqDyn != nil {
+		gvr := GetAgenticSessionV1Alpha1Resource()
+		item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), session, v1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get session"})
+			return
+		}
+
+		// Request temp content pod via annotation
+		annotations := item.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		annotations["ambient-code.io/temp-content-requested"] = "true"
+		annotations["ambient-code.io/temp-content-last-accessed"] = now
+		item.SetAnnotations(annotations)
+
+		if _, err := reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), item, v1.UpdateOptions{}); err != nil {
+			log.Printf("PutSessionWorkspaceFile: Failed to request temp pod: %v", err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Content service not available, please try again in a few seconds"})
+			return
+		}
+
+		log.Printf("PutSessionWorkspaceFile: Requested temp content pod for session %s", session)
+		c.JSON(http.StatusAccepted, gin.H{"message": "Content service starting, please retry upload in a few seconds"})
+		return
 	}
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080", serviceName, project)
