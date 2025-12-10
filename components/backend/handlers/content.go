@@ -837,3 +837,42 @@ func ContentGitListBranches(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"branches": branches})
 }
+
+// ContentDelete handles DELETE /content/delete when running in CONTENT_SERVICE_MODE
+func ContentDelete(c *gin.Context) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		log.Printf("ContentDelete: bind JSON failed: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	log.Printf("ContentDelete: path=%q StateBaseDir=%q", req.Path, StateBaseDir)
+
+	path := filepath.Clean("/" + strings.TrimSpace(req.Path))
+	if path == "/" || strings.Contains(path, "..") {
+		log.Printf("ContentDelete: invalid path rejected: path=%q", path)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
+		return
+	}
+	abs := filepath.Join(StateBaseDir, path)
+	log.Printf("ContentDelete: absolute path=%q", abs)
+
+	// Check if file exists
+	if _, err := os.Stat(abs); os.IsNotExist(err) {
+		log.Printf("ContentDelete: file not found: %q", abs)
+		c.JSON(http.StatusNotFound, gin.H{"error": "file not found"})
+		return
+	}
+
+	// Delete the file
+	if err := os.Remove(abs); err != nil {
+		log.Printf("ContentDelete: delete failed for %q: %v", abs, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete file"})
+		return
+	}
+
+	log.Printf("ContentDelete: successfully deleted %q", abs)
+	c.JSON(http.StatusOK, gin.H{"message": "file deleted successfully"})
+}

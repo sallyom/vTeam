@@ -2632,6 +2632,91 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), rb)
 }
 
+// DeleteSessionWorkspaceFile deletes a file via content service.
+func DeleteSessionWorkspaceFile(c *gin.Context) {
+	// Get project from context (set by middleware) or param
+	project := c.GetString("project")
+	if project == "" {
+		project = c.Param("projectName")
+	}
+	session := c.Param("sessionName")
+
+	if project == "" {
+		log.Printf("DeleteSessionWorkspaceFile: project is empty, session=%s", session)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Project namespace required"})
+		return
+	}
+	sub := strings.TrimPrefix(c.Param("path"), "/")
+	absPath := "/sessions/" + session + "/workspace/" + sub
+	token := c.GetHeader("Authorization")
+	if strings.TrimSpace(token) == "" {
+		token = c.GetHeader("X-Forwarded-Access-Token")
+	}
+
+	// Try temp service first, then regular service
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	reqK8s, _ := GetK8sClientsForRequest(c)
+	serviceFound := false
+
+	if reqK8s != nil {
+		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+			// Temp service doesn't exist, try regular service
+			serviceName = fmt.Sprintf("ambient-content-%s", session)
+			if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+				log.Printf("DeleteSessionWorkspaceFile: No content service found for session %s", session)
+				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Content service not available"})
+				return
+			} else {
+				serviceFound = true
+			}
+		} else {
+			serviceFound = true
+		}
+	} else {
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
+	}
+
+	if !serviceFound {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Content service not available"})
+		return
+	}
+
+	endpoint := fmt.Sprintf("http://%s.%s.svc:8080", serviceName, project)
+	log.Printf("DeleteSessionWorkspaceFile: using service %s for session %s, path=%s", serviceName, session, absPath)
+
+	// Use DELETE request with path in body
+	wreq := struct {
+		Path string `json:"path"`
+	}{Path: absPath}
+	b, _ := json.Marshal(wreq)
+	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodDelete, endpoint+"/content/delete", strings.NewReader(string(b)))
+	if strings.TrimSpace(token) != "" {
+		req.Header.Set("Authorization", token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	// Always return JSON for consistency with frontend expectations
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		c.JSON(http.StatusOK, gin.H{"message": "File deleted successfully"})
+	} else {
+		rb, _ := io.ReadAll(resp.Body)
+		// Try to parse error from content service, otherwise use generic message
+		var errResp map[string]interface{}
+		if err := json.Unmarshal(rb, &errResp); err == nil {
+			c.JSON(resp.StatusCode, errResp)
+		} else {
+			c.JSON(resp.StatusCode, gin.H{"error": "Failed to delete file"})
+		}
+	}
+}
+
 // PushSessionRepo proxies a push request for a given session repo to the per-job content service.
 // POST /api/projects/:projectName/agentic-sessions/:sessionName/github/push
 // Body: { repoIndex: number, commitMessage?: string, branch?: string }

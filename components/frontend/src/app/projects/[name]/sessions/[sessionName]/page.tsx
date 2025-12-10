@@ -294,12 +294,41 @@ export default function ProjectSessionDetailPage({
     onSuccess: async (data) => {
       successToast(`File "${data.filename}" uploaded successfully`);
       // Refresh workspace to show uploaded file
+      await refetchFileUploadsList();
       await refetchDirectoryFiles();
       await refetchArtifactsFiles();
       setUploadModalOpen(false);
     },
     onError: (error: Error) => {
       errorToast(error.message || "Failed to upload file");
+    },
+  });
+
+  // File removal mutation
+  const removeFileMutation = useMutation({
+    mutationFn: async (fileName: string) => {
+      const response = await fetch(
+        `/api/projects/${projectName}/agentic-sessions/${sessionName}/workspace/file-uploads/${fileName}`,
+        {
+          method: "DELETE",
+        },
+      );
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || "Failed to remove file");
+      }
+
+      return response.json();
+    },
+    onSuccess: async () => {
+      successToast("File removed successfully");
+      // Refresh file lists
+      await refetchFileUploadsList();
+      await refetchDirectoryFiles();
+    },
+    onError: (error: Error) => {
+      errorToast(error.message || "Failed to remove file");
     },
   });
 
@@ -370,6 +399,15 @@ export default function ProjectSessionDetailPage({
         ? `artifacts/${artifactsOps.currentSubPath}`
         : "artifacts",
       { enabled: openAccordionItems.includes("artifacts") },
+    );
+
+  // File uploads list (for Context accordion)
+  const { data: fileUploadsList = [], refetch: refetchFileUploadsList } =
+    useWorkspaceList(
+      projectName,
+      sessionName,
+      "file-uploads",
+      { enabled: openAccordionItems.includes("context") },
     );
 
   // Track if we've already initialized from session
@@ -810,9 +848,17 @@ export default function ProjectSessionDetailPage({
 
                     <RepositoriesAccordion
                       repositories={session?.spec?.repos || []}
+                      uploadedFiles={fileUploadsList.map((f) => ({
+                        name: f.name,
+                        path: f.path,
+                        size: f.size,
+                      }))}
                       onAddRepository={() => setContextModalOpen(true)}
                       onRemoveRepository={(repoName) =>
                         removeRepoMutation.mutate(repoName)
+                      }
+                      onRemoveFile={(fileName) =>
+                        removeFileMutation.mutate(fileName)
                       }
                     />
 
