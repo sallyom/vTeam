@@ -821,7 +821,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		// This is critical because ReadWriteOnce PVCs cannot be mounted by multiple pods
 		// With gracePeriod=0, this should complete in 1-3 seconds
 		log.Printf("[PVCConflict] Waiting for temp pod %s to fully terminate...", tempPodName)
-		maxWaitSeconds := 10 // Reduced from 30 since we're force-deleting
+		maxWaitSeconds := 10                    // Reduced from 30 since we're force-deleting
 		for i := 0; i < maxWaitSeconds*4; i++ { // Poll 4x per second for faster detection
 			_, err := config.K8sClient.CoreV1().Pods(sessionNamespace).Get(context.TODO(), tempPodName, v1.GetOptions{})
 			if errors.IsNotFound(err) {

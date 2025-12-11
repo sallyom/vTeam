@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"ambient-code-backend/git"
+	"ambient-code-backend/pathutil"
 
 	"github.com/gin-gonic/gin"
 )
@@ -61,7 +62,7 @@ func ContentGitPush(c *gin.Context) {
 	}
 
 	// Basic safety: repoDir must be under StateBaseDir
-	if !strings.HasPrefix(repoDir+string(os.PathSeparator), StateBaseDir+string(os.PathSeparator)) && repoDir != StateBaseDir {
+	if !pathutil.IsPathWithinBase(repoDir, StateBaseDir) && repoDir != StateBaseDir {
 		log.Printf("contentGitPush: invalid repoPath resolved=%q stateBaseDir=%q", repoDir, StateBaseDir)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repoPath"})
 		return
@@ -101,7 +102,7 @@ func ContentGitAbandon(c *gin.Context) {
 		repoDir = StateBaseDir
 	}
 
-	if !strings.HasPrefix(repoDir+string(os.PathSeparator), StateBaseDir+string(os.PathSeparator)) && repoDir != StateBaseDir {
+	if !pathutil.IsPathWithinBase(repoDir, StateBaseDir) && repoDir != StateBaseDir {
 		log.Printf("contentGitAbandon: invalid repoPath resolved=%q base=%q", repoDir, StateBaseDir)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repoPath"})
 		return
@@ -126,7 +127,7 @@ func ContentGitDiff(c *gin.Context) {
 	}
 
 	repoDir := filepath.Clean(filepath.Join(StateBaseDir, repoPath))
-	if !strings.HasPrefix(repoDir+string(os.PathSeparator), StateBaseDir+string(os.PathSeparator)) && repoDir != StateBaseDir {
+	if !pathutil.IsPathWithinBase(repoDir, StateBaseDir) && repoDir != StateBaseDir {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repoPath"})
 		return
 	}
@@ -161,7 +162,7 @@ func ContentGitStatus(c *gin.Context) {
 	path := filepath.Clean("/" + strings.TrimSpace(c.Query("path")))
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
@@ -226,7 +227,7 @@ func ContentGitConfigureRemote(c *gin.Context) {
 	path := filepath.Clean("/" + body.Path)
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
@@ -303,7 +304,7 @@ func ContentGitSync(c *gin.Context) {
 	path := filepath.Clean("/" + body.Path)
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
@@ -345,7 +346,7 @@ func ContentWrite(c *gin.Context) {
 	path := filepath.Clean("/" + strings.TrimSpace(req.Path))
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		log.Printf("ContentWrite: path traversal attempt rejected: path=%q abs=%q", path, abs)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
@@ -386,7 +387,7 @@ func ContentRead(c *gin.Context) {
 
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		log.Printf("ContentRead: path traversal attempt rejected: path=%q abs=%q", path, abs)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
@@ -416,7 +417,7 @@ func ContentList(c *gin.Context) {
 
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		log.Printf("ContentList: path traversal attempt rejected: path=%q abs=%q", path, abs)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
@@ -675,7 +676,7 @@ func ContentGitMergeStatus(c *gin.Context) {
 
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
@@ -723,7 +724,7 @@ func ContentGitPull(c *gin.Context) {
 	path := filepath.Clean("/" + body.Path)
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
@@ -758,7 +759,7 @@ func ContentGitPushToBranch(c *gin.Context) {
 	path := filepath.Clean("/" + body.Path)
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
@@ -796,7 +797,7 @@ func ContentGitCreateBranch(c *gin.Context) {
 	path := filepath.Clean("/" + body.Path)
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
@@ -821,7 +822,7 @@ func ContentGitListBranches(c *gin.Context) {
 
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return
 	}
@@ -850,7 +851,7 @@ func ContentDelete(c *gin.Context) {
 	path := filepath.Clean("/" + strings.TrimSpace(req.Path))
 	abs := filepath.Join(StateBaseDir, path)
 	// Verify abs is within StateBaseDir to prevent path traversal
-	if !strings.HasPrefix(abs, filepath.Clean(StateBaseDir)+string(os.PathSeparator)) {
+	if !pathutil.IsPathWithinBase(abs, StateBaseDir) {
 		log.Printf("ContentDelete: path traversal attempt rejected: path=%q abs=%q", path, abs)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid path"})
 		return

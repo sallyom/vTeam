@@ -1892,18 +1892,43 @@ class ClaudeCodeAdapter:
             prompt += f"Working directory: workflows/{workflow_name}/\n"
             prompt += "This directory contains workflow logic and automation scripts.\n\n"
 
+        # File uploads directory - PRIORITIZE THIS for user context
+        prompt += "## User-Uploaded Files (IMPORTANT)\n"
+        prompt += "Location: file-uploads/\n"
+        prompt += "Purpose: User-uploaded context files (screenshots, documents, images, PDFs, specs, designs).\n"
+        prompt += "ALWAYS check this directory when starting a new task - it often contains critical context.\n"
+        prompt += "Files here were uploaded by the user via the UI and are available for you to read and reference.\n"
+
+        # List existing files if directory exists
+        file_uploads_path = Path(self.context.workspace_path) / "file-uploads"
+        if file_uploads_path.exists() and file_uploads_path.is_dir():
+            try:
+                files = sorted([f.name for f in file_uploads_path.iterdir() if f.is_file()])
+                if files:
+                    prompt += f"\nCurrently uploaded files ({len(files)}):\n"
+                    for filename in files:
+                        prompt += f"  - {filename}\n"
+                    prompt += "READ THESE FILES if they're relevant to the user's task!\n"
+                else:
+                    prompt += "\nNo files currently uploaded.\n"
+            except Exception as e:
+                logging.warning(f"Failed to list file-uploads directory: {e}")
+                prompt += "\n(Unable to list uploaded files)\n"
+        else:
+            prompt += "\nNo files currently uploaded.\n"
+
+        prompt += "\nCommon use cases:\n"
+        prompt += "  - Screenshots showing UI issues or design mockups\n"
+        prompt += "  - Specification documents and requirements\n"
+        prompt += "  - Reference images or diagrams\n"
+        prompt += "  - Error logs or debug output\n"
+        prompt += "This directory persists across sessions - check it proactively when unclear about task context.\n\n"
+
         # Artifacts directory
         prompt += "## Shared Artifacts Directory\n"
         prompt += f"Location: {artifacts_path}\n"
         prompt += "Purpose: Create all output artifacts (documents, specs, reports) here.\n"
         prompt += "This directory persists across workflows and has its own git remote.\n\n"
-
-        # File uploads directory
-        prompt += "## Uploaded Files Directory\n"
-        prompt += "Location: file-uploads/\n"
-        prompt += "Purpose: User-uploaded files (documents, images, PDFs, specs) for context.\n"
-        prompt += "These files are uploaded by users via the UI and are available for you to read and reference.\n"
-        prompt += "This directory persists across sessions.\n\n"
 
         # Available repos
         if repos_cfg:

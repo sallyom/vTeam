@@ -17,8 +17,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 // Maximum file sizes based on type
-const MAX_DOCUMENT_SIZE = 8 * 1024 * 1024; // 8MB for documents
-const MAX_IMAGE_SIZE = 1 * 1024 * 1024; // 1MB for images
+// Documents (text files): 700KB limit - no base64 encoding overhead
+// Images: 3MB upload limit - realistic compression to 350KB target
+const MAX_DOCUMENT_SIZE = 700 * 1024; // 700KB for documents
+const MAX_IMAGE_SIZE = 3 * 1024 * 1024; // 3MB for images (server will compress to 350KB)
 
 // Determine if a file is an image based on MIME type
 const isImageFile = (fileType: string): boolean => {

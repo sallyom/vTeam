@@ -11,12 +11,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"ambient-code-backend/git"
+	"ambient-code-backend/pathutil"
 	"ambient-code-backend/types"
 
 	"github.com/gin-gonic/gin"
@@ -1564,6 +1566,12 @@ func GetWorkflowMetadata(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"commands": []interface{}{}, "agents": []interface{}{}})
 		return
 	}
+
+	// Log if content service returned an error
+	if resp.StatusCode >= 400 {
+		log.Printf("GetWorkflowMetadata: content service returned error status %d: %s", resp.StatusCode, string(b))
+	}
+
 	c.Data(resp.StatusCode, "application/json", b)
 }
 
@@ -2427,6 +2435,11 @@ func ListSessionWorkspace(c *gin.Context) {
 		return
 	}
 
+	// Log if content service returned an error (other than 404 which is handled below)
+	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
+		log.Printf("ListSessionWorkspace: content service returned error status %d: %s", resp.StatusCode, string(b))
+	}
+
 	// If content service returns 404, check if it's because workspace doesn't exist yet
 	if resp.StatusCode == http.StatusNotFound {
 		log.Printf("ListSessionWorkspace: workspace not found (may not be created yet by runner)")
@@ -2495,6 +2508,12 @@ func GetSessionWorkspaceFile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file from content service"})
 		return
 	}
+
+	// Log if content service returned an error
+	if resp.StatusCode >= 400 {
+		log.Printf("GetSessionWorkspaceFile: content service returned error status %d for path %s", resp.StatusCode, sub)
+	}
+
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), b)
 }
 
@@ -2512,23 +2531,38 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Project namespace required"})
 		return
 	}
+
+	// Get user-scoped K8s clients and validate authentication IMMEDIATELY
+	reqK8s, reqDyn := GetK8sClientsForRequest(c)
+	if reqK8s == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing authentication token"})
+		c.Abort()
+		return
+	}
+
+	// Validate and sanitize path to prevent directory traversal
+	// Use robust path validation that works across platforms
 	sub := strings.TrimPrefix(c.Param("path"), "/")
-	absPath := "/sessions/" + session + "/workspace/" + sub
+	workspaceBase := "/sessions/" + session + "/workspace"
+
+	// Construct absolute path using filepath.Join for proper path handling
+	absPath := filepath.Join(workspaceBase, sub)
+
+	// Use robust path validation from pathutil package
+	// This is more secure than manual string checks and works across platforms
+	if !pathutil.IsPathWithinBase(absPath, workspaceBase) {
+		log.Printf("PutSessionWorkspaceFile: path traversal attempt detected - path=%q escapes workspace=%q", absPath, workspaceBase)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path: must be within workspace directory"})
+		return
+	}
+
+	// Convert to forward slashes for content service (expects POSIX paths)
+	// filepath.Join may use backslashes on Windows, but content service always uses forward slashes
+	absPath = filepath.ToSlash(absPath)
+
 	token := c.GetHeader("Authorization")
 	if strings.TrimSpace(token) == "" {
 		token = c.GetHeader("X-Forwarded-Access-Token")
-	}
-
-	// Try temp service first (for completed sessions), then regular service
-	serviceName := fmt.Sprintf("temp-content-%s", session)
-	reqK8s, reqDyn := GetK8sClientsForRequest(c)
-	serviceFound := false
-
-	// Check if user has valid auth before checking services or spawning temp pods
-	// This prevents unauthenticated requests from triggering resource creation
-	if reqK8s == nil || reqDyn == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing authentication token"})
-		return
 	}
 
 	// RBAC check: verify user has update permission on agenticsessions (file operations modify session state)
@@ -2553,7 +2587,10 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 		return
 	}
 
-	// reqK8s and reqDyn are guaranteed non-nil after auth check above
+	// Try temp service first (for completed sessions), then regular service
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	serviceFound := false
+
 	if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
 		// Temp service doesn't exist, try regular service
 		serviceName = fmt.Sprintf("ambient-content-%s", session)
@@ -2572,7 +2609,7 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 	// reqDyn is guaranteed non-nil after auth check above
 	if !serviceFound {
 		gvr := GetAgenticSessionV1Alpha1Resource()
-		item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), session, v1.GetOptions{})
+		item, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), session, v1.GetOptions{})
 		if err != nil {
 			if errors.IsNotFound(err) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
@@ -2582,8 +2619,15 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 			return
 		}
 
-		// Request temp content pod via annotation
+		// Check if temp content was already requested (avoid duplicate pod creation)
 		annotations := item.GetAnnotations()
+		if annotations != nil && annotations["ambient-code.io/temp-content-requested"] == "true" {
+			log.Printf("PutSessionWorkspaceFile: Temp content already requested for session %s", session)
+			c.JSON(http.StatusAccepted, gin.H{"message": "Content service starting, please retry upload in a few seconds"})
+			return
+		}
+
+		// Request temp content pod via annotation
 		if annotations == nil {
 			annotations = make(map[string]string)
 		}
@@ -2592,7 +2636,14 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 		annotations["ambient-code.io/temp-content-last-accessed"] = now
 		item.SetAnnotations(annotations)
 
-		if _, err := reqDyn.Resource(gvr).Namespace(project).Update(context.TODO(), item, v1.UpdateOptions{}); err != nil {
+		// Use optimistic locking - if resource was modified between Get and Update, K8s returns conflict
+		if _, err := reqDyn.Resource(gvr).Namespace(project).Update(c.Request.Context(), item, v1.UpdateOptions{}); err != nil {
+			if errors.IsConflict(err) {
+				// Another request updated the resource - likely also requested temp pod
+				log.Printf("PutSessionWorkspaceFile: Conflict updating session %s (concurrent request), treating as already requested", session)
+				c.JSON(http.StatusAccepted, gin.H{"message": "Content service starting, please retry upload in a few seconds"})
+				return
+			}
 			log.Printf("PutSessionWorkspaceFile: Failed to request temp pod: %v", err)
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Content service not available, please try again in a few seconds"})
 			return
@@ -2614,7 +2665,7 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 
 	// Detect if content is binary and encode accordingly
 	encoding := "utf8"
-	content := string(payload)
+	var content string
 	contentType := c.GetHeader("Content-Type")
 
 	// If no Content-Type header, detect from payload
@@ -2624,12 +2675,17 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 
 	// Use base64 for binary content types or if content isn't valid UTF-8
 	// Check comprehensive list of binary MIME types and UTF-8 validity
+	// IMPORTANT: Validate UTF-8 BEFORE converting to string
 	isBinary := isBinaryContentType(contentType) || !utf8.Valid(payload)
 
 	if isBinary {
 		encoding = "base64"
 		content = base64.StdEncoding.EncodeToString(payload)
-		log.Printf("PutSessionWorkspaceFile: detected binary content, using base64 encoding (contentType=%s, size=%d)", contentType, len(payload))
+		// Don't log user-controlled strings (contentType header) to prevent log injection
+		log.Printf("PutSessionWorkspaceFile: detected binary content, using base64 encoding (size=%d, contentTypeLen=%d)", len(payload), len(contentType))
+	} else {
+		// Only convert to string after validating UTF-8
+		content = string(payload)
 	}
 
 	wreq := struct {
@@ -2666,6 +2722,12 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
 		return
 	}
+
+	// Log if content service returned an error
+	if resp.StatusCode >= 400 {
+		log.Printf("PutSessionWorkspaceFile: content service returned error status %d for path %s: %s", resp.StatusCode, sub, string(rb))
+	}
+
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), rb)
 }
 
@@ -2683,23 +2745,50 @@ func DeleteSessionWorkspaceFile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Project namespace required"})
 		return
 	}
+
+	// Get user-scoped K8s clients and validate authentication IMMEDIATELY
+	reqK8s, reqDyn := GetK8sClientsForRequest(c)
+	if reqK8s == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing authentication token"})
+		c.Abort()
+		return
+	}
+
+	// Verify session exists using reqDyn before RBAC check to prevent session enumeration
+	gvr := GetAgenticSessionV1Alpha1Resource()
+	if _, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), session, v1.GetOptions{}); err != nil {
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		log.Printf("DeleteSessionWorkspaceFile: Failed to verify session existence: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify session"})
+		return
+	}
+
+	// Validate and sanitize path to prevent directory traversal
+	// Use robust path validation that works across platforms
 	sub := strings.TrimPrefix(c.Param("path"), "/")
-	absPath := "/sessions/" + session + "/workspace/" + sub
+	workspaceBase := "/sessions/" + session + "/workspace"
+
+	// Construct absolute path using filepath.Join for proper path handling
+	absPath := filepath.Join(workspaceBase, sub)
+
+	// Use robust path validation from pathutil package
+	// This is more secure than manual string checks and works across platforms
+	if !pathutil.IsPathWithinBase(absPath, workspaceBase) {
+		log.Printf("DeleteSessionWorkspaceFile: path traversal attempt detected - path=%q escapes workspace=%q", absPath, workspaceBase)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid path: must be within workspace directory"})
+		return
+	}
+
+	// Convert to forward slashes for content service (expects POSIX paths)
+	// filepath.Join may use backslashes on Windows, but content service always uses forward slashes
+	absPath = filepath.ToSlash(absPath)
+
 	token := c.GetHeader("Authorization")
 	if strings.TrimSpace(token) == "" {
 		token = c.GetHeader("X-Forwarded-Access-Token")
-	}
-
-	// Try temp service first, then regular service
-	serviceName := fmt.Sprintf("temp-content-%s", session)
-	reqK8s, reqDyn := GetK8sClientsForRequest(c)
-	serviceFound := false
-
-	// Check if user has valid auth before checking services
-	// This prevents unauthenticated requests from accessing workspace files
-	if reqK8s == nil || reqDyn == nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing authentication token"})
-		return
 	}
 
 	// RBAC check: verify user has update permission on agenticsessions (file operations modify session state)
@@ -2724,7 +2813,10 @@ func DeleteSessionWorkspaceFile(c *gin.Context) {
 		return
 	}
 
-	// reqK8s is guaranteed non-nil after auth check above
+	// Try temp service first, then regular service
+	serviceName := fmt.Sprintf("temp-content-%s", session)
+	serviceFound := false
+
 	if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
 		// Temp service doesn't exist, try regular service
 		serviceName = fmt.Sprintf("ambient-content-%s", session)
