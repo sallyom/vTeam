@@ -60,6 +60,7 @@ export function UploadFileModal({
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isStartingService, setIsStartingService] = useState(false);
   const [fileSizeError, setFileSizeError] = useState<string | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async () => {
@@ -109,6 +110,7 @@ export function UploadFileModal({
     setSelectedFile(null);
     setIsStartingService(false);
     setFileSizeError(null);
+    setIsValidating(false);
     setActiveTab("local");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -116,9 +118,17 @@ export function UploadFileModal({
     onOpenChange(false);
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    // Show loading state while validating
+    setIsValidating(true);
+    setFileSizeError(null);
+    setSelectedFile(null);
+
+    // Use setTimeout to allow UI to update with loading state
+    setTimeout(() => {
       const fileType = file.type || 'application/octet-stream';
       const maxSize = getMaxFileSize(fileType);
       const fileTypeLabel = isImageFile(fileType) ? 'images' : 'documents';
@@ -136,11 +146,12 @@ export function UploadFileModal({
         setFileSizeError(null);
         setSelectedFile(file);
       }
-    }
+      setIsValidating(false);
+    }, 0);
   };
 
   const isSubmitDisabled = () => {
-    if (isLoading) return true;
+    if (isLoading || isValidating) return true;
     if (activeTab === "local") return !selectedFile;
     if (activeTab === "url") return !fileUrl.trim();
     return true;
@@ -163,6 +174,15 @@ export function UploadFileModal({
           </Alert>
         )}
 
+        {isValidating && (
+          <Alert>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <AlertDescription>
+              Validating file...
+            </AlertDescription>
+          </Alert>
+        )}
+
         {isStartingService && (
           <Alert>
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -181,11 +201,11 @@ export function UploadFileModal({
           className="w-full"
         >
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="local">
+            <TabsTrigger value="local" disabled={isLoading || isValidating}>
               <FileUp className="h-4 w-4 mr-2" />
               Local File
             </TabsTrigger>
-            <TabsTrigger value="url">
+            <TabsTrigger value="url" disabled={isLoading || isValidating}>
               <Link className="h-4 w-4 mr-2" />
               From URL
             </TabsTrigger>
@@ -199,9 +219,9 @@ export function UploadFileModal({
                 ref={fileInputRef}
                 type="file"
                 onChange={handleFileSelect}
-                disabled={isLoading}
+                disabled={isLoading || isValidating}
               />
-              {selectedFile && (
+              {selectedFile && !isValidating && (
                 <p className="text-sm text-muted-foreground">
                   Selected: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
                 </p>
@@ -218,7 +238,7 @@ export function UploadFileModal({
                 placeholder="https://example.com/file.pdf"
                 value={fileUrl}
                 onChange={(e) => setFileUrl(e.target.value)}
-                disabled={isLoading}
+                disabled={isLoading || isValidating}
               />
               <p className="text-sm text-muted-foreground">
                 The file will be downloaded and uploaded to your workspace
@@ -228,7 +248,7 @@ export function UploadFileModal({
         </Tabs>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel} disabled={isLoading}>
+          <Button variant="outline" onClick={handleCancel} disabled={isLoading || isValidating}>
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={isSubmitDisabled()}>
@@ -236,6 +256,11 @@ export function UploadFileModal({
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 Uploading...
+              </>
+            ) : isValidating ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Validating...
               </>
             ) : (
               "Upload"

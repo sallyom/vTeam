@@ -44,6 +44,46 @@ var (
 
 const runnerTokenRefreshedAtAnnotation = "ambient-code.io/token-refreshed-at"
 
+// isBinaryContentType checks if a MIME type represents binary content that should be base64 encoded.
+// This includes images, archives, documents, executables, and other non-text formats.
+func isBinaryContentType(contentType string) bool {
+	// Comprehensive list of binary MIME type prefixes and exact matches
+	binaryPrefixes := []string{
+		"image/",                   // All image formats (jpeg, png, gif, webp, etc.)
+		"audio/",                   // All audio formats (mp3, wav, ogg, etc.)
+		"video/",                   // All video formats (mp4, webm, avi, etc.)
+		"font/",                    // Font files (woff, woff2, ttf, etc.)
+		"application/octet-stream", // Generic binary
+		"application/pdf",          // PDF documents
+		"application/zip",          // ZIP archives
+		"application/x-",           // Many binary formats (x-7z-compressed, x-tar, x-gzip, etc.)
+		"application/vnd.",         // Vendor-specific formats (MS Office, etc.)
+	}
+
+	// Check exact matches for common binary types not covered by prefixes
+	binaryExact := []string{
+		"application/gzip",
+		"application/x-bzip2",
+		"application/java-archive", // JAR files
+		"application/msword",       // Legacy .doc
+		"application/rtf",
+	}
+
+	for _, prefix := range binaryPrefixes {
+		if strings.HasPrefix(contentType, prefix) {
+			return true
+		}
+	}
+
+	for _, exact := range binaryExact {
+		if contentType == exact {
+			return true
+		}
+	}
+
+	return false
+}
+
 // parseSpec parses AgenticSessionSpec with v1alpha1 fields
 func parseSpec(spec map[string]interface{}) types.AgenticSessionSpec {
 	result := types.AgenticSessionSpec{}
@@ -820,7 +860,10 @@ func provisionRunnerTokenForSession(c *gin.Context, reqK8s *kubernetes.Clientset
 			},
 		},
 	}
-	b, _ := json.Marshal(patch)
+	b, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("marshal patch: %w", err)
+	}
 	if _, err := reqDyn.Resource(gvr).Namespace(project).Patch(c.Request.Context(), obj.GetName(), ktypes.MergePatchType, b, v1.PatchOptions{}); err != nil {
 		return fmt.Errorf("annotate AgenticSession: %w", err)
 	}
@@ -1515,7 +1558,12 @@ func GetWorkflowMetadata(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	b, _ := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("GetWorkflowMetadata: failed to read response body: %v", err)
+		c.JSON(http.StatusOK, gin.H{"commands": []interface{}{}, "agents": []interface{}{}})
+		return
+	}
 	c.Data(resp.StatusCode, "application/json", b)
 }
 
@@ -2354,7 +2402,12 @@ func ListSessionWorkspace(c *gin.Context) {
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080", serviceName, project)
 	u := fmt.Sprintf("%s/content/list?path=%s", endpoint, url.QueryEscape(absPath))
 	log.Printf("ListSessionWorkspace: project=%s session=%s endpoint=%s", project, session, endpoint)
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, u, nil)
+	if err != nil {
+		log.Printf("ListSessionWorkspace: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	if strings.TrimSpace(token) != "" {
 		req.Header.Set("Authorization", token)
 	}
@@ -2367,7 +2420,12 @@ func ListSessionWorkspace(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("ListSessionWorkspace: failed to read response body: %v", err)
+		c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		return
+	}
 
 	// If content service returns 404, check if it's because workspace doesn't exist yet
 	if resp.StatusCode == http.StatusNotFound {
@@ -2415,7 +2473,12 @@ func GetSessionWorkspaceFile(c *gin.Context) {
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080", serviceName, project)
 	u := fmt.Sprintf("%s/content/file?path=%s", endpoint, url.QueryEscape(absPath))
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, u, nil)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, u, nil)
+	if err != nil {
+		log.Printf("GetSessionWorkspaceFile: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	if strings.TrimSpace(token) != "" {
 		req.Header.Set("Authorization", token)
 	}
@@ -2426,7 +2489,12 @@ func GetSessionWorkspaceFile(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("GetSessionWorkspaceFile: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), b)
 }
 
@@ -2456,26 +2524,53 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 	reqK8s, reqDyn := GetK8sClientsForRequest(c)
 	serviceFound := false
 
-	if reqK8s != nil {
+	// Check if user has valid auth before checking services or spawning temp pods
+	// This prevents unauthenticated requests from triggering resource creation
+	if reqK8s == nil || reqDyn == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing authentication token"})
+		return
+	}
+
+	// RBAC check: verify user has update permission on agenticsessions (file operations modify session state)
+	ssar := &authzv1.SelfSubjectAccessReview{
+		Spec: authzv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Group:     "vteam.ambient-code",
+				Resource:  "agenticsessions",
+				Verb:      "update",
+				Namespace: project,
+			},
+		},
+	}
+	res, err := reqK8s.AuthorizationV1().SelfSubjectAccessReviews().Create(c.Request.Context(), ssar, v1.CreateOptions{})
+	if err != nil {
+		log.Printf("RBAC check failed for file upload in project %s: %v", project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify permissions"})
+		return
+	}
+	if !res.Status.Allowed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to modify session workspace"})
+		return
+	}
+
+	// reqK8s and reqDyn are guaranteed non-nil after auth check above
+	if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+		// Temp service doesn't exist, try regular service
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
 		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
-			// Temp service doesn't exist, try regular service
-			serviceName = fmt.Sprintf("ambient-content-%s", session)
-			if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
-				// Neither service exists - need to spawn temp content pod
-				log.Printf("PutSessionWorkspaceFile: No content service found for session %s, requesting temp pod", session)
-				serviceFound = false
-			} else {
-				serviceFound = true
-			}
+			// Neither service exists - need to spawn temp content pod
+			log.Printf("PutSessionWorkspaceFile: No content service found for session %s, requesting temp pod", session)
+			serviceFound = false
 		} else {
 			serviceFound = true
 		}
 	} else {
-		serviceName = fmt.Sprintf("ambient-content-%s", session)
+		serviceFound = true
 	}
 
 	// If no service exists, request temp content pod and return accepted status
-	if !serviceFound && reqDyn != nil {
+	// reqDyn is guaranteed non-nil after auth check above
+	if !serviceFound {
 		gvr := GetAgenticSessionV1Alpha1Resource()
 		item, err := reqDyn.Resource(gvr).Namespace(project).Get(context.TODO(), session, v1.GetOptions{})
 		if err != nil {
@@ -2510,19 +2605,26 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080", serviceName, project)
 	log.Printf("PutSessionWorkspaceFile: using service %s for session %s", serviceName, session)
-	payload, _ := io.ReadAll(c.Request.Body)
+	payload, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		log.Printf("PutSessionWorkspaceFile: failed to read request body: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read file data"})
+		return
+	}
 
 	// Detect if content is binary and encode accordingly
 	encoding := "utf8"
 	content := string(payload)
 	contentType := c.GetHeader("Content-Type")
 
+	// If no Content-Type header, detect from payload
+	if contentType == "" {
+		contentType = http.DetectContentType(payload)
+	}
+
 	// Use base64 for binary content types or if content isn't valid UTF-8
-	isBinary := strings.HasPrefix(contentType, "image/") ||
-		strings.HasPrefix(contentType, "application/octet-stream") ||
-		strings.HasPrefix(contentType, "application/pdf") ||
-		strings.HasPrefix(contentType, "application/zip") ||
-		!utf8.ValidString(string(payload))
+	// Check comprehensive list of binary MIME types and UTF-8 validity
+	isBinary := isBinaryContentType(contentType) || !utf8.Valid(payload)
 
 	if isBinary {
 		encoding = "base64"
@@ -2535,8 +2637,18 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 		Content  string `json:"content"`
 		Encoding string `json:"encoding"`
 	}{Path: absPath, Content: content, Encoding: encoding}
-	b, _ := json.Marshal(wreq)
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint+"/content/write", strings.NewReader(string(b)))
+	b, err := json.Marshal(wreq)
+	if err != nil {
+		log.Printf("PutSessionWorkspaceFile: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint+"/content/write", strings.NewReader(string(b)))
+	if err != nil {
+		log.Printf("PutSessionWorkspaceFile: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	if strings.TrimSpace(token) != "" {
 		req.Header.Set("Authorization", token)
 	}
@@ -2548,7 +2660,12 @@ func PutSessionWorkspaceFile(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	rb, _ := io.ReadAll(resp.Body)
+	rb, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("PutSessionWorkspaceFile: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), rb)
 }
 
@@ -2575,25 +2692,51 @@ func DeleteSessionWorkspaceFile(c *gin.Context) {
 
 	// Try temp service first, then regular service
 	serviceName := fmt.Sprintf("temp-content-%s", session)
-	reqK8s, _ := GetK8sClientsForRequest(c)
+	reqK8s, reqDyn := GetK8sClientsForRequest(c)
 	serviceFound := false
 
-	if reqK8s != nil {
+	// Check if user has valid auth before checking services
+	// This prevents unauthenticated requests from accessing workspace files
+	if reqK8s == nil || reqDyn == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing authentication token"})
+		return
+	}
+
+	// RBAC check: verify user has update permission on agenticsessions (file operations modify session state)
+	ssar := &authzv1.SelfSubjectAccessReview{
+		Spec: authzv1.SelfSubjectAccessReviewSpec{
+			ResourceAttributes: &authzv1.ResourceAttributes{
+				Group:     "vteam.ambient-code",
+				Resource:  "agenticsessions",
+				Verb:      "update",
+				Namespace: project,
+			},
+		},
+	}
+	res, err := reqK8s.AuthorizationV1().SelfSubjectAccessReviews().Create(c.Request.Context(), ssar, v1.CreateOptions{})
+	if err != nil {
+		log.Printf("RBAC check failed for file deletion in project %s: %v", project, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify permissions"})
+		return
+	}
+	if !res.Status.Allowed {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to modify session workspace"})
+		return
+	}
+
+	// reqK8s is guaranteed non-nil after auth check above
+	if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
+		// Temp service doesn't exist, try regular service
+		serviceName = fmt.Sprintf("ambient-content-%s", session)
 		if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
-			// Temp service doesn't exist, try regular service
-			serviceName = fmt.Sprintf("ambient-content-%s", session)
-			if _, err := reqK8s.CoreV1().Services(project).Get(c.Request.Context(), serviceName, v1.GetOptions{}); err != nil {
-				log.Printf("DeleteSessionWorkspaceFile: No content service found for session %s", session)
-				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Content service not available"})
-				return
-			} else {
-				serviceFound = true
-			}
+			log.Printf("DeleteSessionWorkspaceFile: No content service found for session %s", session)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Content service not available"})
+			return
 		} else {
 			serviceFound = true
 		}
 	} else {
-		serviceName = fmt.Sprintf("ambient-content-%s", session)
+		serviceFound = true
 	}
 
 	if !serviceFound {
@@ -2608,8 +2751,18 @@ func DeleteSessionWorkspaceFile(c *gin.Context) {
 	wreq := struct {
 		Path string `json:"path"`
 	}{Path: absPath}
-	b, _ := json.Marshal(wreq)
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodDelete, endpoint+"/content/delete", strings.NewReader(string(b)))
+	b, err := json.Marshal(wreq)
+	if err != nil {
+		log.Printf("DeleteSessionWorkspaceFile: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodDelete, endpoint+"/content/delete", strings.NewReader(string(b)))
+	if err != nil {
+		log.Printf("DeleteSessionWorkspaceFile: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	if strings.TrimSpace(token) != "" {
 		req.Header.Set("Authorization", token)
 	}
@@ -2626,7 +2779,12 @@ func DeleteSessionWorkspaceFile(c *gin.Context) {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		c.JSON(http.StatusOK, gin.H{"message": "File deleted successfully"})
 	} else {
-		rb, _ := io.ReadAll(resp.Body)
+		rb, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("DeleteSessionWorkspaceFile: failed to read error response: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file"})
+			return
+		}
 		// Try to parse error from content service, otherwise use generic message
 		var errResp map[string]interface{}
 		if err := json.Unmarshal(rb, &errResp); err == nil {
@@ -2729,8 +2887,18 @@ func PushSessionRepo(c *gin.Context) {
 		"branch":        resolvedBranch,
 		"outputRepoUrl": resolvedOutputURL,
 	}
-	b, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint+"/content/github/push", strings.NewReader(string(b)))
+	b, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("pushSessionRepo: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint+"/content/github/push", strings.NewReader(string(b)))
+	if err != nil {
+		log.Printf("pushSessionRepo: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
 	}
@@ -2776,7 +2944,12 @@ func PushSessionRepo(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("pushSessionRepo: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("pushSessionRepo: content returned status=%d body.snip=%q", resp.StatusCode, func() string {
 			s := string(bodyBytes)
@@ -2829,8 +3002,18 @@ func AbandonSessionRepo(c *gin.Context) {
 	payload := map[string]interface{}{
 		"repoPath": repoPath,
 	}
-	b, _ := json.Marshal(payload)
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint+"/content/github/abandon", strings.NewReader(string(b)))
+	b, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("abandonSessionRepo: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint+"/content/github/abandon", strings.NewReader(string(b)))
+	if err != nil {
+		log.Printf("abandonSessionRepo: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
 	}
@@ -2845,7 +3028,12 @@ func AbandonSessionRepo(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("abandonSessionRepo: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("abandonSessionRepo: content returned status=%d body=%s", resp.StatusCode, string(bodyBytes))
 		c.Data(resp.StatusCode, "application/json", bodyBytes)
@@ -2903,7 +3091,19 @@ func DiffSessionRepo(c *gin.Context) {
 		return
 	}
 	defer resp.Body.Close()
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("DiffSessionRepo: failed to read response body: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"files": gin.H{
+				"added":   0,
+				"removed": 0,
+			},
+			"total_added":   0,
+			"total_removed": 0,
+		})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
@@ -2935,7 +3135,12 @@ func GetGitStatus(c *gin.Context) {
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-status?path=%s", serviceName, project, url.QueryEscape(absPath))
 
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		log.Printf("GetGitStatus: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
 	}
@@ -2947,7 +3152,12 @@ func GetGitStatus(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("GetGitStatus: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
@@ -2990,13 +3200,23 @@ func ConfigureGitRemote(c *gin.Context) {
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-configure-remote", serviceName, project)
 
-	reqBody, _ := json.Marshal(map[string]interface{}{
+	reqBody, err := json.Marshal(map[string]interface{}{
 		"path":      absPath,
 		"remoteUrl": body.RemoteURL,
 		"branch":    body.Branch,
 	})
+	if err != nil {
+		log.Printf("ConfigureGitRemote: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
 
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	if err != nil {
+		log.Printf("ConfigureGitRemote: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
@@ -3043,7 +3263,12 @@ func ConfigureGitRemote(c *gin.Context) {
 		}
 	}
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("ConfigureGitRemote: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
@@ -3086,13 +3311,23 @@ func SynchronizeGit(c *gin.Context) {
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-sync", serviceName, project)
 
-	reqBody, _ := json.Marshal(map[string]interface{}{
+	reqBody, err := json.Marshal(map[string]interface{}{
 		"path":    absPath,
 		"message": body.Message,
 		"branch":  body.Branch,
 	})
+	if err != nil {
+		log.Printf("SynchronizeGit: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
 
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	if err != nil {
+		log.Printf("SynchronizeGit: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
@@ -3105,7 +3340,12 @@ func SynchronizeGit(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("SynchronizeGit: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
@@ -3151,7 +3391,12 @@ func GetGitMergeStatus(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("GetGitMergeStatus: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
@@ -3192,12 +3437,22 @@ func GitPullSession(c *gin.Context) {
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-pull", serviceName, project)
 
-	reqBody, _ := json.Marshal(map[string]interface{}{
+	reqBody, err := json.Marshal(map[string]interface{}{
 		"path":   absPath,
 		"branch": body.Branch,
 	})
+	if err != nil {
+		log.Printf("GitPullSession: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
 
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	if err != nil {
+		log.Printf("GitPullSession: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
@@ -3210,7 +3465,12 @@ func GitPullSession(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("GitPullSession: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
@@ -3255,13 +3515,23 @@ func GitPushSession(c *gin.Context) {
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-push", serviceName, project)
 
-	reqBody, _ := json.Marshal(map[string]interface{}{
+	reqBody, err := json.Marshal(map[string]interface{}{
 		"path":    absPath,
 		"branch":  body.Branch,
 		"message": body.Message,
 	})
+	if err != nil {
+		log.Printf("GitPushSession: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
 
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	if err != nil {
+		log.Printf("GitPushSession: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
@@ -3274,7 +3544,12 @@ func GitPushSession(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("GitPushSession: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
@@ -3312,12 +3587,22 @@ func GitCreateBranchSession(c *gin.Context) {
 
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-create-branch", serviceName, project)
 
-	reqBody, _ := json.Marshal(map[string]interface{}{
+	reqBody, err := json.Marshal(map[string]interface{}{
 		"path":       absPath,
 		"branchName": body.BranchName,
 	})
+	if err != nil {
+		log.Printf("GitCreateBranchSession: failed to marshal request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare request"})
+		return
+	}
 
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, endpoint, strings.NewReader(string(reqBody)))
+	if err != nil {
+		log.Printf("GitCreateBranchSession: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
@@ -3330,7 +3615,12 @@ func GitCreateBranchSession(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("GitCreateBranchSession: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
 
@@ -3360,7 +3650,12 @@ func GitListBranchesSession(c *gin.Context) {
 	endpoint := fmt.Sprintf("http://%s.%s.svc:8080/content/git-list-branches?path=%s",
 		serviceName, project, url.QueryEscape(absPath))
 
-	req, _ := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		log.Printf("GitListBranchesSession: failed to create HTTP request: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
 	if v := c.GetHeader("Authorization"); v != "" {
 		req.Header.Set("Authorization", v)
 	}
@@ -3372,6 +3667,11 @@ func GitListBranchesSession(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
-	bodyBytes, _ := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("GitListBranchesSession: failed to read response body: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response from content service"})
+		return
+	}
 	c.Data(resp.StatusCode, resp.Header.Get("Content-Type"), bodyBytes)
 }
