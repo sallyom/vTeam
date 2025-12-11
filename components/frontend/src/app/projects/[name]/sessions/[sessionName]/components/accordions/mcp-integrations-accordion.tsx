@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { getApiBaseUrl } from '@/services/api/client'
 
 type McpIntegrationsAccordionProps = {
   projectName: string
@@ -26,10 +27,11 @@ export function McpIntegrationsAccordion({
     setConnecting(true)
 
     try {
-      // Call backend to get OAuth URL
-      const response = await fetch(
-        `/api/projects/${projectName}/agentic-sessions/${sessionName}/oauth/google/url`
-      )
+      // Call backend to get OAuth URL using same base URL pattern as other API calls
+      const apiBase = getApiBaseUrl()
+      const apiPath = `${apiBase}/projects/${projectName}/agentic-sessions/${sessionName}/oauth/google/url`
+
+      const response = await fetch(apiPath)
 
       if (!response.ok) {
         const error = await response.json()

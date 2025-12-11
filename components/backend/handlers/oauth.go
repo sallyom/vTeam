@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 // OAuthProvider represents a generic OAuth provider configuration
@@ -63,9 +64,7 @@ func getOAuthProvider(provider string) (*OAuthProvider, error) {
 			TokenURL:     "https://oauth2.googleapis.com/token",
 			Scopes: []string{
 				"https://www.googleapis.com/auth/userinfo.email",
-				"https://www.googleapis.com/auth/drive",
 				"https://www.googleapis.com/auth/drive.file",
-				"https://www.googleapis.com/auth/drive.readonly",
 			},
 		}, nil
 
@@ -87,6 +86,59 @@ func getOAuthProvider(provider string) (*OAuthProvider, error) {
 	default:
 		return nil, fmt.Errorf("unsupported OAuth provider: %s", provider)
 	}
+}
+
+// GetOAuthURL handles GET /api/projects/:projectName/agentic-sessions/:sessionName/oauth/google/url
+// Returns the OAuth URL for the frontend to open in a popup
+func GetOAuthURL(c *gin.Context) {
+	projectName := c.Param("projectName")
+	sessionName := c.Param("sessionName")
+
+	// Get Google OAuth provider config
+	provider, err := getOAuthProvider("google")
+	if err != nil {
+		log.Printf("Failed to get OAuth provider: %v", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Google OAuth not configured"})
+		return
+	}
+
+	// Build state with session context
+	stateData := OAuthStateData{
+		Provider:    "google",
+		ProjectName: projectName,
+		SessionName: sessionName,
+		Timestamp:   time.Now().Unix(),
+	}
+
+	stateJSON, err := json.Marshal(stateData)
+	if err != nil {
+		log.Printf("Failed to marshal state: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate OAuth state"})
+		return
+	}
+
+	state := base64.StdEncoding.EncodeToString(stateJSON)
+
+	// Get backend URL for redirect URI
+	backendURL := os.Getenv("BACKEND_URL")
+	if backendURL == "" {
+		backendURL = "http://localhost:8080"
+	}
+	redirectURI := fmt.Sprintf("%s/oauth2callback", backendURL)
+
+	// Build OAuth URL
+	authURL := fmt.Sprintf(
+		"https://accounts.google.com/o/oauth2/v2/auth?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&access_type=offline&state=%s&prompt=consent",
+		provider.ClientID,
+		redirectURI,
+		strings.Join(provider.Scopes, " "),
+		state,
+	)
+
+	c.JSON(http.StatusOK, gin.H{
+		"url":   authURL,
+		"state": state,
+	})
 }
 
 // HandleOAuth2Callback handles GET /oauth2callback
@@ -147,8 +199,15 @@ func HandleOAuth2Callback(c *gin.Context) {
 		return
 	}
 
+	// Get backend URL for redirect URI (must match the one used in auth URL)
+	backendURL := os.Getenv("BACKEND_URL")
+	if backendURL == "" {
+		backendURL = "http://localhost:8080"
+	}
+	redirectURI := fmt.Sprintf("%s/oauth2callback", backendURL)
+
 	// Exchange code for token
-	tokenData, err := exchangeOAuthCode(c.Request.Context(), providerConfig, code)
+	tokenData, err := exchangeOAuthCode(c.Request.Context(), providerConfig, code, redirectURI)
 	if err != nil {
 		log.Printf("Failed to exchange OAuth code: %v", err)
 		callbackData.Error = "token_exchange_failed"
@@ -184,28 +243,28 @@ func HandleOAuth2Callback(c *gin.Context) {
 		return
 	}
 
-	// Write credentials directly to session PVC
+	// Store credentials in Kubernetes Secret in the project namespace
 	if stateData.ProjectName != "" && stateData.SessionName != "" {
-		err := writeCredentialsToSessionPVC(
+		err := storeCredentialsInSecret(
 			c.Request.Context(),
 			stateData.ProjectName,
 			stateData.SessionName,
+			provider,
 			tokenData.AccessToken,
 			tokenData.RefreshToken,
 			tokenData.ExpiresIn,
 		)
 		if err != nil {
-			log.Printf("Failed to write credentials to session PVC: %v", err)
-			// Still return success to user, but log the error
+			log.Printf("Failed to store credentials in Secret: %v", err)
 			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(
-				"<html><body><h1>Authorization Successful!</h1><p>Provider: "+provider+"</p><p><strong>Note:</strong> Credentials received but could not be written to session workspace. Session pod may not be running yet.</p><p>You can close this window.</p><script>window.close();</script></body></html>",
+				"<html><body><h1>Authorization Error</h1><p>Provider: "+provider+"</p><p><strong>Error:</strong> Failed to store credentials. Please contact support.</p><p>You can close this window.</p><script>window.close();</script></body></html>",
 			))
 			return
 		}
 
 		log.Printf("✓ OAuth flow completed for session %s/%s", stateData.ProjectName, stateData.SessionName)
 		c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(
-			"<html><body><h1>Authorization Successful!</h1><p>Provider: "+provider+"</p><p>Google Drive is now available in your session!</p><p>You can close this window.</p><script>window.close();</script></body></html>",
+			"<html><body><h1>Authorization Successful!</h1><p>Provider: "+provider+"</p><p>Google Drive credentials are now available in your session!</p><p>You can close this window.</p><script>window.close();</script></body></html>",
 		))
 	} else {
 		log.Printf("Warning: State missing session context (projectName=%s, sessionName=%s)", stateData.ProjectName, stateData.SessionName)
@@ -231,13 +290,13 @@ type OAuthTokenResponse struct {
 }
 
 // exchangeOAuthCode exchanges an authorization code for an access token
-func exchangeOAuthCode(ctx context.Context, provider *OAuthProvider, code string) (*OAuthTokenResponse, error) {
+func exchangeOAuthCode(ctx context.Context, provider *OAuthProvider, code string, redirectURI string) (*OAuthTokenResponse, error) {
 	// Prepare token exchange request
 	formData := fmt.Sprintf("code=%s&client_id=%s&client_secret=%s&redirect_uri=%s&grant_type=authorization_code",
 		code,
 		provider.ClientID,
 		provider.ClientSecret,
-		"http://localhost:8000/oauth2callback",
+		redirectURI,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.TokenURL, strings.NewReader(formData))
@@ -469,5 +528,88 @@ func writeCredentialsToSessionPVC(ctx context.Context, projectName, sessionName,
 	}
 
 	log.Printf("✓ Wrote Google OAuth credentials to session %s/%s PVC at %s", projectName, sessionName, credentialsPath)
+	return nil
+}
+
+// storeCredentialsInSecret stores OAuth credentials in a Kubernetes Secret in the project namespace
+// Secret name: {sessionName}-{provider}-oauth (e.g., agentic-session-123-google-oauth)
+// This allows the session pod to mount or read the credentials from its own namespace
+// The Secret is owned by the AgenticSession CR, so it's automatically deleted when the session is deleted
+func storeCredentialsInSecret(ctx context.Context, projectName, sessionName, provider, accessToken, refreshToken string, expiresIn int64) error {
+	secretName := fmt.Sprintf("%s-%s-oauth", sessionName, provider)
+
+	// Prepare credentials JSON
+	credentials := map[string]interface{}{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"token_type":    "Bearer",
+		"expires_in":    expiresIn,
+		"created_at":    time.Now().Unix(),
+	}
+
+	credentialsJSON, err := json.MarshalIndent(credentials, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal credentials: %w", err)
+	}
+
+	// Get the AgenticSession CR to set as owner
+	gvr := schema.GroupVersionResource{
+		Group:    "vteam.ambient-code",
+		Version:  "v1alpha1",
+		Resource: "agenticsessions",
+	}
+	sessionObj, err := DynamicClient.Resource(gvr).Namespace(projectName).Get(ctx, sessionName, v1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get AgenticSession %s/%s: %w", projectName, sessionName, err)
+	}
+
+	// Create OwnerReference to ensure Secret is deleted when session is deleted
+	ownerRef := v1.OwnerReference{
+		APIVersion: sessionObj.GetAPIVersion(),
+		Kind:       sessionObj.GetKind(),
+		Name:       sessionObj.GetName(),
+		UID:        sessionObj.GetUID(),
+		Controller: BoolPtr(true),
+		// BlockOwnerDeletion intentionally omitted (can cause permission issues)
+	}
+
+	// Create or update Secret in project namespace
+	secret := &corev1.Secret{
+		ObjectMeta: v1.ObjectMeta{
+			Name:      secretName,
+			Namespace: projectName,
+			Labels: map[string]string{
+				"app":                       "ambient-code",
+				"ambient-code.io/session":   sessionName,
+				"ambient-code.io/provider":  provider,
+				"ambient-code.io/oauth":     "true",
+			},
+			OwnerReferences: []v1.OwnerReference{ownerRef},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{
+			"credentials.json": credentialsJSON,
+			"access_token":     []byte(accessToken),
+			"refresh_token":    []byte(refreshToken),
+		},
+	}
+
+	// Try to create the Secret
+	_, err = K8sClient.CoreV1().Secrets(projectName).Create(ctx, secret, v1.CreateOptions{})
+	if err != nil {
+		if errors.IsAlreadyExists(err) {
+			// Update existing Secret
+			_, err = K8sClient.CoreV1().Secrets(projectName).Update(ctx, secret, v1.UpdateOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to update Secret %s/%s: %w", projectName, secretName, err)
+			}
+			log.Printf("✓ Updated OAuth credentials Secret %s/%s", projectName, secretName)
+		} else {
+			return fmt.Errorf("failed to create Secret %s/%s: %w", projectName, secretName, err)
+		}
+	} else {
+		log.Printf("✓ Created OAuth credentials Secret %s/%s", projectName, secretName)
+	}
+
 	return nil
 }
