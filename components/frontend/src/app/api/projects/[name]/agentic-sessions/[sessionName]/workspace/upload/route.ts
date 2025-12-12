@@ -1,6 +1,7 @@
 import { buildForwardHeadersAsync } from '@/lib/auth';
 import { BACKEND_URL } from '@/lib/config';
 import { NextRequest } from 'next/server';
+import { fileTypeFromBuffer } from 'file-type';
 
 // Maximum file sizes based on type
 // SDK has 1MB JSON limit, base64 adds ~33% overhead, plus JSON structure overhead
@@ -81,6 +82,57 @@ function isValidUrl(urlString: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+// Validate file content type via magic bytes
+// Returns the actual MIME type detected from file content, or null if detection fails
+// This prevents Content-Type header spoofing attacks
+async function validateFileType(buffer: ArrayBuffer, claimedType: string): Promise<string> {
+  try {
+    // Convert ArrayBuffer to Uint8Array for file-type library
+    const uint8Array = new Uint8Array(buffer);
+
+    // Detect actual file type from magic bytes
+    const detected = await fileTypeFromBuffer(uint8Array);
+
+    if (!detected) {
+      // If detection fails, treat as plain text/binary
+      // Allow the claimed type only if it's text-based or generic binary
+      if (claimedType.startsWith('text/') || claimedType === 'application/octet-stream') {
+        return claimedType;
+      }
+      // For other types, reject if we can't verify
+      throw new Error('Unable to verify file type. File may be corrupted or unsupported.');
+    }
+
+    // Normalize both types for comparison (remove parameters like charset)
+    const normalizedClaimed = claimedType.split(';')[0].trim().toLowerCase();
+    const normalizedDetected = detected.mime.toLowerCase();
+
+    // Check if types match
+    if (normalizedClaimed !== normalizedDetected) {
+      // Special case: allow jpeg/jpg variations
+      const isJpegVariant = (type: string) => type === 'image/jpeg' || type === 'image/jpg';
+      if (isJpegVariant(normalizedClaimed) && isJpegVariant(normalizedDetected)) {
+        return detected.mime;
+      }
+
+      // Types don't match - reject
+      throw new Error(
+        `Content-Type mismatch: claimed '${normalizedClaimed}' but detected '${normalizedDetected}'. ` +
+        `This may indicate a malicious file or incorrect Content-Type header.`
+      );
+    }
+
+    // Use the detected type (more trustworthy than header)
+    return detected.mime;
+  } catch (error) {
+    // Re-throw validation errors
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('File type validation failed');
   }
 }
 
@@ -311,15 +363,33 @@ export async function POST(
       // Sanitize filename to prevent path traversal attacks
       const rawFilename = (formData.get('filename') as string) || file.name;
       const filename = sanitizeFilename(rawFilename);
-      const contentType = file.type || 'application/octet-stream';
+      const claimedContentType = file.type || 'application/octet-stream';
+      const fileArrayBuffer = await file.arrayBuffer();
 
-      // Compress and validate file
+      // Validate file type via magic bytes to prevent malicious file uploads
+      let validatedContentType: string;
+      try {
+        validatedContentType = await validateFileType(fileArrayBuffer, claimedContentType);
+      } catch (error) {
+        return new Response(
+          JSON.stringify({
+            error: error instanceof Error ? error.message : 'File type validation failed',
+            details: 'The file content does not match the claimed file type'
+          }),
+          {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Compress and validate file size
       let fileBuffer: ArrayBuffer;
       let finalContentType: string;
       let compressionInfo: { compressed: boolean; originalSize: number; finalSize: number };
 
       try {
-        const result = await compressAndValidate(await file.arrayBuffer(), contentType);
+        const result = await compressAndValidate(fileArrayBuffer, validatedContentType);
         fileBuffer = result.buffer;
         finalContentType = result.contentType;
         compressionInfo = result.compressionInfo;
@@ -394,15 +464,33 @@ export async function POST(
         });
       }
 
-      const contentType = fileResp.headers.get('content-type') || 'application/octet-stream';
+      const claimedContentType = fileResp.headers.get('content-type') || 'application/octet-stream';
+      const fileArrayBuffer = await fileResp.arrayBuffer();
 
-      // Compress and validate file
+      // Validate file type via magic bytes to prevent Content-Type spoofing
+      let validatedContentType: string;
+      try {
+        validatedContentType = await validateFileType(fileArrayBuffer, claimedContentType);
+      } catch (error) {
+        return new Response(
+          JSON.stringify({
+            error: error instanceof Error ? error.message : 'File type validation failed',
+            details: 'The file content does not match the claimed Content-Type header'
+          }),
+          {
+            status: 400,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Compress and validate file size
       let fileBuffer: ArrayBuffer;
       let finalContentType: string;
       let compressionInfo: { compressed: boolean; originalSize: number; finalSize: number };
 
       try {
-        const result = await compressAndValidate(await fileResp.arrayBuffer(), contentType);
+        const result = await compressAndValidate(fileArrayBuffer, validatedContentType);
         fileBuffer = result.buffer;
         finalContentType = result.contentType;
         compressionInfo = result.compressionInfo;

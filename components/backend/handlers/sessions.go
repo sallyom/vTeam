@@ -2754,18 +2754,6 @@ func DeleteSessionWorkspaceFile(c *gin.Context) {
 		return
 	}
 
-	// Verify session exists using reqDyn before RBAC check to prevent session enumeration
-	gvr := GetAgenticSessionV1Alpha1Resource()
-	if _, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), session, v1.GetOptions{}); err != nil {
-		if errors.IsNotFound(err) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
-			return
-		}
-		log.Printf("DeleteSessionWorkspaceFile: Failed to verify session existence: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify session"})
-		return
-	}
-
 	// Validate and sanitize path to prevent directory traversal
 	// Use robust path validation that works across platforms
 	sub := strings.TrimPrefix(c.Param("path"), "/")
@@ -2792,6 +2780,7 @@ func DeleteSessionWorkspaceFile(c *gin.Context) {
 	}
 
 	// RBAC check: verify user has update permission on agenticsessions (file operations modify session state)
+	// IMPORTANT: RBAC check MUST happen BEFORE checking session existence to prevent enumeration attacks
 	ssar := &authzv1.SelfSubjectAccessReview{
 		Spec: authzv1.SelfSubjectAccessReviewSpec{
 			ResourceAttributes: &authzv1.ResourceAttributes{
@@ -2810,6 +2799,19 @@ func DeleteSessionWorkspaceFile(c *gin.Context) {
 	}
 	if !res.Status.Allowed {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to modify session workspace"})
+		return
+	}
+
+	// Verify session exists using reqDyn AFTER RBAC check
+	// This prevents enumeration attacks - unauthorized users get same "Forbidden" response
+	gvr := GetAgenticSessionV1Alpha1Resource()
+	if _, err := reqDyn.Resource(gvr).Namespace(project).Get(c.Request.Context(), session, v1.GetOptions{}); err != nil {
+		if errors.IsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+			return
+		}
+		log.Printf("DeleteSessionWorkspaceFile: Failed to verify session existence: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify session"})
 		return
 	}
 
