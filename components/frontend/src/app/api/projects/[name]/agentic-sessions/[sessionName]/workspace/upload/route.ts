@@ -409,7 +409,8 @@ export async function POST(
 
       if (!resp.ok) {
         const errorText = await resp.text();
-        return new Response(JSON.stringify({ error: 'Failed to upload file', details: errorText }), {
+        console.error('Upload failed:', errorText);
+        return new Response(JSON.stringify({ error: 'Failed to upload file' }), {
           status: resp.status,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -510,7 +511,8 @@ export async function POST(
 
       if (!resp.ok) {
         const errorText = await resp.text();
-        return new Response(JSON.stringify({ error: 'Failed to upload file', details: errorText }), {
+        console.error('Upload failed:', errorText);
+        return new Response(JSON.stringify({ error: 'Failed to upload file' }), {
           status: resp.status,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -537,7 +539,7 @@ export async function POST(
     }
   } catch (error) {
     console.error('File upload error:', error);
-    return new Response(JSON.stringify({ error: 'Internal server error', details: String(error) }), {
+    return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
