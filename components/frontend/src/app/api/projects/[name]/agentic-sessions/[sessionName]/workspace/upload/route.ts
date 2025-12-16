@@ -99,8 +99,21 @@ async function validateFileType(buffer: ArrayBuffer, claimedType: string): Promi
 
     if (!detected) {
       // If detection fails, treat as plain text/binary
-      // Allow the claimed type only if it's text-based or generic binary
-      if (claimedType.startsWith('text/') || claimedType === 'application/octet-stream') {
+      // Allow common text-based types that don't have magic bytes (JSON, XML, CSV, YAML, JavaScript, etc.)
+      const textTypes = [
+        'text/',
+        'application/json',
+        'application/xml',
+        'application/javascript',
+        'application/yaml',
+        'application/x-yaml',
+        'text/yaml',
+        'text/csv',
+        'application/csv',
+        'application/octet-stream',
+      ];
+
+      if (textTypes.some(t => claimedType.startsWith(t)) || claimedType === 'application/octet-stream') {
         return claimedType;
       }
       // For other types, reject if we can't verify
