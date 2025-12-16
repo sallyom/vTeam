@@ -294,7 +294,8 @@ async function compressAndValidate(
           finalSize: result.finalSize,
         },
       };
-    } catch {
+    } catch (error) {
+      console.error('Image compression failed:', error);
       throw new Error(`Image too large and could not be compressed. Please reduce image size and try again.`);
     }
   } else {
@@ -385,10 +386,10 @@ export async function POST(
       try {
         validatedContentType = await validateFileType(fileArrayBuffer, claimedContentType);
       } catch (error) {
+        console.error('File type validation failed:', error);
         return new Response(
           JSON.stringify({
-            error: error instanceof Error ? error.message : 'File type validation failed',
-            details: 'The file content does not match the claimed file type'
+            error: 'File type validation failed'
           }),
           {
             status: 400,
@@ -487,10 +488,10 @@ export async function POST(
       try {
         validatedContentType = await validateFileType(fileArrayBuffer, claimedContentType);
       } catch (error) {
+        console.error('File type validation failed:', error);
         return new Response(
           JSON.stringify({
-            error: error instanceof Error ? error.message : 'File type validation failed',
-            details: 'The file content does not match the claimed Content-Type header'
+            error: 'File type validation failed'
           }),
           {
             status: 400,
