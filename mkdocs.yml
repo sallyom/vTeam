@@ -46,6 +46,7 @@ nav:
     - Getting Started: user-guide/getting-started.md
     - Working with Amber: user-guide/working-with-amber.md
     - Amber Quickstart: user-guide/amber-quickstart.md
+    - Git Repository Options: user-guide/git-repository-options.md
   - Developer Guide:
     - Observability & Instrumentation: observability-langfuse.md
     - Model Pricing: model-pricing.md

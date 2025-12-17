@@ -599,6 +599,7 @@ func CreateSession(c *gin.Context) {
 		if metadata["annotations"] == nil {
 			metadata["annotations"] = make(map[string]interface{})
 		}
+		// Direct map access for plain maps (no need for unstructured helpers)
 		annotations := metadata["annotations"].(map[string]interface{})
 		annotations["vteam.ambient-code/parent-session-id"] = req.ParentSessionID
 		log.Printf("Creating continuation session from parent %s (operator will handle temp pod cleanup)", req.ParentSessionID)
@@ -606,34 +607,69 @@ func CreateSession(c *gin.Context) {
 	}
 
 	if len(envVars) > 0 {
+		// Direct map access for plain maps (no need for unstructured helpers)
 		spec := session["spec"].(map[string]interface{})
 		spec["environmentVariables"] = envVars
 	}
 
 	// Interactive flag
 	if req.Interactive != nil {
-		session["spec"].(map[string]interface{})["interactive"] = *req.Interactive
+		// Direct map access for plain maps (no need for unstructured helpers)
+		spec := session["spec"].(map[string]interface{})
+		spec["interactive"] = *req.Interactive
 	}
 
 	// AutoPushOnComplete flag
 	if req.AutoPushOnComplete != nil {
-		session["spec"].(map[string]interface{})["autoPushOnComplete"] = *req.AutoPushOnComplete
+		// Direct map access for plain maps (no need for unstructured helpers)
+		spec := session["spec"].(map[string]interface{})
+		spec["autoPushOnComplete"] = *req.AutoPushOnComplete
 	}
 
 	// Set multi-repo configuration on spec (simplified format)
-	{
+	// Generate working branch names upfront based on session context
+	if len(req.Repos) > 0 {
+		// Direct map access for plain maps (no need for unstructured helpers)
 		spec := session["spec"].(map[string]interface{})
-		if len(req.Repos) > 0 {
-			arr := make([]map[string]interface{}, 0, len(req.Repos))
-			for _, r := range req.Repos {
-				m := map[string]interface{}{"url": r.URL}
-				if r.Branch != nil {
-					m["branch"] = *r.Branch
-				}
-				arr = append(arr, m)
+		arr := make([]map[string]interface{}, 0, len(req.Repos))
+		for _, r := range req.Repos {
+			// Determine the working branch to use
+			var requestedBranch string
+			if r.WorkingBranch != nil {
+				requestedBranch = strings.TrimSpace(*r.WorkingBranch)
+			} else if r.Branch != nil {
+				requestedBranch = strings.TrimSpace(*r.Branch)
 			}
-			spec["repos"] = arr
+
+			// Validate user-supplied branch names to prevent command injection
+			if requestedBranch != "" && !isValidGitBranchName(requestedBranch) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid branch name format: %s", requestedBranch)})
+				return
+			}
+
+			allowProtected := false
+			if r.AllowProtectedWork != nil {
+				allowProtected = *r.AllowProtectedWork
+			}
+
+			// Generate the actual branch name that will be used
+			workingBranch := generateWorkingBranch(
+				req.DisplayName,
+				name, // session name (unique ID)
+				requestedBranch,
+				allowProtected,
+			)
+
+			// Wrap in 'input' object to match runner expectations
+			m := map[string]interface{}{
+				"input": map[string]interface{}{
+					"url":    r.URL,
+					"branch": workingBranch,
+				},
+			}
+			arr = append(arr, m)
 		}
+		spec["repos"] = arr
 	}
 
 	// Add userContext derived from authenticated caller; ignore client-supplied userId
@@ -661,7 +697,9 @@ func CreateSession(c *gin.Context) {
 			if len(groups) == 0 && req.UserContext != nil {
 				groups = req.UserContext.Groups
 			}
-			session["spec"].(map[string]interface{})["userContext"] = map[string]interface{}{
+			// Direct map access for plain maps (no need for unstructured helpers)
+			spec := session["spec"].(map[string]interface{})
+			spec["userContext"] = map[string]interface{}{
 				"userId":      uid,
 				"displayName": displayName,
 				"groups":      groups,
@@ -1406,17 +1444,19 @@ func AddRepo(c *gin.Context) {
 	}
 
 	var req struct {
-		URL    string `json:"url" binding:"required"`
-		Branch string `json:"branch"`
+		URL                string `json:"url" binding:"required"`
+		Branch             string `json:"branch"`
+		WorkingBranch      string `json:"workingBranch"`
+		AllowProtectedWork bool   `json:"allowProtectedWork"`
+		Sync               *struct {
+			URL    string `json:"url"`
+			Branch string `json:"branch"`
+		} `json:"sync"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
-	}
-
-	if req.Branch == "" {
-		req.Branch = "main"
 	}
 
 	gvr := GetAgenticSessionV1Alpha1Resource()
@@ -1447,10 +1487,52 @@ func AddRepo(c *gin.Context) {
 		repos = []interface{}{}
 	}
 
-	newRepo := map[string]interface{}{
-		"url":    req.URL,
-		"branch": req.Branch,
+	// Determine the requested branch
+	requestedBranch := req.WorkingBranch
+	if requestedBranch == "" {
+		requestedBranch = req.Branch
 	}
+
+	// Validate user-supplied branch names to prevent command injection
+	if requestedBranch != "" && !isValidGitBranchName(requestedBranch) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("Invalid branch name format: %s", requestedBranch)})
+		return
+	}
+
+	// Get session display name for branch generation
+	displayName := ""
+	if dn, ok := spec["displayName"].(string); ok {
+		displayName = dn
+	}
+
+	// Generate the actual working branch name
+	workingBranch := generateWorkingBranch(
+		displayName,
+		sessionName,
+		requestedBranch,
+		req.AllowProtectedWork,
+	)
+
+	// Wrap in 'input' object to match runner expectations
+	newRepo := map[string]interface{}{
+		"input": map[string]interface{}{
+			"url":    req.URL,
+			"branch": workingBranch,
+		},
+	}
+
+	// Add sync configuration if provided
+	if req.Sync != nil && strings.TrimSpace(req.Sync.URL) != "" {
+		syncBranch := strings.TrimSpace(req.Sync.Branch)
+		if syncBranch == "" {
+			syncBranch = "main"
+		}
+		newRepo["sync"] = map[string]interface{}{
+			"url":    strings.TrimSpace(req.Sync.URL),
+			"branch": syncBranch,
+		}
+	}
+
 	repos = append(repos, newRepo)
 	spec["repos"] = repos
 

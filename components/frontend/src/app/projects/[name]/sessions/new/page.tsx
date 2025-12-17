@@ -242,7 +242,6 @@ export default function NewProjectSessionPage({ params }: { params: Promise<{ na
                   }
                 }}
                 isEditing={editingRepoIndex !== null}
-                projectName={projectName}
               />
 
               {/* Runner behavior */}

@@ -28,8 +28,10 @@ type AgenticSessionSpec struct {
 
 // SimpleRepo represents a simplified repository configuration
 type SimpleRepo struct {
-	URL    string  `json:"url"`
-	Branch *string `json:"branch,omitempty"`
+	URL                string  `json:"url"`
+	Branch             *string `json:"branch,omitempty"`
+	WorkingBranch      *string `json:"workingBranch,omitempty"`      // User-requested working branch (input only)
+	AllowProtectedWork *bool   `json:"allowProtectedWork,omitempty"` // Allow work directly on protected branches (input only)
 }
 
 type AgenticSessionStatus struct {
