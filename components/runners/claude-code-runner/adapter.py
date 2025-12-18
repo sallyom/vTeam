@@ -934,8 +934,34 @@ class ClaudeCodeAdapter:
                     event={"type": "system_log", "message": "📥 Cloning input repository..."}
                 )
                 clone_url = self._url_with_token(input_repo, token) if token else input_repo
-                await self._run_cmd(["git", "clone", "--branch", input_branch, "--single-branch", clone_url, str(workspace)], cwd=str(workspace.parent))
-                await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workspace), ignore_errors=True)
+
+                # Try cloning with specified branch first
+                try:
+                    await self._run_cmd(["git", "clone", "--branch", input_branch, "--single-branch", clone_url, str(workspace)], cwd=str(workspace.parent))
+                    await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workspace), ignore_errors=True)
+                except RuntimeError as e:
+                    # If branch doesn't exist, clone default branch and create the requested branch
+                    error_msg = str(e).lower()
+                    if "remote branch" in error_msg or "not found" in error_msg:
+                        yield RawEvent(
+                            type=EventType.RAW,
+                            thread_id=self._current_thread_id or self.context.session_id,
+                            run_id=self._current_run_id or "init",
+                            event={"type": "system_log", "message": f"⚠️ Branch '{input_branch}' not found, creating from default branch..."}
+                        )
+                        # Clone without specifying branch (gets default branch)
+                        await self._run_cmd(["git", "clone", clone_url, str(workspace)], cwd=str(workspace.parent))
+                        await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(workspace), ignore_errors=True)
+                        # Create and checkout the new branch
+                        await self._run_cmd(["git", "checkout", "-b", input_branch], cwd=str(workspace))
+                        yield RawEvent(
+                            type=EventType.RAW,
+                            thread_id=self._current_thread_id or self.context.session_id,
+                            run_id=self._current_run_id or "init",
+                            event={"type": "system_log", "message": f"✓ Created new branch '{input_branch}'"}
+                        )
+                    else:
+                        raise
             elif reusing_workspace:
                 yield RawEvent(
                     type=EventType.RAW,
@@ -952,9 +978,44 @@ class ClaudeCodeAdapter:
                     event={"type": "system_log", "message": "🔄 Resetting workspace to clean state"}
                 )
                 await self._run_cmd(["git", "remote", "set-url", "origin", self._url_with_token(input_repo, token) if token else input_repo], cwd=str(workspace))
-                await self._run_cmd(["git", "fetch", "origin", input_branch], cwd=str(workspace))
-                await self._run_cmd(["git", "checkout", input_branch], cwd=str(workspace))
-                await self._run_cmd(["git", "reset", "--hard", f"origin/{input_branch}"], cwd=str(workspace))
+
+                # Try to fetch and checkout the branch
+                try:
+                    await self._run_cmd(["git", "fetch", "origin", input_branch], cwd=str(workspace))
+                    await self._run_cmd(["git", "checkout", input_branch], cwd=str(workspace))
+                    await self._run_cmd(["git", "reset", "--hard", f"origin/{input_branch}"], cwd=str(workspace))
+                except RuntimeError as e:
+                    # If branch doesn't exist remotely, check if it exists locally
+                    error_msg = str(e).lower()
+                    if "couldn't find remote ref" in error_msg or "not found" in error_msg:
+                        # Check if branch exists locally
+                        try:
+                            await self._run_cmd(["git", "checkout", input_branch], cwd=str(workspace))
+                            yield RawEvent(
+                                type=EventType.RAW,
+                                thread_id=self._current_thread_id or self.context.session_id,
+                                run_id=self._current_run_id or "init",
+                                event={"type": "system_log", "message": f"✓ Checked out existing local branch '{input_branch}'"}
+                            )
+                        except RuntimeError:
+                            # Branch doesn't exist locally either, create it from default branch
+                            yield RawEvent(
+                                type=EventType.RAW,
+                                thread_id=self._current_thread_id or self.context.session_id,
+                                run_id=self._current_run_id or "init",
+                                event={"type": "system_log", "message": f"⚠️ Branch '{input_branch}' not found, creating from default branch..."}
+                            )
+                            # Fetch default branch and create new branch
+                            await self._run_cmd(["git", "fetch", "origin"], cwd=str(workspace))
+                            await self._run_cmd(["git", "checkout", "-b", input_branch], cwd=str(workspace))
+                            yield RawEvent(
+                                type=EventType.RAW,
+                                thread_id=self._current_thread_id or self.context.session_id,
+                                run_id=self._current_run_id or "init",
+                                event={"type": "system_log", "message": f"✓ Created new branch '{input_branch}'"}
+                            )
+                    else:
+                        raise
 
             # Git identity
             user_name = os.getenv("GIT_USER_NAME", "").strip() or "Ambient Code Bot"
@@ -990,9 +1051,14 @@ class ClaudeCodeAdapter:
         try:
             for r in repos_cfg:
                 name = (r.get('name') or '').strip()
-                inp = r.get('input') or {}
-                url = (inp.get('url') or '').strip()
-                branch = (inp.get('branch') or '').strip() or 'main'
+                # Support both flat structure {url, branch} and nested {input: {url, branch}}
+                if 'input' in r:
+                    inp = r.get('input') or {}
+                    url = (inp.get('url') or '').strip()
+                    branch = (inp.get('branch') or '').strip() or 'main'
+                else:
+                    url = (r.get('url') or '').strip()
+                    branch = (r.get('branch') or '').strip() or 'main'
                 if not name or not url:
                     continue
 
@@ -1008,8 +1074,34 @@ class ClaudeCodeAdapter:
                         event={"type": "system_log", "message": f"📥 Cloning {name}..."}
                     )
                     clone_url = self._url_with_token(url, token) if token else url
-                    await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
-                    await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
+
+                    # Try cloning with specified branch first
+                    try:
+                        await self._run_cmd(["git", "clone", "--branch", branch, "--single-branch", clone_url, str(repo_dir)], cwd=str(workspace))
+                        await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
+                    except RuntimeError as e:
+                        # If branch doesn't exist, clone default branch and create the requested branch
+                        error_msg = str(e).lower()
+                        if "remote branch" in error_msg or "not found" in error_msg:
+                            yield RawEvent(
+                                type=EventType.RAW,
+                                thread_id=self._current_thread_id or self.context.session_id,
+                                run_id=self._current_run_id or "init",
+                                event={"type": "system_log", "message": f"⚠️ Branch '{branch}' not found, creating from default branch..."}
+                            )
+                            # Clone without specifying branch (gets default branch)
+                            await self._run_cmd(["git", "clone", clone_url, str(repo_dir)], cwd=str(workspace))
+                            await self._run_cmd(["git", "remote", "set-url", "origin", clone_url], cwd=str(repo_dir), ignore_errors=True)
+                            # Create and checkout the new branch
+                            await self._run_cmd(["git", "checkout", "-b", branch], cwd=str(repo_dir))
+                            yield RawEvent(
+                                type=EventType.RAW,
+                                thread_id=self._current_thread_id or self.context.session_id,
+                                run_id=self._current_run_id or "init",
+                                event={"type": "system_log", "message": f"✓ Created new branch '{branch}'"}
+                            )
+                        else:
+                            raise
                 elif reusing_workspace:
                     yield RawEvent(
                         type=EventType.RAW,
@@ -1026,9 +1118,44 @@ class ClaudeCodeAdapter:
                         event={"type": "system_log", "message": f"🔄 Resetting {name} to clean state"}
                     )
                     await self._run_cmd(["git", "remote", "set-url", "origin", self._url_with_token(url, token) if token else url], cwd=str(repo_dir), ignore_errors=True)
-                    await self._run_cmd(["git", "fetch", "origin", branch], cwd=str(repo_dir))
-                    await self._run_cmd(["git", "checkout", branch], cwd=str(repo_dir))
-                    await self._run_cmd(["git", "reset", "--hard", f"origin/{branch}"], cwd=str(repo_dir))
+
+                    # Try to fetch the branch
+                    try:
+                        await self._run_cmd(["git", "fetch", "origin", branch], cwd=str(repo_dir))
+                        await self._run_cmd(["git", "checkout", branch], cwd=str(repo_dir))
+                        await self._run_cmd(["git", "reset", "--hard", f"origin/{branch}"], cwd=str(repo_dir))
+                    except RuntimeError as e:
+                        # If branch doesn't exist remotely, check if it exists locally
+                        error_msg = str(e).lower()
+                        if "couldn't find remote ref" in error_msg or "not found" in error_msg:
+                            # Check if branch exists locally
+                            try:
+                                await self._run_cmd(["git", "checkout", branch], cwd=str(repo_dir))
+                                yield RawEvent(
+                                    type=EventType.RAW,
+                                    thread_id=self._current_thread_id or self.context.session_id,
+                                    run_id=self._current_run_id or "init",
+                                    event={"type": "system_log", "message": f"✓ Checked out existing local branch '{branch}'"}
+                                )
+                            except RuntimeError:
+                                # Branch doesn't exist locally either, create it from default branch
+                                yield RawEvent(
+                                    type=EventType.RAW,
+                                    thread_id=self._current_thread_id or self.context.session_id,
+                                    run_id=self._current_run_id or "init",
+                                    event={"type": "system_log", "message": f"⚠️ Branch '{branch}' not found, creating from default branch..."}
+                                )
+                                # Fetch default branch and create new branch
+                                await self._run_cmd(["git", "fetch", "origin"], cwd=str(repo_dir))
+                                await self._run_cmd(["git", "checkout", "-b", branch], cwd=str(repo_dir))
+                                yield RawEvent(
+                                    type=EventType.RAW,
+                                    thread_id=self._current_thread_id or self.context.session_id,
+                                    run_id=self._current_run_id or "init",
+                                    event={"type": "system_log", "message": f"✓ Created new branch '{branch}'"}
+                                )
+                        else:
+                            raise
 
                 # Git identity
                 user_name = os.getenv("GIT_USER_NAME", "").strip() or "Ambient Code Bot"

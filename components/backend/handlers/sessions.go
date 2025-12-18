@@ -641,7 +641,17 @@ func CreateSession(c *gin.Context) {
 		if len(req.Repos) > 0 {
 			arr := make([]map[string]interface{}, 0, len(req.Repos))
 			for _, r := range req.Repos {
-				m := map[string]interface{}{"url": r.URL}
+				// Derive repo name from URL
+				repoName := r.URL
+				if idx := strings.LastIndex(repoName, "/"); idx != -1 {
+					repoName = repoName[idx+1:]
+				}
+				repoName = strings.TrimSuffix(repoName, ".git")
+
+				m := map[string]interface{}{
+					"name": repoName,
+					"url":  r.URL,
+				}
 				if r.Branch != nil {
 					m["branch"] = *r.Branch
 				}
@@ -1434,6 +1444,17 @@ func AddRepo(c *gin.Context) {
 		req.Branch = "main"
 	}
 
+	// Derive repo name from URL (e.g., "https://github.com/org/repo.git" -> "repo")
+	repoName := req.URL
+	if idx := strings.LastIndex(repoName, "/"); idx != -1 {
+		repoName = repoName[idx+1:]
+	}
+	repoName = strings.TrimSuffix(repoName, ".git")
+	if repoName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not derive repository name from URL"})
+		return
+	}
+
 	gvr := GetAgenticSessionV1Alpha1Resource()
 	item, err := k8sDyn.Resource(gvr).Namespace(project).Get(context.TODO(), sessionName, v1.GetOptions{})
 	if err != nil {
@@ -1463,6 +1484,7 @@ func AddRepo(c *gin.Context) {
 	}
 
 	newRepo := map[string]interface{}{
+		"name":   repoName,
 		"url":    req.URL,
 		"branch": req.Branch,
 	}
@@ -1489,8 +1511,19 @@ func AddRepo(c *gin.Context) {
 		session.Status = parseStatus(statusMap)
 	}
 
+	// Notify runner to clone the repo by calling its internal /add-repo endpoint
+	proxyPayload := map[string]interface{}{
+		"name":   repoName,
+		"url":    req.URL,
+		"branch": req.Branch,
+	}
+	if err := proxyToRunner(project, sessionName, "POST", "/add-repo", proxyPayload); err != nil {
+		log.Printf("Warning: Failed to notify runner to clone repo: %v", err)
+		// Don't fail the request - CR was updated successfully
+	}
+
 	log.Printf("Added repository %s to session %s in project %s", req.URL, sessionName, project)
-	c.JSON(http.StatusOK, gin.H{"message": "Repository added", "session": session})
+	c.JSON(http.StatusOK, gin.H{"message": "Repository added", "session": session, "name": repoName})
 }
 
 // RemoveRepo removes a repository from a running session
