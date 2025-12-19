@@ -80,7 +80,6 @@ async def lifespan(app: FastAPI):
     
     # Import adapter here to avoid circular imports
     from adapter import ClaudeCodeAdapter
-    from pathlib import Path
     
     # Initialize context from environment
     session_id = os.getenv("SESSION_ID", "unknown")
@@ -98,16 +97,17 @@ async def lifespan(app: FastAPI):
     
     logger.info("Adapter initialized - fresh client will be created for each run")
     
-    # Check if this is a restart (conversation history exists)
-    history_marker = Path(workspace_path) / ".claude" / "state"
+    # Check if this is a continuation (has parent session)
+    # PARENT_SESSION_ID is set when continuing from another session
+    parent_session_id = os.getenv("PARENT_SESSION_ID", "").strip()
     
-    # Check for INITIAL_PROMPT and auto-execute (only if this is first run)
+    # Check for INITIAL_PROMPT and auto-execute (only if no parent session)
     initial_prompt = os.getenv("INITIAL_PROMPT", "").strip()
-    if initial_prompt and not history_marker.exists():
+    if initial_prompt and not parent_session_id:
         logger.info(f"INITIAL_PROMPT detected ({len(initial_prompt)} chars), will auto-execute after 3s delay")
         asyncio.create_task(auto_execute_initial_prompt(initial_prompt, session_id))
     elif initial_prompt:
-        logger.info(f"INITIAL_PROMPT detected but conversation history exists - skipping auto-execution (session restart)")
+        logger.info(f"INITIAL_PROMPT detected but has parent session ({parent_session_id[:12]}...) - skipping")
     
     logger.info(f"AG-UI server ready for session {session_id}")
     
@@ -122,6 +122,8 @@ async def auto_execute_initial_prompt(prompt: str, session_id: str):
     
     The 3-second delay gives the runner time to fully start. Backend has retry
     logic to handle if Service DNS isn't ready yet.
+    
+    Only called for fresh sessions (no PARENT_SESSION_ID set).
     """
     import uuid
     import aiohttp
