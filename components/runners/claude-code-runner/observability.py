@@ -472,7 +472,10 @@ class ObservabilityManager:
                 self._tool_spans[tool_id] = span
                 logging.debug(f"Langfuse: Started tool span for {tool_name} (id={tool_id}) with tag tool:{tool_name}")
             else:
-                # Fallback: create orphaned span if no active turn (shouldn't happen)
+                # Fallback: create orphaned span if no active turn
+                # This can occur when Claude CLI is invoked directly without the full backend wrapper,
+                # or during edge cases in turn lifecycle management. Creating orphaned spans ensures
+                # tool usage is still tracked and visible in Langfuse, even if not associated with a turn.
                 logging.warning(f"No active turn for tool {tool_name}, creating orphaned span")
                 span = self.langfuse_client.start_observation(
                     as_type="span",
