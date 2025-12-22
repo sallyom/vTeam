@@ -5,7 +5,7 @@ This guide explains how to create custom dashboards in Langfuse to track tool us
 ## Prerequisites
 
 - Langfuse instance with tool observations being tracked
-- Tool spans tagged with `tool:{tool_name}` and metadata `tool_id`, `tool_name`
+- Tool spans with metadata fields: `tool_id` and `tool_name`
 
 ## Creating a Tool Usage Dashboard
 
@@ -25,7 +25,7 @@ This guide explains how to create custom dashboards in Langfuse to track tool us
 - **Data Source**: Observations
 - **Filters**:
   - `name` starts with `tool_` OR
-  - `tags` contains `tool:*` (if using wildcard filtering)
+  - `metadata.tool_name` EXISTS (filter by metadata key)
 - **Group By**: `metadata.tool_name`
 - **Metric**: Count
 - **Sort**: Descending by count
@@ -93,11 +93,11 @@ This guide explains how to create custom dashboards in Langfuse to track tool us
 
 ---
 
-## Alternative: Using Tags for Filtering
+## Alternative: Filtering by Tool Name
 
 If you want to analyze a specific tool type:
 
-1. Create a widget with filter: `tags` contains `tool:Read`
+1. Create a widget with filter: `metadata.tool_name = "Read"`
 2. This will show only Read tool observations
 3. Duplicate and modify for other tools (Bash, Write, etc.)
 
@@ -124,15 +124,16 @@ client = Langfuse(
 Quick ad-hoc analysis without creating dashboards:
 
 1. Go to **Observations** view
-2. Add metadata filter: `tool_name` EXISTS (or specific value)
-3. Add tag filter: `tool:Read`, `tool:Bash`, etc.
+2. Add metadata filter: `tool_name` EXISTS (or specific value like "Read")
+3. Add filter by name: starts with `tool_`
 4. Sort by timestamp, duration, or level
 5. Export results if needed
 
 ## Tips
 
-- **Use wildcards**: If Langfuse supports wildcard filtering, use `tool:*` to match all tool tags
-- **Combine filters**: Use both metadata and tags for robust filtering
+- **Filter by metadata**: Use `metadata.tool_name = "Read"` to see specific tool types
+- **Filter by observation name**: Use `name` starts with `tool_` to see all tools
+- **Combine filters**: Use both metadata and name filters for robust filtering
 - **Time-based analysis**: Compare weekday vs weekend tool usage
 - **Session-based**: Group by `session_id` to see tool usage per session
 - **User-based**: Group by `user_id` to see which users use which tools most
@@ -166,7 +167,7 @@ Quick ad-hoc analysis without creating dashboards:
 **Solution**:
 - Verify tool observations have `metadata.tool_name` field
 - Check if using correct filter syntax (exact match vs contains)
-- Try filtering by tags instead: `tool:*`
+- Try filtering by observation name instead: `name` starts with `tool_`
 
 **Issue**: Cost/usage data not showing for tool observations
 

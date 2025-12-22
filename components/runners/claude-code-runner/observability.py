@@ -445,7 +445,7 @@ class ObservabilityManager:
         Creates a span without usage data to show tool execution in real-time.
         Usage/cost tracking is done separately in track_interaction() from ResultMessage.
 
-        Tags are added for easy filtering: tool:Read, tool:Write, tool:Bash, etc.
+        Metadata (tool_id, tool_name) enables filtering in Langfuse Observations view.
 
         Args:
             tool_name: Tool name (e.g., "Read", "Write", "Bash")
@@ -466,11 +466,10 @@ class ObservabilityManager:
                     as_type="span",
                     name=f"tool_{tool_name}",
                     input=tool_input,
-                    metadata={"tool_id": tool_id, "tool_name": tool_name},
-                    tags=[f"tool:{tool_name}"]
+                    metadata={"tool_id": tool_id, "tool_name": tool_name}
                 )
                 self._tool_spans[tool_id] = span
-                logging.debug(f"Langfuse: Started tool span for {tool_name} (id={tool_id}) with tag tool:{tool_name}")
+                logging.debug(f"Langfuse: Started tool span for {tool_name} (id={tool_id})")
             else:
                 # Fallback: create orphaned span if no active turn
                 # This can occur when Claude CLI is invoked directly without the full backend wrapper,
@@ -481,11 +480,10 @@ class ObservabilityManager:
                     as_type="span",
                     name=f"tool_{tool_name}",
                     input=tool_input,
-                    metadata={"tool_id": tool_id, "tool_name": tool_name},
-                    tags=[f"tool:{tool_name}"]
+                    metadata={"tool_id": tool_id, "tool_name": tool_name}
                 )
                 self._tool_spans[tool_id] = span
-                logging.debug(f"Langfuse: Started orphaned tool span for {tool_name} (id={tool_id}) with tag tool:{tool_name}")
+                logging.debug(f"Langfuse: Started orphaned tool span for {tool_name} (id={tool_id})")
         except Exception as e:
             logging.debug(f"Langfuse: Failed to track tool use: {e}")
 
