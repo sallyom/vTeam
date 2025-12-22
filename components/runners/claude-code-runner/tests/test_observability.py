@@ -345,6 +345,7 @@ class TestTrackToolUse:
         assert call_kwargs["input"] == tool_input
         assert call_kwargs["metadata"]["tool_id"] == "tool-456"
         assert call_kwargs["metadata"]["tool_name"] == "Read"
+        assert call_kwargs["tags"] == ["tool:Read"]
 
         assert "tool-456" in manager._tool_spans
         assert manager._tool_spans["tool-456"] == mock_tool_span
